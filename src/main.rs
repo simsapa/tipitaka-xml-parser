@@ -4,10 +4,8 @@ use std::process::exit;
 use clap::{Parser, Subcommand};
 use dotenvy::dotenv;
 use anyhow::Result;
-// use diesel::prelude::*;
-// use diesel::sqlite::SqliteConnection;
 
-// use tipitaka_xml_parser::logger;
+use tipitaka_xml_parser::logger;
 
 /// Parse Tipitaka XML files with fragment-based parser
 fn parse_tipitaka_xml(
@@ -24,10 +22,9 @@ fn parse_tipitaka_xml(
 
     // Load fragment adjustments if provided
     let adjustments = if let Some(tsv_path) = adjust_fragments_tsv {
-        println!("Loading fragment adjustments from: {:?}", tsv_path);
         match load_fragment_adjustments(&PathBuf::from(tsv_path)) {
             Ok(adj) => {
-                println!("✓ Loaded {} fragment adjustments\n", adj.len());
+                logger::info(&format!("Loaded {} fragment adjustments", adj.len()));
                 Some(adj)
             }
             Err(e) => {
@@ -40,10 +37,10 @@ fn parse_tipitaka_xml(
 
     // Collect XML files to process
     let xml_files: Vec<PathBuf> = if input_path.is_file() {
-        println!("Processing single file: {:?}\n", input_path);
+        logger::info(&format!("Processing single file: {:?}", input_path));
         vec![input_path.to_path_buf()]
     } else if input_path.is_dir() {
-        println!("Processing folder: {:?}", input_path);
+        logger::info(&format!("Processing folder: {:?}", input_path));
         let files: Vec<PathBuf> = fs::read_dir(input_path)
             .map_err(|e| format!("Failed to read directory: {}", e))?
             .filter_map(|entry| entry.ok())
@@ -56,7 +53,7 @@ fn parse_tipitaka_xml(
             })
             .collect();
 
-        println!("Found {} XML files\n", files.len());
+        logger::info(&format!("Found {} XML files", files.len()));
         files
     } else {
         return Err(format!("Input path does not exist: {:?}", input_path));
@@ -67,7 +64,7 @@ fn parse_tipitaka_xml(
     }
 
     if dry_run {
-        println!("DRY RUN MODE - No database operations will be performed\n");
+        logger::info("DRY RUN MODE - No database operations will be performed");
     }
 
     let mut importer = TipitakaImporter::new()
@@ -82,18 +79,18 @@ fn parse_tipitaka_xml(
     let mut errors = 0;
 
     for (idx, xml_file) in xml_files.iter().enumerate() {
-        println!("[{}/{}] Processing: {:?}", idx + 1, xml_files.len(), 
-                 xml_file.file_name().unwrap_or_default());
+        logger::info(&format!("[{}/{}] Processing: {:?}",
+                              idx + 1, xml_files.len(), xml_file.file_name().unwrap_or_default()));
 
         // Handle fragments export if specified (unique feature of new parser)
         if let Some(frag_db_path) = fragments_db {
             if !dry_run {
                 match importer.export_fragments(xml_file, frag_db_path) {
                     Ok(count) => {
-                        println!("  ✓ Exported {} fragments to {:?}", count, frag_db_path);
+                        logger::info(&format!("Exported {} fragments to {:?}", count, frag_db_path));
                     }
                     Err(e) => {
-                        eprintln!("  ✗ Error exporting fragments: {}", e);
+                        logger::error(&format!("Error exporting fragments: {}", e));
                         errors += 1;
                         continue;
                     }
@@ -101,16 +98,12 @@ fn parse_tipitaka_xml(
             }
         }
 
-        println!("  ✓ Processing complete\n");
+        logger::info("Processing complete");
     }
 
-    if let Some(frag_db_path) = fragments_db {
-        if !dry_run {
-            println!("\n✓ Fragments exported to: {:?}", frag_db_path);
-        }
+    if errors > 0 {
+        logger::error(&format!("Total errors: {}", errors));
     }
-
-    println!("Errors: {}", errors);
 
     Ok(())
 }
@@ -124,28 +117,21 @@ fn reconstruct_xml_from_fragments(
     use tipitaka_xml_parser::reconstruct_xml_from_db;
     use std::fs;
 
-    println!("Reconstructing XML from Fragments Database");
-    println!("==========================================\n");
-
     if !fragments_db_path.exists() {
         return Err(format!("Fragments database not found: {:?}", fragments_db_path));
     }
-
-    println!("Fragments DB: {:?}", fragments_db_path);
-    println!("XML Filename: {}", xml_filename);
-    println!("Output Path: {:?}\n", output_path);
 
     // Reconstruct XML
     let xml_content = reconstruct_xml_from_db(fragments_db_path, xml_filename)
         .map_err(|e| format!("Failed to reconstruct XML: {}", e))?;
 
-    println!("✓ Reconstructed {} bytes of XML content", xml_content.len());
+    logger::info(&format!("Reconstructed {} bytes of XML content", xml_content.len()));
 
     // Write to output file
     fs::write(output_path, &xml_content)
         .map_err(|e| format!("Failed to write output file: {}", e))?;
 
-    println!("✓ Written to: {:?}", output_path);
+    logger::info(&format!("Written to: {:?}", output_path));
 
     Ok(())
 }
@@ -210,11 +196,8 @@ enum Commands {
 }
 
 fn main() {
-    // Attempt to load .env file. This might define SIMSAPA_DIR if it's not
-    // already in the environment. Clap will pick it up via `env = "SIMSAPA_DIR"`.
-    if dotenv().is_err() {
-        println!("Info: No .env file found or failed to load.");
-    }
+    // Attempt to load .env file with values such as ENABLE_PRINT_LOG=true
+    let _ = dotenv();
 
     let cli = Cli::parse();
 
@@ -243,7 +226,7 @@ fn main() {
                         let output_text = input_text.replace(r#"encoding="UTF-16""#, r#"encoding="UTF-8""#);
                         match fs::write(&output_path, output_text) {
                             Ok(()) => {
-                                println!("✓ Wrote UTF-8 file to {:?}", output_path);
+                                logger::info(&format!("Wrote UTF-8 file to {:?}", output_path));
                                 Ok(())
                             }
                             Err(e) => Err(format!("Failed to write output file {:?}: {}", output_path, e)),
@@ -256,7 +239,7 @@ fn main() {
     };
 
     if let Err(e) = command_result {
-        eprintln!("Error executing command: {}", e);
+        logger::error(&format!("Error executing command: {}", e));
         exit(1);
     }
 }
