@@ -26,9 +26,10 @@ fn load_tsv_suttas(file_pattern: &str) -> Vec<String> {
 
 #[test]
 fn test_dn_s0101m_sutta_count() {
-    use simsapa_cli::tipitaka_xml_parser::{detect_nikaya_structure, parse_into_fragments};
-    use simsapa_cli::tipitaka_xml_parser_tsv::encoding::read_xml_file;
-    use simsapa_cli::tipitaka_xml_parser::FragmentType;
+    use tipitaka_xml_parser::nikaya_detector::detect_nikaya_structure;
+    use tipitaka_xml_parser::fragment_parser::parse_into_fragments;
+    use tipitaka_xml_parser::encoding::read_xml_file;
+    use tipitaka_xml_parser::types::FragmentType;
     
     // Load expected suttas from TSV
     let expected_suttas = load_tsv_suttas("romn/s0101m.mul.xml");

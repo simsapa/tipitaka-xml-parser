@@ -126,15 +126,16 @@ fn extract_slice_from_xml(
 
 /// Test helper that parses an XML file and validates position tracking
 fn test_position_tracking_for_file(xml_path: &str, xml_filename: &str) {
-    use simsapa_cli::tipitaka_xml_parser::{detect_nikaya_structure, parse_into_fragments};
-    use simsapa_cli::tipitaka_xml_parser_tsv::encoding::read_xml_file;
+    use tipitaka_xml_parser::nikaya_detector::detect_nikaya_structure;
+    use tipitaka_xml_parser::fragment_parser::parse_into_fragments;
+    use tipitaka_xml_parser::encoding::read_xml_file;
     
     let path = PathBuf::from(xml_path);
     let xml_content = read_xml_file(&path).expect("Failed to read XML");
     
     let structure = detect_nikaya_structure(&xml_content).expect("Failed to detect nikaya");
     
-    let fragments = parse_into_fragments(&xml_content, &structure, xml_filename, None)
+    let fragments = parse_into_fragments(&xml_content, &structure, xml_filename, None, false)
         .expect("Failed to parse fragments");
     
     println!("\n=== Testing {} ===", xml_filename);
@@ -169,7 +170,7 @@ fn test_position_tracking_for_file(xml_path: &str, xml_filename: &str) {
             println!("Position: {}:{} to {}:{}",
                      fragment.start_line, fragment.start_char,
                      fragment.end_line, fragment.end_char);
-            println!("Fragment type: {:?}", fragment.fragment_type);
+            println!("Fragment type: {:?}", fragment.frag_type);
             println!("\nExpected content (first 200 chars):");
             println!("{:?}", fragment.content.chars().take(200).collect::<String>());
             println!("\nExtracted content (first 200 chars):");

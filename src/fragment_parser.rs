@@ -253,6 +253,14 @@ impl<'a> FragmentBoundaryDetector<'a> {
                     Some((GroupType::Vagga, String::new(), None, None))
                 }
             },
+            "p" if attributes.get("rend") == Some(&"title".to_string()) => {
+                // In SN, <p rend="title"> = Vagga title
+                if self.nikaya_structure.nikaya == "samyutta" {
+                    Some((GroupType::Vagga, String::new(), None, None))
+                } else {
+                    None
+                }
+            },
             "p" if attributes.get("rend") == Some(&"subhead".to_string()) => {
                 // In MN and SN, subhead = Sutta title
                 if self.nikaya_structure.nikaya == "majjhima" || 
@@ -322,19 +330,28 @@ fn derive_cst_fields(
     }
     
     // Extract vagga from group_levels
-    let cst_vagga = fragment.group_levels.iter()
-        .find(|level| matches!(level.group_type, crate::types::GroupType::Vagga))
-        .and_then(|level| {
-            if level.title.trim().is_empty() {
-                None
-            } else {
-                Some(level.title.clone())
-            }
-        })
-        .or_else(|| {
-            // Fallback: Extract vagga title from <head rend="chapter"> tag in fragment content
-            extract_vagga_title_from_content(&fragment.content)
-        });
+    // Only extract vagga for nikayas that have vaggas in their structure
+    let has_vagga_level = nikaya_structure.levels.iter()
+        .any(|t| matches!(t, crate::types::GroupType::Vagga));
+    
+    let cst_vagga = if has_vagga_level {
+        fragment.group_levels.iter()
+            .find(|level| matches!(level.group_type, crate::types::GroupType::Vagga))
+            .and_then(|level| {
+                if level.title.trim().is_empty() {
+                    None
+                } else {
+                    Some(level.title.clone())
+                }
+            })
+            .or_else(|| {
+                // Fallback: Extract vagga title from <head rend="chapter"> tag in fragment content
+                // This is used for MN where <head rend="chapter"> is the vagga title
+                extract_vagga_title_from_content(&fragment.content)
+            })
+    } else {
+        None
+    };
     
     // Extract sutta title from group_levels (filter out empty titles)
     let cst_sutta = fragment.group_levels.iter()
@@ -546,7 +563,8 @@ fn extract_first_paranum(content: &str) -> Option<String> {
 ///
 /// For DN: code is like "dn1.1" from div id="dn1_1" or div id="dn1" + sutta number "1."
 /// For MN: code is like "mn1.5.1" from div id="mn1_5_1" or div id="mn1_5" + sutta number "1."
-fn derive_cst_code(fragment: &XmlFragment, _nikaya_structure: &NikayaStructure, cst_sutta_title: Option<&str>) -> Option<String> {
+/// For SN: code is like "sn1.1.1.1" from div id="sn1" + div id="sn1_1" + vagga number "1." + sutta number "1."
+fn derive_cst_code(fragment: &XmlFragment, nikaya_structure: &NikayaStructure, cst_sutta_title: Option<&str>) -> Option<String> {
     // First check if the Sutta level itself has an ID (like "dn1_12")
     // This is the most direct and reliable source
     if let Some(sutta_id) = fragment.group_levels.iter()
@@ -562,11 +580,8 @@ fn derive_cst_code(fragment: &XmlFragment, _nikaya_structure: &NikayaStructure, 
         return Some(code);
     }
     
-    // Fallback: Try to construct from book ID + vagga number + sutta number
-    // For MN/SN: code format is "mn{book}.{vagga}.{sutta}" e.g., "mn1.1.10"
-    // For DN: code format is "dn{book}.{sutta}" e.g., "dn1.10"
-    
-    // Get book ID (e.g., "dn1" or "mn1")
+    // Fallback: Try to construct from components based on nikaya structure
+    // Get book number from ID (e.g., "dn1" -> "1", "mn1" -> "1", "sn1" -> "1")
     let book_id = fragment.group_levels.iter()
         .find_map(|level| {
             if matches!(level.group_type, crate::types::GroupType::Book) {
@@ -576,7 +591,33 @@ fn derive_cst_code(fragment: &XmlFragment, _nikaya_structure: &NikayaStructure, 
             }
         });
     
-    // Get vagga number from title (e.g., "1" from "1. Mūlapariyāyavaggo")
+    // For Samyutta Nikaya: extract samyutta number from ID like "sn1_1"
+    let samyutta_number = if nikaya_structure.nikaya == "samyutta" {
+        fragment.group_levels.iter()
+            .find_map(|level| {
+                if matches!(level.group_type, crate::types::GroupType::Samyutta) {
+                    // Extract number from samyutta title like "1. Devatāsaṃyuttaṃ"
+                    level.title.split_whitespace()
+                        .next()
+                        .and_then(|first| first.strip_suffix('.'))
+                        .filter(|num| num.chars().all(|c| c.is_numeric()))
+                        .or_else(|| {
+                            // Fallback: Extract from ID like "sn1_1" -> "1"
+                            level.id.as_ref().and_then(|id| {
+                                id.rsplit('_')
+                                    .next()
+                                    .filter(|num| num.chars().all(|c| c.is_numeric()))
+                            })
+                        })
+                } else {
+                    None
+                }
+            })
+    } else {
+        None
+    };
+    
+    // Get vagga number from title (e.g., "1" from "1. Mūlapariyāyavaggo" or "1. Naḷavaggo")
     // This is more reliable than using the vagga ID since the ID may be inherited from the next vagga
     // However, for vagga 0 (introduction/preamble) in commentary files, the title is often empty,
     // so we fallback to extracting from the ID (e.g., "mn1_0" -> "0")
@@ -602,7 +643,7 @@ fn derive_cst_code(fragment: &XmlFragment, _nikaya_structure: &NikayaStructure, 
             }
         });
     
-    // Extract sutta number from title (e.g., "1. Brahmajālasuttaṃ" -> "1")
+    // Extract sutta number from title (e.g., "1. Brahmajālasuttaṃ" or "1. Oghataraṇasuttaṃ" -> "1")
     // First try from Sutta GroupLevel
     let sutta_number = fragment.group_levels.iter()
         .find_map(|level| {
@@ -626,22 +667,58 @@ fn derive_cst_code(fragment: &XmlFragment, _nikaya_structure: &NikayaStructure, 
             })
         });
     
-    // Build the code based on what we have
-    match (book_id, vagga_number, sutta_number) {
-        (Some(book), Some(vagga), Some(sutta)) => {
-            // MN/SN style: mn1.1.10
-            Some(format!("{}.{}.{}", book, vagga, sutta))
+    // Build the code based on nikaya structure
+    match nikaya_structure.nikaya.as_str() {
+        "digha" => {
+            // DN style: dn{book}.{sutta}
+            match (book_id, sutta_number) {
+                (Some(book), Some(sutta)) => Some(format!("{}.{}", book, sutta)),
+                _ => None,
+            }
         }
-        (Some(book), Some(vagga), None) => {
-            // MN/SN vagga 0 (introduction/preamble) in commentary files: mn1.0.0
-            // These fragments don't have a sutta number, so we use "0" as placeholder
-            Some(format!("{}.{}.0", book, vagga))
+        "majjhima" => {
+            // MN style: mn{book}.{vagga}.{sutta}
+            match (book_id, vagga_number, sutta_number) {
+                (Some(book), Some(vagga), Some(sutta)) => {
+                    Some(format!("{}.{}.{}", book, vagga, sutta))
+                }
+                (Some(book), Some(vagga), None) => {
+                    // MN vagga 0 (introduction/preamble) in commentary files: mn1.0.0
+                    Some(format!("{}.{}.0", book, vagga))
+                }
+                _ => None,
+            }
         }
-        (Some(book), None, Some(sutta)) => {
-            // DN style: dn1.10
-            Some(format!("{}.{}", book, sutta))
+        "samyutta" => {
+            // SN style: sn{book}.{samyutta}.{vagga}.{sutta}
+            match (book_id, samyutta_number, vagga_number, sutta_number) {
+                (Some(book), Some(samyutta), Some(vagga), Some(sutta)) => {
+                    Some(format!("{}.{}.{}.{}", book, samyutta, vagga, sutta))
+                }
+                (Some(book), Some(samyutta), Some(vagga), None) => {
+                    // SN vagga 0 (introduction/preamble) in commentary files: sn1.1.0.0
+                    Some(format!("{}.{}.{}.0", book, samyutta, vagga))
+                }
+                _ => None,
+            }
         }
-        _ => None,
+        "anguttara" => {
+            // AN style: an{book}.{pannasaka}.{vagga}.{sutta}
+            // For now, treat it like MN until we have proper pannasaka parsing
+            match (book_id, vagga_number, sutta_number) {
+                (Some(book), Some(vagga), Some(sutta)) => {
+                    Some(format!("{}.{}.{}", book, vagga, sutta))
+                }
+                _ => None,
+            }
+        }
+        _ => {
+            // Default fallback for other nikayas
+            match (book_id, sutta_number) {
+                (Some(book), Some(sutta)) => Some(format!("{}.{}", book, sutta)),
+                _ => None,
+            }
+        }
     }
 }
 
@@ -1620,5 +1697,42 @@ mod tests {
         assert_eq!(sutta_frag.cst_vagga.as_deref(), Some("5. Cūḷayamakavaggo"));
         assert_eq!(sutta_frag.cst_sutta.as_deref(), Some("1. Sāleyyakasuttaṃ"));
         assert_eq!(sutta_frag.cst_paranum.as_deref(), Some("439"));
+    }
+
+    #[test]
+    fn test_cst_fields_sn() {
+        // Test CST field derivation for SN
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<TEI.2>
+<text>
+<body>
+<p rend="nikaya">Saṃyuttanikāyo</p>
+<div id="sn1" n="sn1" type="book">
+<head rend="book">Sagāthāvaggo</head>
+<div id="sn1_1" n="sn1_1" type="samyutta">
+<head rend="chapter">1. Devatāsaṃyuttaṃ</head>
+<p rend="title">1. Naḷavaggo</p>
+<p rend="subhead">1. Oghataraṇasuttaṃ</p>
+<p rend="bodytext" n="1">Evaṃ me sutaṃ – ekaṃ samayaṃ bhagavā sāvatthiyaṃ viharati</p>
+</div>
+</div>
+</body>
+</text>
+</TEI.2>"#;
+        
+        let structure = detect_nikaya_structure(xml).unwrap();
+        let fragments = parse_into_fragments(xml, &structure, "s0301m.mul.xml", None, false).unwrap();
+        
+        // Find the sutta fragment
+        let sutta_frag = fragments.iter()
+            .find(|f| matches!(f.frag_type, FragmentType::Sutta))
+            .expect("Should have a sutta fragment");
+        
+        // Check CST fields
+        assert_eq!(sutta_frag.cst_file.as_str(), "s0301m.mul.xml");
+        assert_eq!(sutta_frag.cst_code.as_deref(), Some("sn1.1.1.1"));
+        assert_eq!(sutta_frag.cst_vagga.as_deref(), Some("1. Naḷavaggo"));
+        assert_eq!(sutta_frag.cst_sutta.as_deref(), Some("1. Oghataraṇasuttaṃ"));
+        assert_eq!(sutta_frag.cst_paranum.as_deref(), Some("1"));
     }
 }
