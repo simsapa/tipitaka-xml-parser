@@ -2,7 +2,7 @@
 
 A cli tool which attempts to parse [tipitaka-xml](https://github.com/VipassanaTech/tipitaka-xml) `romn/` xml files into suttas in an sqlite database.
 
-⚠ **Warning: Work-In-Progress.** The parser produces some okay results for some nikāyas, while it can't handle some others due to the irregular structure of the xml files.
+⚠️ **Warning** ⚠️ **Work-In-Progress.** The parser produces some okay results for some nikāyas, while it can't handle some others due to the irregular structure of the xml files.
 
 The parser results can be still improved with extra code to handle various cases, after which manual checking and correction will be necessary.
 
