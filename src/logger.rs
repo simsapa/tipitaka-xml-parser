@@ -126,7 +126,7 @@ impl Logger {
             .map_err(|e| format!("Failed to get logger_dir: {}", e))?;
 
         std::fs::create_dir_all(&data_dir)?;
-        let log_file = data_dir.join("log.txt");
+        let log_file = data_dir.join("tipitaka_xml_parser_log.txt");
 
         // Read environment variables
         let disable_log = std::env::var("DISABLE_LOG")

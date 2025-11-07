@@ -63,7 +63,8 @@ fn get_fragments_for_filename(
     let rows: Vec<XmlFragmentRecord> = dsl::xml_fragments
         .filter(dsl::cst_file.eq(cst_file))
         .order((dsl::start_line.asc(), dsl::start_char.asc()))
-        .load::<XmlFragmentRecord>(conn)
+        .select(XmlFragmentRecord::as_select())
+        .load(conn)
         .context("Failed to query fragments")?;
     
     // Convert XmlFragmentRecord to XmlFragment

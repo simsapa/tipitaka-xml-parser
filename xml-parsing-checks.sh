@@ -13,9 +13,9 @@ fi
 cargo build
 
 for i in s0101m.mul.xml s0101a.att.xml s0101t.tik.xml s0201m.mul.xml s0201a.att.xml s0201t.tik.xml s0301m.mul.xml s0301a.att.xml s0301t.tik.xml s0402m2.mul.xml s0402a.att.xml s0402t.tik.xml; do
-    ./target/debug/simsapa_cli parse-tipitaka-xml ../../bootstrap-assets-resources/tipitaka-org-vri-cst/tipitaka-xml/romn/"$i" suttas.sqlite3 --fragments-db fragments.sqlite3 --adjust-fragments-tsv assets/adjust-fragments.tsv
+    ./target/debug/tipitaka_xml_parser parse-tipitaka-xml ../bootstrap-assets-resources/tipitaka-org-vri-cst/tipitaka-xml/romn/"$i" --fragments-db fragments.sqlite3 --adjust-fragments-tsv assets/adjust-fragments.tsv
 
-    ./target/debug/simsapa_cli reconstruct-xml-from-fragments ./fragments.sqlite3 "$i" ./"$i"
+    ./target/debug/tipitaka_xml_parser reconstruct-xml-from-fragments ./fragments.sqlite3 "$i" ./"$i"
 done
 
 sed -i 's/UTF-16/UTF-8/' ./*.xml
