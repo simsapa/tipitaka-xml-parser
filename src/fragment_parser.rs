@@ -182,9 +182,11 @@ impl HierarchyTracker {
                         id.clone()
                     };
                     
-                    // Only truncate child levels if we're providing a new ID
-                    // If id is None, we're just updating the title, so keep child levels intact
-                    let should_truncate = id.is_some();
+                    // Only truncate child levels if we're providing a new ID OR if the title is changing
+                    // If id is None AND title is the same, we're just re-entering the same level
+                    // Otherwise, we're entering a NEW level (with a new title) and should truncate child levels
+                    let title_changed = existing.title != title;
+                    let should_truncate = id.is_some() || title_changed;
                     
                     if should_truncate {
                         // Truncate levels after this one before updating
@@ -294,16 +296,28 @@ impl<'a> FragmentBoundaryDetector<'a> {
             },
             "p" if attributes.get("rend") == Some(&"title".to_string()) => {
                 // In SN, <p rend="title"> = Vagga title
+                // In AN (commentary/tika), <p rend="title"> = Pannasaka title
                 if self.nikaya_structure.nikaya == "samyutta" {
+                    Some((GroupType::Vagga, String::new(), None, None))
+                } else if self.nikaya_structure.nikaya == "anguttara" {
+                    Some((GroupType::Pannasaka, String::new(), None, None))
+                } else {
+                    None
+                }
+            },
+            "p" if attributes.get("rend") == Some(&"chapter".to_string()) => {
+                // In AN (commentary/tika), <p rend="chapter"> = Vagga title
+                if self.nikaya_structure.nikaya == "anguttara" {
                     Some((GroupType::Vagga, String::new(), None, None))
                 } else {
                     None
                 }
             },
             "p" if attributes.get("rend") == Some(&"subhead".to_string()) => {
-                // In MN and SN, subhead = Sutta title
+                // In MN, SN, and AN, subhead = Sutta title
                 if self.nikaya_structure.nikaya == "majjhima" || 
-                   self.nikaya_structure.nikaya == "samyutta" {
+                   self.nikaya_structure.nikaya == "samyutta" ||
+                   self.nikaya_structure.nikaya == "anguttara" {
                     Some((GroupType::Sutta, String::new(), None, None))
                 } else {
                     None
@@ -434,7 +448,7 @@ fn extract_sutta_title_from_content(content: &str) -> Option<String> {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
                 let name_bytes = e.name();
-                let name = std::str::from_utf8(name_bytes.as_ref()).unwrap_or("");
+                let name = std::str::from_utf8(name_bytes.as_ref()).unwrap_or("").to_string();
                 
                 // Check both <head> and <p> tags
                 if name == "head" || name == "p" {
@@ -468,7 +482,13 @@ fn extract_sutta_title_from_content(content: &str) -> Option<String> {
                                 if rend == "subhead" && first_subhead_title.is_none() {
                                     first_subhead_title = Some(title_text.clone());
                                 } else if rend == "chapter" && first_chapter_title.is_none() {
-                                    first_chapter_title = Some(title_text.clone());
+                                    // For <p rend="chapter">, only treat as sutta title if in DN
+                                    // In AN tika, <p rend="chapter"> is a Vagga marker, not a Sutta marker
+                                    // In DN, <head rend="chapter"> IS a Sutta marker
+                                    // We can't distinguish nikayas here, so use tag name: <head> = DN sutta, <p> = vagga
+                                    if name == "head" {
+                                        first_chapter_title = Some(title_text.clone());
+                                    }
                                 }
                                 
                                 // If we found a subhead title, we can return immediately
@@ -1072,14 +1092,85 @@ pub fn parse_into_fragments(
                         // Don't set pending_title - the next <head> will update the title
                     } else {
                         // For other elements, we'll get the title from the text content, so store it as pending
-                        // EXCEPT for MN/SN subheads which need text content validation
-                        let is_mn_sn_subhead = (nikaya_structure.nikaya == "majjhima" || 
-                                               nikaya_structure.nikaya == "samyutta") &&
+                        // EXCEPT for MN/SN/AN subheads which need text content validation
+                        let is_sutta_subhead = (nikaya_structure.nikaya == "majjhima" || 
+                                               nikaya_structure.nikaya == "samyutta" ||
+                                               nikaya_structure.nikaya == "anguttara") &&
                                               matches!(group_type, GroupType::Sutta) &&
                                               tag_name == "p" && 
                                               attributes.get("rend") == Some(&"subhead".to_string());
                         
-                        if !is_mn_sn_subhead {
+                        // For AN tika/commentary: <p rend="chapter"> = Vagga boundary, should close fragments
+                        let is_an_vagga_chapter = nikaya_structure.nikaya == "anguttara" &&
+                                                 matches!(group_type, GroupType::Vagga) &&
+                                                 tag_name == "p" &&
+                                                 attributes.get("rend") == Some(&"chapter".to_string());
+                        
+                        // Before entering a new Vagga level in AN tika, close any open sutta fragment
+                        if is_an_vagga_chapter && in_sutta_content {
+                            let is_first_vagga = !seen_first_vagga_or_sutta;
+                            
+                            if is_first_vagga {
+                                // Mark that we've seen the first vagga, but don't close the fragment
+                                seen_first_vagga_or_sutta = true;
+                            } else {
+                                // Close current sutta fragment before entering new Vagga
+                                if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) = 
+                                    (current_fragment_start, current_frag_type.as_ref()) {
+                                    
+                                    if matches!(frag_type, FragmentType::Sutta) {
+                                        let tentative_content = xml_content[frag_start_pos..event_start_pos].to_string();
+                                        let has_sutta_content = tentative_content.contains("rend=\"subhead\"") || 
+                                                               tentative_content.contains("rend=\"chapter\"") ||
+                                                               tentative_content.contains("rend=\"bodytext\"");
+                                        
+                                        if has_sutta_content {
+                                            // Close at the current position (before the new vagga chapter)
+                                            let (end_pos, end_line, end_char) = apply_fragment_adjustment(
+                                                xml_content,
+                                                event_start_pos,
+                                                event_start_line,
+                                                event_start_char,
+                                                cst_file,
+                                                fragments.len(),
+                                                adjustments,
+                                            );
+                                            
+                                            let content = xml_content[frag_start_pos..end_pos].to_string();
+                                            
+                                            if !content.trim().is_empty() {
+                                                fragments.push(XmlFragment {
+                                                    nikaya: nikaya_structure.nikaya.clone(),
+                                                    frag_type: frag_type.clone(),
+                                                    content,
+                                                    start_line: frag_start_line,
+                                                    end_line,
+                                                    start_char: frag_start_char,
+                                                    end_char,
+                                                    group_levels: current_fragment_group_levels.clone(),
+                                                    cst_file: cst_file.to_string(),
+                                                    frag_idx: fragments.len(),
+                                                    frag_review: None,
+                                                    cst_code: None,
+                                                    cst_vagga: None,
+                                                    cst_sutta: None,
+                                                    cst_paranum: None,
+                                                    sc_code: None,
+                                                    sc_sutta: None,
+                                                });
+                                            }
+                                            
+                                            // Start new fragment at the adjusted end position
+                                            current_fragment_start = Some((end_pos, end_line, end_char));
+                                            current_frag_type = Some(FragmentType::Sutta);
+                                            // Note: we'll update group_levels AFTER entering the new level via pending_title
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if !is_sutta_subhead {
                             pending_title = Some((group_type.clone(), String::new(), id, number));
                         }
                     }
@@ -1109,9 +1200,9 @@ pub fn parse_into_fragments(
                 // Handle sutta boundaries based on nikaya structure
                 let is_potential_sutta_marker = detector.is_sutta_start(&tag_name, &attributes);
                 
-                // For MN/SN, we need to check the text content to see if it's a numbered subhead
+                // For MN/SN/AN, we need to check the text content to see if it's a numbered subhead
                 if is_potential_sutta_marker && 
-                   (nikaya_structure.nikaya == "majjhima" || nikaya_structure.nikaya == "samyutta") &&
+                   (nikaya_structure.nikaya == "majjhima" || nikaya_structure.nikaya == "samyutta" || nikaya_structure.nikaya == "anguttara") &&
                    tag_name == "p" && attributes.get("rend") == Some(&"subhead".to_string()) {
                     // Store START position of the tag for later text check
                     pending_subhead_check = Some((event_start_pos, event_start_line, event_start_char));
@@ -1328,6 +1419,11 @@ pub fn parse_into_fragments(
                 if let Some((group_type, _, id, number)) = pending_title.take() {
                     if !text.is_empty() {
                         hierarchy.enter_level(group_type, text, id, number);
+                        
+                        // Update group_levels after entering any new level while a fragment is open
+                        if current_fragment_start.is_some() {
+                            current_fragment_group_levels = hierarchy.get_current_levels();
+                        }
                     }
                 }
             },
@@ -1879,7 +1975,7 @@ mod tests {
 
     #[test]
     fn test_cst_fields_an() {
-        // Test CST field derivation for AN
+        // Test CST field derivation for AN (mul file with div IDs)
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <TEI.2>
 <text>
@@ -1914,5 +2010,128 @@ mod tests {
         assert_eq!(sutta_frag.cst_vagga.as_deref(), Some("1. Bālavaggo"));
         assert_eq!(sutta_frag.cst_sutta.as_deref(), Some("1. Bhayasuttaṃ"));
         assert_eq!(sutta_frag.cst_paranum.as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn test_cst_fields_an_tika() {
+        // Test CST field derivation for AN tika/commentary files
+        // These use <p> tags instead of <div> tags for pannasaka and vagga
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<TEI.2>
+<text>
+<body>
+<div id="an2" n="an2" type="book">
+<p rend="nikaya">Aṅguttaranikāye</p>
+<head rend="book">Dukanipāta-ṭīkā</head>
+<p rend="title">1. Paṭhamapaṇṇāsakaṃ</p>
+<p rend="chapter">1. Kammakāraṇavaggo</p>
+<p rend="subhead">1. Vajjasuttavaṇṇanā</p>
+<p rend="bodytext" n="1"><hi rend="paranum">1</hi>Dukanipātassa paṭhame</p>
+<p rend="subhead">2. Padhānasuttavaṇṇanā</p>
+<p rend="bodytext" n="2"><hi rend="paranum">2</hi>Dutiye</p>
+</div>
+</body>
+</text>
+</TEI.2>"#;
+        
+        let structure = detect_nikaya_structure(xml).unwrap();
+        let fragments = parse_into_fragments(xml, &structure, "s0402t.tik.xml", None, false).unwrap();
+        
+        let sutta_fragments: Vec<_> = fragments.iter()
+            .filter(|f| matches!(f.frag_type, FragmentType::Sutta))
+            .collect();
+        
+        // Should have at least 2 sutta fragments
+        assert!(sutta_fragments.len() >= 2, "Should have at least 2 sutta fragments");
+        
+        // Find first actual sutta (not preamble)
+        let sutta1 = sutta_fragments.iter()
+            .find(|f| f.cst_code.is_some() && f.cst_sutta.as_ref().map(|s| s.contains("Vajjasuttavaṇṇanā")).unwrap_or(false))
+            .expect("Should find first sutta");
+        
+        // Check CST fields for first sutta
+        assert_eq!(sutta1.cst_code.as_deref(), Some("an2.1.1.1"));
+        assert_eq!(sutta1.cst_vagga.as_deref(), Some("1. Kammakāraṇavaggo"));
+        assert_eq!(sutta1.cst_sutta.as_deref(), Some("1. Vajjasuttavaṇṇanā"));
+        
+        // Find second sutta
+        let sutta2 = sutta_fragments.iter()
+            .find(|f| f.cst_sutta.as_ref().map(|s| s.contains("Padhānasuttavaṇṇanā")).unwrap_or(false))
+            .expect("Should find second sutta");
+        
+        // Check CST fields for second sutta
+        assert_eq!(sutta2.cst_code.as_deref(), Some("an2.1.1.2"));
+        assert_eq!(sutta2.cst_vagga.as_deref(), Some("1. Kammakāraṇavaggo"));
+        assert_eq!(sutta2.cst_sutta.as_deref(), Some("2. Padhānasuttavaṇṇanā"));
+    }
+    
+    #[test]
+    fn test_cst_fields_an_tika_multi_vagga() {
+        // Test that AN tika files properly split fragments on <p rend="chapter"> Vagga boundaries
+        // This regression test ensures we don't have a single fragment spanning multiple vaggas
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<TEI.2>
+<text>
+<body>
+<div id="an2" n="an2" type="book">
+<p rend="nikaya">Aṅguttaranikāye</p>
+<head rend="book">Dukanipāta-ṭīkā</head>
+<p rend="title">1. Paṭhamapaṇṇāsakaṃ</p>
+<p rend="chapter">1. Kammakāraṇavaggo</p>
+<p rend="subhead">1. Vajjasuttavaṇṇanā</p>
+<p rend="bodytext" n="1"><hi rend="paranum">1</hi>First vagga first sutta content</p>
+<p rend="chapter">2. Adhikaraṇavaggavaṇṇanā</p>
+<p rend="bodytext" n="11"><hi rend="paranum">11</hi>Second vagga content without sutta subhead</p>
+<p rend="chapter">3. Bālavaggavaṇṇanā</p>
+<p rend="bodytext" n="22"><hi rend="paranum">22</hi>Third vagga content without sutta subhead</p>
+</div>
+</body>
+</text>
+</TEI.2>"#;
+        
+        let structure = detect_nikaya_structure(xml).unwrap();
+        let fragments = parse_into_fragments(xml, &structure, "s0402t.tik.xml", None, false).unwrap();
+        
+        let sutta_fragments: Vec<_> = fragments.iter()
+            .filter(|f| matches!(f.frag_type, FragmentType::Sutta))
+            .collect();
+        
+        // Should have at least 3 fragments (one for each vagga)
+        assert!(sutta_fragments.len() >= 3, "Should have at least 3 sutta fragments, got {}", sutta_fragments.len());
+        
+        // Verify each fragment contains at most 1 chapter marker (its own vagga title)
+        for frag in &sutta_fragments {
+            let chapter_count = frag.content.matches("rend=\"chapter\"").count();
+            assert!(chapter_count <= 1, 
+                "Fragment should contain at most 1 chapter marker, found {} in fragment with vagga: {:?}", 
+                chapter_count, frag.cst_vagga);
+        }
+        
+        // Find fragment with first vagga
+        let vagga1_frag = sutta_fragments.iter()
+            .find(|f| f.cst_vagga.as_ref().map(|v| v.contains("Kammakāraṇavaggo")).unwrap_or(false))
+            .expect("Should find fragment with first vagga");
+        
+        assert_eq!(vagga1_frag.cst_code.as_deref(), Some("an2.1.1.1"));
+        assert_eq!(vagga1_frag.cst_vagga.as_deref(), Some("1. Kammakāraṇavaggo"));
+        assert_eq!(vagga1_frag.cst_sutta.as_deref(), Some("1. Vajjasuttavaṇṇanā"));
+        
+        // Find fragment with second vagga
+        let vagga2_frag = sutta_fragments.iter()
+            .find(|f| f.cst_vagga.as_ref().map(|v| v.contains("Adhikaraṇavaggavaṇṇanā")).unwrap_or(false))
+            .expect("Should find fragment with second vagga");
+        
+        assert_eq!(vagga2_frag.cst_code.as_deref(), Some("an2.1.2.0"));
+        assert_eq!(vagga2_frag.cst_vagga.as_deref(), Some("2. Adhikaraṇavaggavaṇṇanā"));
+        assert_eq!(vagga2_frag.cst_sutta, None); // No sutta subhead
+        
+        // Find fragment with third vagga
+        let vagga3_frag = sutta_fragments.iter()
+            .find(|f| f.cst_vagga.as_ref().map(|v| v.contains("Bālavaggavaṇṇanā")).unwrap_or(false))
+            .expect("Should find fragment with third vagga");
+        
+        assert_eq!(vagga3_frag.cst_code.as_deref(), Some("an2.1.3.0"));
+        assert_eq!(vagga3_frag.cst_vagga.as_deref(), Some("3. Bālavaggavaṇṇanā"));
+        assert_eq!(vagga3_frag.cst_sutta, None); // No sutta subhead
     }
 }
