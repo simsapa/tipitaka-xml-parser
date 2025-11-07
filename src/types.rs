@@ -107,34 +107,25 @@ pub struct FragmentKey {
 pub type FragmentAdjustments = HashMap<FragmentKey, FragmentAdjustment>;
 
 use anyhow::{Context, Result};
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
 
-/// Load fragment adjustments from a TSV file
+pub static ADJUST_FRAGMENTS_TSV: &str = include_str!("../assets/adjust-fragments.tsv");
+
+/// Load fragment adjustments from the embedded TSV data
 ///
-/// The TSV file should have a header line with at least these fields:
+/// The TSV data should have a header line with at least these fields:
 /// - cst_file: Name of the XML file
 /// - frag_idx: Fragment index (0-indexed)
 /// - end_line: (Optional) Override end line number (1-indexed)
 /// - end_char: (Optional) Override end character position (0-indexed)
 ///
-/// # Arguments
-/// * `tsv_path` - Path to the TSV file
-///
 /// # Returns
 /// HashMap mapping (cst_file, frag_idx) to FragmentAdjustment
-pub fn load_fragment_adjustments(tsv_path: &PathBuf) -> Result<FragmentAdjustments> {
-    let file = File::open(tsv_path)
-        .with_context(|| format!("Failed to open adjustments TSV file: {:?}", tsv_path))?;
-    
-    let reader = BufReader::new(file);
-    let mut lines = reader.lines();
+pub fn load_fragment_adjustments() -> Result<FragmentAdjustments> {
+    let mut lines = ADJUST_FRAGMENTS_TSV.lines();
     
     // Read header line
     let header = lines.next()
-        .ok_or_else(|| anyhow::anyhow!("TSV file is empty"))?
-        .context("Failed to read header line")?;
+        .ok_or_else(|| anyhow::anyhow!("TSV data is empty"))?;
     
     // Parse header to find column indices
     let columns: Vec<&str> = header.split('\t').collect();
@@ -148,10 +139,7 @@ pub fn load_fragment_adjustments(tsv_path: &PathBuf) -> Result<FragmentAdjustmen
     let mut adjustments = FragmentAdjustments::new();
     
     // Parse data lines
-    for (line_num, line_result) in lines.enumerate() {
-        let line = line_result
-            .with_context(|| format!("Failed to read line {} of TSV file", line_num + 2))?;
-        
+    for (line_num, line) in lines.enumerate() {
         // Skip empty lines
         if line.trim().is_empty() {
             continue;

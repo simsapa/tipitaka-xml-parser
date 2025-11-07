@@ -10,9 +10,6 @@ use crate::types::{XmlFragment, FragmentType, GroupType, GroupLevel, FragmentAdj
 use crate::nikaya_structure::NikayaStructure;
 use std::collections::HashMap;
 
-/// Embedded cst-vs-sc.tsv mapping file
-pub static CST_VS_SC_TSV: &str = include_str!("../assets/cst-vs-sc.tsv");
-
 /// Line and character position tracking for XML reader
 ///
 /// Tracks both line numbers (1-indexed) and character positions within lines (0-indexed).

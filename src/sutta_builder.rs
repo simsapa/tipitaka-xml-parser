@@ -9,7 +9,8 @@ use quick_xml::{Reader, events::Event};
 use html_escape;
 
 use crate::logger;
-use crate::fragment_parser::CST_VS_SC_TSV;
+
+pub static CST_VS_SC_TSV: &str = include_str!("../assets/cst-vs-sc.tsv");
 
 /// FIXME: dummy function to be removed
 fn consistent_niggahita(text: Option<String>) -> String {

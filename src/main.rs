@@ -11,7 +11,6 @@ use tipitaka_xml_parser::logger;
 fn parse_tipitaka_xml(
     input_path: &Path,
     fragments_db: Option<&Path>,
-    adjust_fragments_tsv: Option<&Path>,
     dry_run: bool,
 ) -> Result<(), String> {
     use tipitaka_xml_parser::{
@@ -20,19 +19,15 @@ fn parse_tipitaka_xml(
     };
     use std::fs;
 
-    // Load fragment adjustments if provided
-    let adjustments = if let Some(tsv_path) = adjust_fragments_tsv {
-        match load_fragment_adjustments(&PathBuf::from(tsv_path)) {
-            Ok(adj) => {
-                logger::info(&format!("Loaded {} fragment adjustments", adj.len()));
-                Some(adj)
-            }
-            Err(e) => {
-                return Err(format!("Failed to load fragment adjustments: {}", e));
-            }
+    // Load fragment adjustments from embedded TSV
+    let adjustments = match load_fragment_adjustments() {
+        Ok(adj) => {
+            logger::info(&format!("Loaded {} fragment adjustments", adj.len()));
+            Some(adj)
         }
-    } else {
-        None
+        Err(e) => {
+            return Err(format!("Failed to load fragment adjustments: {}", e));
+        }
     };
 
     // Collect XML files to process
@@ -157,10 +152,6 @@ enum Commands {
         #[arg(long, value_name = "FRAGMENTS_DB_PATH")]
         fragments_db: Option<PathBuf>,
 
-        /// Optional path to TSV file containing manual fragment adjustments
-        #[arg(long, value_name = "ADJUST_FRAGMENTS_TSV")]
-        adjust_fragments_tsv: Option<PathBuf>,
-
         /// Parse without inserting into database (dry run)
         #[arg(long, default_value_t = false)]
         dry_run: bool,
@@ -204,8 +195,8 @@ fn main() {
     // === Execute the requested command ===
 
     let command_result = match cli.command {
-        Commands::ParseTipitakaXml { input_path, fragments_db, adjust_fragments_tsv, dry_run } => {
-            parse_tipitaka_xml(&input_path, fragments_db.as_deref(), adjust_fragments_tsv.as_deref(), dry_run)
+        Commands::ParseTipitakaXml { input_path, fragments_db, dry_run } => {
+            parse_tipitaka_xml(&input_path, fragments_db.as_deref(), dry_run)
         }
 
         Commands::ReconstructXmlFromFragments { fragments_db_path, xml_filename, output_path } => {
