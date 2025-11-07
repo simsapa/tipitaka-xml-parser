@@ -1,0 +1,32 @@
+[package]
+name = "tipitaka_xml_parser"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "tipitaka_xml_parser"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5.37", features = ["derive", "env"] }
+dotenvy = "0.15.7"
+anyhow = "1.0"
+thiserror = "2.0"
+chrono = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+diesel = { version = "2.2.10", features = ["sqlite"] }
+diesel_migrations = { version = "2.2.0", features = ["sqlite"] }
+# indexmap = { version = "2.0", features = ["serde"] }
+# indicatif = "0.17"
+# regex = "1.11"
+# lazy_static = "1.5"
+quick-xml = "0.31"
+html-escape = "0.2"
+encoding_rs = "0.8"
+csv = "1.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3.8"

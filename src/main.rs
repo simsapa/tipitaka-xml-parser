@@ -1,0 +1,329 @@
+pub mod tipitaka_xml_parser;
+
+use std::path::{Path, PathBuf};
+use std::process::exit;
+
+use clap::{Parser, Subcommand, ValueEnum};
+use dotenvy::dotenv;
+use anyhow::Result;
+use diesel::prelude::*;
+use diesel::sqlite::SqliteConnection;
+
+use crate::logger;
+
+/// Parse Tipitaka XML files with fragment-based parser
+fn parse_tipitaka_xml(
+    input_path: &Path,
+    output_db_path: &Path,
+    fragments_db: Option<&Path>,
+    adjust_fragments_tsv: Option<&Path>,
+    dry_run: bool,
+) -> Result<(), String> {
+    use crate::{
+        TipitakaImporter,
+        load_fragment_adjustments,
+        initialize_database,
+    };
+    use diesel::sqlite::SqliteConnection;
+    use diesel::Connection;
+    use std::fs;
+
+    // Load fragment adjustments if provided
+    let adjustments = if let Some(tsv_path) = adjust_fragments_tsv {
+        println!("Loading fragment adjustments from: {:?}", tsv_path);
+        match load_fragment_adjustments(&PathBuf::from(tsv_path)) {
+            Ok(adj) => {
+                println!("✓ Loaded {} fragment adjustments\n", adj.len());
+                Some(adj)
+            }
+            Err(e) => {
+                return Err(format!("Failed to load fragment adjustments: {}", e));
+            }
+        }
+    } else {
+        None
+    };
+    
+    // Initialize output database if needed
+    if !dry_run {
+        if let Err(e) = initialize_database(output_db_path) {
+            return Err(format!("Failed to initialize database: {}", e));
+        }
+    }
+
+    // Collect XML files to process
+    let xml_files: Vec<PathBuf> = if input_path.is_file() {
+        println!("Processing single file: {:?}\n", input_path);
+        vec![input_path.to_path_buf()]
+    } else if input_path.is_dir() {
+        println!("Processing folder: {:?}", input_path);
+        let files: Vec<PathBuf> = fs::read_dir(input_path)
+            .map_err(|e| format!("Failed to read directory: {}", e))?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext == "xml")
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        println!("Found {} XML files\n", files.len());
+        files
+    } else {
+        return Err(format!("Input path does not exist: {:?}", input_path));
+    };
+
+    if xml_files.is_empty() {
+        return Err("No XML files found to process".to_string());
+    }
+
+    if dry_run {
+        println!("DRY RUN MODE - No database operations will be performed\n");
+    }
+
+    // Create importer (TSV is now embedded in the binary)
+    let mut importer = TipitakaImporter::new()
+        .map_err(|e| format!("Failed to create importer: {}", e))?;
+
+    // Add fragment adjustments if provided
+    if let Some(adj) = adjustments {
+        importer = importer.with_adjustments(adj);
+    }
+
+    // Get database connection if not dry run
+    let mut conn_opt = if !dry_run {
+        Some(SqliteConnection::establish(output_db_path.to_str().unwrap())
+            .map_err(|e| format!("Failed to connect to database: {}", e))?)
+    } else {
+        None
+    };
+    
+    // Process each XML file
+    let mut total_fragments = 0;
+    let mut total_suttas = 0;
+    let mut total_inserted = 0;
+    let mut errors = 0;
+
+    for (idx, xml_file) in xml_files.iter().enumerate() {
+        println!("[{}/{}] Processing: {:?}", idx + 1, xml_files.len(), 
+                 xml_file.file_name().unwrap_or_default());
+
+        // Handle fragments export if specified (unique feature of new parser)
+        if let Some(frag_db_path) = fragments_db {
+            if !dry_run {
+                match importer.export_fragments(xml_file, frag_db_path) {
+                    Ok(count) => {
+                        println!("  ✓ Exported {} fragments to {:?}", count, frag_db_path);
+                    }
+                    Err(e) => {
+                        eprintln!("  ✗ Error exporting fragments: {}", e);
+                        errors += 1;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Process file with importer
+        let stats = match importer.process_file(xml_file, conn_opt.as_mut()) {
+            Ok(stats) => stats,
+            Err(e) => {
+                eprintln!("  ✗ Error processing file: {}", e);
+                errors += 1;
+                continue;
+            }
+        };
+
+        // Display results
+        println!("  Nikaya: {}", stats.nikaya);
+        println!("  Fragments: {}, Suttas: {}", stats.fragments_parsed, stats.suttas_total);
+
+        if !dry_run {
+            println!("  Inserted: {}, Failed: {}", stats.suttas_inserted, stats.suttas_failed);
+        }
+
+        total_fragments += stats.fragments_parsed;
+        total_suttas += stats.suttas_total;
+        total_inserted += stats.suttas_inserted;
+
+        println!("  ✓ Processing complete\n");
+    }
+
+    // Summary
+    println!("\n===================");
+    println!("Summary");
+    println!("===================");
+    println!("Files processed: {}", xml_files.len());
+    println!("Total fragments: {}", total_fragments);
+    println!("Total suttas: {}", total_suttas);
+
+    if !dry_run {
+        println!("Successfully inserted: {}", total_inserted);
+        println!("Failed: {}", total_suttas - total_inserted);
+        println!("\n✓ Import complete! Database: {:?}", output_db_path);
+    } else {
+        println!("\nDRY RUN - No database operations performed");
+    }
+
+    if let Some(frag_db_path) = fragments_db {
+        if !dry_run {
+            println!("\n✓ Fragments exported to: {:?}", frag_db_path);
+        }
+    }
+
+    println!("Errors: {}", errors);
+
+    Ok(())
+}
+
+/// Reconstruct XML file from fragments database
+fn reconstruct_xml_from_fragments(
+    fragments_db_path: &Path,
+    xml_filename: &str,
+    output_path: &Path,
+) -> Result<(), String> {
+    use crate::reconstruct_xml_from_db;
+    use std::fs;
+
+    println!("Reconstructing XML from Fragments Database");
+    println!("==========================================\n");
+
+    if !fragments_db_path.exists() {
+        return Err(format!("Fragments database not found: {:?}", fragments_db_path));
+    }
+
+    println!("Fragments DB: {:?}", fragments_db_path);
+    println!("XML Filename: {}", xml_filename);
+    println!("Output Path: {:?}\n", output_path);
+
+    // Reconstruct XML
+    let xml_content = reconstruct_xml_from_db(fragments_db_path, xml_filename)
+        .map_err(|e| format!("Failed to reconstruct XML: {}", e))?;
+
+    println!("✓ Reconstructed {} bytes of XML content", xml_content.len());
+
+    // Write to output file
+    fs::write(output_path, &xml_content)
+        .map_err(|e| format!("Failed to write output file: {}", e))?;
+
+    println!("✓ Written to: {:?}", output_path);
+
+    Ok(())
+}
+
+#[derive(Parser, Debug)]
+#[command(author, version, about = "Tipitaka-xml Parser", long_about = None)]
+#[command(propagate_version = true)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Parse VRI CST Tipitaka XML files with fragment-based parser
+    #[command(arg_required_else_help = true)]
+    ParseTipitakaXml {
+        /// Path to a single XML file or folder containing XML files
+        #[arg(value_name = "INPUT_PATH")]
+        input_path: PathBuf,
+
+        /// Path to the output SQLite database file for sutta import (stub - not yet implemented)
+        #[arg(value_name = "OUTPUT_DB_PATH")]
+        output_db_path: PathBuf,
+
+        /// Optional path to SQLite database for exporting fragments
+        #[arg(long, value_name = "FRAGMENTS_DB_PATH")]
+        fragments_db: Option<PathBuf>,
+
+        /// Optional path to TSV file containing manual fragment adjustments
+        #[arg(long, value_name = "ADJUST_FRAGMENTS_TSV")]
+        adjust_fragments_tsv: Option<PathBuf>,
+
+        /// Parse without inserting into database (dry run)
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
+
+    /// Reconstruct XML file from fragments database
+    #[command(arg_required_else_help = true)]
+    ReconstructXmlFromFragments {
+        /// Path to the fragments SQLite database
+        #[arg(value_name = "FRAGMENTS_DB_PATH")]
+        fragments_db_path: PathBuf,
+
+        /// XML filename to reconstruct (as stored in nikaya table)
+        #[arg(value_name = "XML_FILENAME")]
+        xml_filename: String,
+
+        /// Path to write the reconstructed XML output
+        #[arg(value_name = "OUTPUT_PATH")]
+        output_path: PathBuf,
+    },
+
+    /// Convert Tipitaka XML file to UTF-8 (normalizes line endings to LF)
+    #[command(arg_required_else_help = true)]
+    TipitakaXmlToUtf8 {
+        /// Path to the input XML file
+        #[arg(value_name = "INPUT_XML_PATH")]
+        input_xml_path: PathBuf,
+
+        /// Path to write the UTF-8 encoded output
+        #[arg(value_name = "OUTPUT_PATH")]
+        output_path: PathBuf,
+    },
+}
+
+fn main() {
+    // Attempt to load .env file. This might define SIMSAPA_DIR if it's not
+    // already in the environment. Clap will pick it up via `env = "SIMSAPA_DIR"`.
+    if dotenv().is_err() {
+        println!("Info: No .env file found or failed to load.");
+    }
+
+    let cli = Cli::parse();
+
+    // === Execute the requested command ===
+
+    let command_result = match cli.command {
+        Commands::ParseTipitakaXml { input_path, output_db_path, fragments_db, adjust_fragments_tsv, dry_run } => {
+            parse_tipitaka_xml(&input_path, &output_db_path, fragments_db.as_deref(), adjust_fragments_tsv.as_deref(), dry_run)
+        }
+
+        Commands::ReconstructXmlFromFragments { fragments_db_path, xml_filename, output_path } => {
+            reconstruct_xml_from_fragments(&fragments_db_path, &xml_filename, &output_path)
+        }
+
+        Commands::TipitakaXmlToUtf8 { input_xml_path, output_path } => {
+            use std::fs;
+            use crate::encoding::read_xml_file;
+
+            if !input_xml_path.exists() {
+                Err(format!("Input XML file does not exist: {:?}", input_xml_path))
+            } else if !input_xml_path.is_file() {
+                Err(format!("Input path is not a file: {:?}", input_xml_path))
+            } else {
+                match read_xml_file(&input_xml_path) {
+                    Ok(input_text) => {
+                        let output_text = input_text.replace(r#"encoding="UTF-16""#, r#"encoding="UTF-8""#);
+                        match fs::write(&output_path, output_text) {
+                            Ok(()) => {
+                                println!("✓ Wrote UTF-8 file to {:?}", output_path);
+                                Ok(())
+                            }
+                            Err(e) => Err(format!("Failed to write output file {:?}: {}", output_path, e)),
+                        }
+                    }
+                    Err(e) => Err(format!("Failed to read XML file: {}", e)),
+                }
+            }
+        }
+    };
+
+    if let Err(e) = command_result {
+        eprintln!("Error executing command: {}", e);
+        exit(1);
+    }
+}
