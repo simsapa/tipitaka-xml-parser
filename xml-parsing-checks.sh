@@ -6,14 +6,14 @@ if [ -f fragments.sqlite3 ]; then
     rm fragments.sqlite3
 fi
 
-if [ -f suttas.sqlite3 ]; then
-    rm suttas.sqlite3
-fi
-
 cargo build
 
+# NOTE: No trailing /
+# XML_DIR="../bootstrap-assets-resources/tipitaka-org-vri-cst/tipitaka-xml/romn"
+XML_DIR="tests/data"
+
 for i in s0101m.mul.xml s0101a.att.xml s0101t.tik.xml s0201m.mul.xml s0201a.att.xml s0201t.tik.xml s0301m.mul.xml s0301a.att.xml s0301t.tik.xml s0402m2.mul.xml s0402a.att.xml s0402t.tik.xml; do
-    ./target/debug/tipitaka_xml_parser parse-tipitaka-xml ../bootstrap-assets-resources/tipitaka-org-vri-cst/tipitaka-xml/romn/"$i" --fragments-db fragments.sqlite3 --adjust-fragments-tsv assets/adjust-fragments.tsv
+    ./target/debug/tipitaka_xml_parser parse-tipitaka-xml "$XML_DIR"/"$i" --fragments-db fragments.sqlite3 --adjust-fragments-tsv assets/adjust-fragments.tsv
 
     ./target/debug/tipitaka_xml_parser reconstruct-xml-from-fragments ./fragments.sqlite3 "$i" ./"$i"
 done

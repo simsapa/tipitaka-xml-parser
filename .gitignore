@@ -3,7 +3,6 @@
 log.txt
 tipitaka_xml_parser_log.txt
 
-suttas.sqlite3
 fragments.sqlite3
 
 # build folders
