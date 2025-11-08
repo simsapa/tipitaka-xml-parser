@@ -363,7 +363,7 @@ fn test_s0201a_att_kakacupama_sutta() {
     
     // Find the fragment containing Kakacūpamasuttavaṇṇanā
     let kakacupama_fragment = fragments.iter()
-        .find(|f| f.content.contains("Kakacūpamasuttavaṇṇanā"))
+        .find(|f| f.content_xml.contains("Kakacūpamasuttavaṇṇanā"))
         .expect("Should find Kakacūpamasuttavaṇṇanā fragment");
     
     // Verify cst_code
@@ -392,7 +392,7 @@ fn test_s0201t_tik_culasihanada_sutta() {
     
     // Find the fragment containing Cūḷasīhanādasuttavaṇṇanā
     let culasihanada_fragment = fragments.iter()
-        .find(|f| f.content.contains("Cūḷasīhanādasuttavaṇṇanā"))
+        .find(|f| f.content_xml.contains("Cūḷasīhanādasuttavaṇṇanā"))
         .expect("Should find Cūḷasīhanādasuttavaṇṇanā fragment");
     
     // Verify cst_code

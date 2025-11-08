@@ -399,7 +399,7 @@ fn derive_cst_fields(
             .or_else(|| {
                 // Fallback: Extract vagga title from <head rend="chapter"> tag in fragment content
                 // This is used for MN where <head rend="chapter"> is the vagga title
-                extract_vagga_title_from_content(&fragment.content)
+                extract_vagga_title_from_content(&fragment.content_xml)
             })
     } else {
         None
@@ -417,11 +417,11 @@ fn derive_cst_fields(
         })
         .or_else(|| {
             // Fallback: Extract title from <head> or <p rend="subhead"> tag in fragment content
-            extract_sutta_title_from_content(&fragment.content)
+            extract_sutta_title_from_content(&fragment.content_xml)
         });
     
     // Extract cst_paranum from first <p rend="bodytext" n="...">
-    let cst_paranum = extract_first_paranum(&fragment.content);
+    let cst_paranum = extract_first_paranum(&fragment.content_xml);
     
     // Derive cst_code from div id attributes and sutta number
     // Pass the cst_sutta as a parameter so it can be used for deriving the code
@@ -975,12 +975,12 @@ pub fn parse_into_fragments(
                             adjustments,
                         );
                         
-                        let content = xml_content[frag_start_pos..end_pos].to_string();
-                        if !content.trim().is_empty() {
+                        let content_xml = xml_content[frag_start_pos..end_pos].to_string();
+                        if !content_xml.trim().is_empty() {
                             fragments.push(XmlFragment {
                                 nikaya: nikaya_structure.nikaya.clone(),
                                 frag_type: frag_type.clone(),
-                                content,
+                                content_xml: content_xml,
                                 start_line: frag_start_line,
                                 end_line,
                                 start_char: frag_start_char,
@@ -1047,13 +1047,13 @@ pub fn parse_into_fragments(
                                         );
                                         
                                         // Create content with adjusted end position
-                                        let content = xml_content[frag_start_pos..end_pos].to_string();
+                                        let content_xml = xml_content[frag_start_pos..end_pos].to_string();
                                         
-                                if !content.trim().is_empty() {
+                                if !content_xml.trim().is_empty() {
                                     fragments.push(XmlFragment {
                                         nikaya: nikaya_structure.nikaya.clone(),
                                         frag_type: frag_type.clone(),
-                                        content,
+                                        content_xml: content_xml,
                                         start_line: frag_start_line,
                                         end_line,
                                         start_char: frag_start_char,
@@ -1135,13 +1135,13 @@ pub fn parse_into_fragments(
                                                 adjustments,
                                             );
                                             
-                                            let content = xml_content[frag_start_pos..end_pos].to_string();
+                                            let content_xml = xml_content[frag_start_pos..end_pos].to_string();
                                             
-                                            if !content.trim().is_empty() {
+                                            if !content_xml.trim().is_empty() {
                                                 fragments.push(XmlFragment {
                                                     nikaya: nikaya_structure.nikaya.clone(),
                                                     frag_type: frag_type.clone(),
-                                                    content,
+                                                    content_xml: content_xml,
                                                     start_line: frag_start_line,
                                                     end_line,
                                                     start_char: frag_start_char,
@@ -1254,12 +1254,12 @@ pub fn parse_into_fragments(
                                 adjustments,
                             );
                             
-                            let content = xml_content[frag_start_pos..end_pos].to_string();
-                                 if !content.trim().is_empty() {
+                            let content_xml = xml_content[frag_start_pos..end_pos].to_string();
+                                 if !content_xml.trim().is_empty() {
                                     fragments.push(XmlFragment {
                                         nikaya: nikaya_structure.nikaya.clone(),
                                         frag_type: frag_type.clone(),
-                                        content,
+                                        content_xml: content_xml,
                                         start_line: frag_start_line,
                                         end_line,
                                         start_char: frag_start_char,
@@ -1370,12 +1370,12 @@ pub fn parse_into_fragments(
                                     adjustments,
                                 );
                                 
-                                let content = xml_content[frag_start_pos..end_pos].to_string();
-                                if !content.trim().is_empty() {
+                                let content_xml = xml_content[frag_start_pos..end_pos].to_string();
+                                if !content_xml.trim().is_empty() {
                                     fragments.push(XmlFragment {
                                         nikaya: nikaya_structure.nikaya.clone(),
                                         frag_type: frag_type.clone(),
-                                        content,
+                                        content_xml: content_xml,
                                         start_line: frag_start_line,
                                         end_line,
                                         start_char: frag_start_char,
@@ -1470,12 +1470,12 @@ pub fn parse_into_fragments(
                         );
                         
                         // Include everything from start up to the adjusted end position
-        let content = xml_content[start_pos..end_pos].to_string();
-        if !content.trim().is_empty() {
+        let content_xml = xml_content[start_pos..end_pos].to_string();
+        if !content_xml.trim().is_empty() {
             fragments.push(XmlFragment {
                 nikaya: nikaya_structure.nikaya.clone(),
                 frag_type: frag_type.clone(),
-                content,
+                content_xml: content_xml,
                 start_line,
                 end_line,
                 start_char,
@@ -1531,12 +1531,12 @@ pub fn parse_into_fragments(
             adjustments,
         );
         
-        let content = xml_content[start_pos..end_pos].to_string();
-        if !content.trim().is_empty() {
+        let content_xml = xml_content[start_pos..end_pos].to_string();
+        if !content_xml.trim().is_empty() {
                             fragments.push(XmlFragment {
                                 nikaya: nikaya_structure.nikaya.clone(),
                                 frag_type: frag_type.clone(),
-                                content,
+                                content_xml: content_xml,
                                 start_line,
                                 end_line,
                                 start_char,
@@ -1715,7 +1715,7 @@ mod tests {
         
         for fragment in &fragments {
             // Each fragment should have non-empty content
-            assert!(!fragment.content.trim().is_empty(), 
+            assert!(!fragment.content_xml.trim().is_empty(),
                     "Fragment content should not be empty");
         }
     }
@@ -2085,7 +2085,7 @@ mod tests {
         
         // Verify each fragment contains at most 1 chapter marker (its own vagga title)
         for frag in &sutta_fragments {
-            let chapter_count = frag.content.matches("rend=\"chapter\"").count();
+            let chapter_count = frag.content_xml.matches("rend=\"chapter\"").count();
             assert!(chapter_count <= 1, 
                 "Fragment should contain at most 1 chapter marker, found {} in fragment with vagga: {:?}", 
                 chapter_count, frag.cst_vagga);

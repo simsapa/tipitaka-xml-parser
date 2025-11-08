@@ -59,7 +59,7 @@ pub struct XmlFragment {
     /// Comments on the review status of this fragment
     pub frag_review: Option<String>,
     /// Raw XML content of this fragment
-    pub content: String,
+    pub content_xml: String,
     /// Starting line number in source file (1-indexed)
     pub start_line: usize,
     /// Starting character position within start_line (0-indexed)

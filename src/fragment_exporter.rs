@@ -105,7 +105,7 @@ fn insert_fragments(
             nikaya: &fragment.nikaya,
             cst_code: fragment.cst_code.as_deref(),
             sc_code: fragment.sc_code.as_deref(),
-            content: &fragment.content,
+            content_xml: &fragment.content_xml,
             cst_vagga: fragment.cst_vagga.as_deref(),
             cst_sutta: fragment.cst_sutta.as_deref(),
             cst_paranum: fragment.cst_paranum.as_deref(),
@@ -149,7 +149,7 @@ mod tests {
             XmlFragment {
                 nikaya: "digha".to_string(),
                 frag_type: FragmentType::Header,
-                content: "<p rend=\"nikaya\">Dīghanikāyo</p>".to_string(),
+                content_xml: "<p rend=\"nikaya\">Dīghanikāyo</p>".to_string(),
                 start_line: 1,
                 end_line: 1,
                 start_char: 0,
@@ -168,7 +168,7 @@ mod tests {
             XmlFragment {
                 nikaya: "digha".to_string(),
                 frag_type: FragmentType::Sutta,
-                content: "<p>Test content</p>".to_string(),
+                content_xml: "<p>Test content</p>".to_string(),
                 start_line: 2,
                 end_line: 2,
                 start_char: 0,
@@ -239,7 +239,7 @@ mod tests {
             XmlFragment {
                 nikaya: "digha".to_string(),
                 frag_type: FragmentType::Header,
-                content: "<p rend=\"nikaya\">Dīghanikāyo</p>".to_string(),
+                content_xml: "<p rend=\"nikaya\">Dīghanikāyo</p>".to_string(),
                 start_line: 1,
                 end_line: 1,
                 start_char: 0,
@@ -261,7 +261,7 @@ mod tests {
             XmlFragment {
                 nikaya: "majjhima".to_string(),
                 frag_type: FragmentType::Header,
-                content: "<p rend=\"nikaya\">Majjhimanikāyo</p>".to_string(),
+                content_xml: "<p rend=\"nikaya\">Majjhimanikāyo</p>".to_string(),
                 start_line: 1,
                 end_line: 1,
                 start_char: 0,

@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS xml_fragments (
     nikaya TEXT NOT NULL,
     cst_code TEXT,
     sc_code TEXT,
-    content TEXT NOT NULL,
+    content_xml TEXT NOT NULL,
     cst_vagga TEXT,
     cst_sutta TEXT,
     cst_paranum TEXT,

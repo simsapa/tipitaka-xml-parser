@@ -19,7 +19,7 @@ diesel::table! {
         nikaya -> Text,
         cst_code -> Nullable<Text>,
         sc_code -> Nullable<Text>,
-        content -> Text,
+        content_xml -> Text,
         cst_vagga -> Nullable<Text>,
         cst_sutta -> Nullable<Text>,
         cst_paranum -> Nullable<Text>,

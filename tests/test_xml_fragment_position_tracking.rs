@@ -154,7 +154,7 @@ fn test_position_tracking_for_file(xml_path: &str, xml_filename: &str) {
         );
         
         // Compare with fragment content
-        if extracted != fragment.content {
+        if extracted != fragment.content_xml {
             mismatches.push((idx, fragment, extracted));
         }
     }
@@ -172,10 +172,10 @@ fn test_position_tracking_for_file(xml_path: &str, xml_filename: &str) {
                      fragment.end_line, fragment.end_char);
             println!("Fragment type: {:?}", fragment.frag_type);
             println!("\nExpected content (first 200 chars):");
-            println!("{:?}", fragment.content.chars().take(200).collect::<String>());
+            println!("{:?}", fragment.content_xml.chars().take(200).collect::<String>());
             println!("\nExtracted content (first 200 chars):");
             println!("{:?}", extracted.chars().take(200).collect::<String>());
-            println!("\nExpected length: {}", fragment.content.len());
+            println!("\nExpected length: {}", fragment.content_xml.len());
             println!("Extracted length: {}", extracted.len());
         }
         

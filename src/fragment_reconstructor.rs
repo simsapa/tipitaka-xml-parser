@@ -82,7 +82,7 @@ fn get_fragments_for_filename(
         fragments.push(XmlFragment {
             nikaya: row.nikaya,
             frag_type,
-            content: row.content,
+            content_xml: row.content_xml,
             start_line: row.start_line as usize,
             end_line: row.end_line as usize,
             start_char: row.start_char as usize,
@@ -112,7 +112,7 @@ fn reconstruct_xml_from_fragments(fragments: &[XmlFragment]) -> Result<String> {
     // Simply concatenate all fragment contents in order
     let mut xml = String::new();
     for fragment in fragments {
-        xml.push_str(&fragment.content);
+        xml.push_str(&fragment.content_xml);
     }
     
     Ok(xml)
@@ -192,8 +192,8 @@ mod tests {
         
         // Verify head tags are together
         for frag in &fragments {
-            if frag.content.contains("<head rend=\"chapter\">") {
-                assert!(frag.content.contains("</head>"),
+            if frag.content_xml.contains("<head rend=\"chapter\">") {
+                assert!(frag.content_xml.contains("</head>"),
                     "Fragment with <head rend=\"chapter\"> must also contain </head>");
             }
         }
