@@ -20,6 +20,7 @@ diesel::table! {
         cst_code -> Nullable<Text>,
         sc_code -> Nullable<Text>,
         content_xml -> Text,
+        content_html -> Nullable<Text>,
         cst_vagga -> Nullable<Text>,
         cst_sutta -> Nullable<Text>,
         cst_paranum -> Nullable<Text>,

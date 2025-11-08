@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS xml_fragments (
     cst_code TEXT,
     sc_code TEXT,
     content_xml TEXT NOT NULL,
+    content_html TEXT,
     cst_vagga TEXT,
     cst_sutta TEXT,
     cst_paranum TEXT,

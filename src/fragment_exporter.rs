@@ -13,6 +13,7 @@ use crate::types::XmlFragment;
 use crate::nikaya_structure::NikayaStructure;
 use crate::fragments_models::{NewNikayaStructure, NewXmlFragment};
 use crate::fragments_schema::{nikaya_structures, xml_fragments};
+use crate::sutta_builder::xml_to_html;
 
 // Embed the fragments migrations
 pub const FRAGMENTS_MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations/fragments/");
@@ -97,6 +98,12 @@ fn insert_fragments(
         let group_levels_json = serde_json::to_string(&fragment.group_levels)
             .context("Failed to serialize group levels")?;
         
+        // Generate HTML from XML only for Sutta fragments
+        let content_html = match fragment.frag_type {
+            crate::types::FragmentType::Sutta => xml_to_html(&fragment.content_xml).ok(),
+            crate::types::FragmentType::Header => None,
+        };
+
         let new_fragment = NewXmlFragment {
             cst_file: &fragment.cst_file,
             frag_idx: fragment.frag_idx as i32,
@@ -106,6 +113,7 @@ fn insert_fragments(
             cst_code: fragment.cst_code.as_deref(),
             sc_code: fragment.sc_code.as_deref(),
             content_xml: &fragment.content_xml,
+            content_html: content_html.as_deref(),
             cst_vagga: fragment.cst_vagga.as_deref(),
             cst_sutta: fragment.cst_sutta.as_deref(),
             cst_paranum: fragment.cst_paranum.as_deref(),

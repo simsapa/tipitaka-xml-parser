@@ -8,6 +8,7 @@ use anyhow::{Result, Context};
 use serde::Deserialize;
 use quick_xml::{Reader, events::Event};
 use html_escape;
+use regex::Regex;
 
 use crate::logger;
 
@@ -523,5 +524,15 @@ pub fn xml_to_html(xml_content: &str) -> Result<String> {
         buf.clear();
     }
 
-    Ok(html)
+    // Normalize successive blank lines to one
+    let normalized_html = normalize_blank_lines(&html);
+
+    Ok(normalized_html)
+}
+
+/// Normalize successive blank lines to a single blank line
+fn normalize_blank_lines(text: &str) -> String {
+    // Replace multiple consecutive newlines (3 or more) with just 2 newlines (one blank line)
+    let re = Regex::new(r"\n{3,}").unwrap();
+    re.replace_all(text, "\n\n").to_string()
 }
