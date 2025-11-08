@@ -108,7 +108,9 @@ pub type FragmentAdjustments = HashMap<FragmentKey, FragmentAdjustment>;
 
 use anyhow::{Context, Result};
 
-pub static ADJUST_FRAGMENTS_TSV: &str = include_str!("../assets/adjust-fragments.tsv");
+// NOTE: Should remain private to limit relying on the data. Provide public
+// functions to access data derived from tsv.
+static ADJUST_FRAGMENTS_TSV: &str = include_str!("../assets/adjust-fragments.tsv");
 
 /// Load fragment adjustments from the embedded TSV data
 ///

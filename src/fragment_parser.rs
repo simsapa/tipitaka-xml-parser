@@ -6,9 +6,11 @@
 use anyhow::{Result, Context};
 use quick_xml::Reader;
 use quick_xml::events::Event;
+use std::collections::HashMap;
+
 use crate::types::{XmlFragment, FragmentType, GroupType, GroupLevel, FragmentAdjustments, FragmentKey};
 use crate::nikaya_structure::NikayaStructure;
-use std::collections::HashMap;
+use crate::sutta_builder::cst_code_to_sc_code_map;
 
 /// Line and character position tracking for XML reader
 ///
@@ -1585,23 +1587,8 @@ pub fn parse_into_fragments(
 fn populate_sc_fields_from_tsv(
     fragments: &mut Vec<XmlFragment>,
 ) -> anyhow::Result<()> {
-    // Load TSV mapping using the sutta_builder function
-    use crate::sutta_builder::load_tsv_mapping;
-    let tsv_records = load_tsv_mapping()
-        .context("Failed to load TSV mapping")?;
-    
-    // Build a map from cst_code to (sc_code, sc_sutta)
-    let mut tsv_map: HashMap<String, (String, String)> = HashMap::new();
-    
-    for record in tsv_records {
-        if !record.cst_code.is_empty() && !record.sc_code.is_empty() {
-            tsv_map.insert(
-                record.cst_code.clone(),
-                (record.sc_code.clone(), record.sc_sutta.clone())
-            );
-        }
-    }
-    
+    let tsv_map = cst_code_to_sc_code_map()?;
+
     // Populate fragments
     for fragment in fragments.iter_mut() {
         if let Some(ref cst_code) = fragment.cst_code {

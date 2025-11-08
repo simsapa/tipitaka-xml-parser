@@ -3,6 +3,7 @@
 //! This module provides functionality to assemble database records
 //! from parsed XML fragments.
 
+use std::collections::HashMap;
 use anyhow::{Result, Context};
 use serde::Deserialize;
 use quick_xml::{Reader, events::Event};
@@ -10,7 +11,9 @@ use html_escape;
 
 use crate::logger;
 
-pub static CST_VS_SC_TSV: &str = include_str!("../assets/cst-vs-sc.tsv");
+// NOTE: Should remain private to limit relying on the data. Provide public
+// functions to access data derived from tsv.
+static CST_VS_SC_TSV: &str = include_str!("../assets/cst-vs-sc.tsv");
 
 /// FIXME: dummy function to be removed
 fn consistent_niggahita(text: Option<String>) -> String {
@@ -22,18 +25,26 @@ fn consistent_niggahita(text: Option<String>) -> String {
     }
 }
 
-/// TSV record for CST code lookup
+/// TSV record for CST code lookup. The attribute names are prefixed with 'tsv_'
+/// to help identify where the tsv data is used and only rely on it for sc_code
+/// lookup and verifying parsed values. All values (other than sc_code) should
+/// be parsed from the xml file and not rely on the tsv data.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TsvRecord {
-    pub cst_file: String,
-    pub cst_code: String,
-    pub cst_vagga: String,
-    pub cst_sutta: String,
-    pub cst_paranum: String,
+    #[serde(rename = "cst_file")]
+    pub tsv_cst_file: String,
+    #[serde(rename = "cst_code")]
+    pub tsv_cst_code: String,
+    #[serde(rename = "cst_vagga")]
+    pub tsv_cst_vagga: String,
+    #[serde(rename = "cst_sutta")]
+    pub tsv_cst_sutta: String,
+    #[serde(rename = "cst_paranum")]
+    pub tsv_cst_paranum: String,
     #[serde(rename = "code")]
-    pub sc_code: String,
+    pub tsv_sc_code: String,
     #[serde(rename = "sutta")]
-    pub sc_sutta: String,
+    pub tsv_sc_sutta: String,
 }
 
 /// Load TSV mapping from embedded string
@@ -152,12 +163,12 @@ pub fn find_code_for_sutta(
     let mut fallback_match: Option<String> = None;
     
     for record in tsv_records {
-        let record_filename = record.cst_file
+        let record_filename = record.tsv_cst_file
             .trim_start_matches("romn/")
             .trim_start_matches("mula/");
         
-        let record_title = consistent_niggahita(Some(record.cst_sutta.clone()));
-        let record_vagga = consistent_niggahita(Some(record.cst_vagga.clone()));
+        let record_title = consistent_niggahita(Some(record.tsv_cst_sutta.clone()));
+        let record_vagga = consistent_niggahita(Some(record.tsv_cst_vagga.clone()));
         
         // Check if filename matches (using base filename for commentaries)
         if record_filename == base_filename {
@@ -170,25 +181,25 @@ pub fn find_code_for_sutta(
                         let vaggas_match = &record_vagga == expected_vagga;
                         if vaggas_match {
                             // Perfect match: title + vagga - only return if code unused
-                            if !used_codes.contains(&record.sc_code) {
-                                return Some(record.sc_code.clone());
+                            if !used_codes.contains(&record.tsv_sc_code) {
+                                return Some(record.tsv_sc_code.clone());
                             }
                         } else {
                             // Title matches but vagga doesn't
                             // Save as fallback if code not yet used
-                            if fallback_match.is_none() && !used_codes.contains(&record.sc_code) {
-                                fallback_match = Some(record.sc_code.clone());
+                            if fallback_match.is_none() && !used_codes.contains(&record.tsv_sc_code) {
+                                fallback_match = Some(record.tsv_sc_code.clone());
                             }
                         }
                     } else {
                         // No vagga filter - return first unused match
-                        if !used_codes.contains(&record.sc_code) {
-                            return Some(record.sc_code.clone());
+                        if !used_codes.contains(&record.tsv_sc_code) {
+                            return Some(record.tsv_sc_code.clone());
                         }
                         // If code is already used, save as fallback to continue searching
                         // (This shouldn't happen often but handles edge cases)
                         if fallback_match.is_none() {
-                            fallback_match = Some(record.sc_code.clone());
+                            fallback_match = Some(record.tsv_sc_code.clone());
                         }
                     }
                 }
@@ -198,6 +209,25 @@ pub fn find_code_for_sutta(
     
     // If no exact match found, return fallback (for commentaries with misaligned vaggas)
     fallback_match
+}
+
+/// Returns a map to find (sc_code, sc_sutta) for a given cst_code.
+pub fn cst_code_to_sc_code_map() -> Result<HashMap<String, (String, String)>> {
+    let tsv_records = load_tsv_mapping()
+        .context("Failed to load TSV mapping")?;
+
+    let mut tsv_map: HashMap<String, (String, String)> = HashMap::new();
+
+    for record in tsv_records {
+        if !record.tsv_cst_code.is_empty() && !record.tsv_sc_code.is_empty() {
+            tsv_map.insert(
+                record.tsv_cst_code.clone(),
+                (record.tsv_sc_code.clone(), record.tsv_sc_sutta.clone())
+            );
+        }
+    }
+
+    Ok(tsv_map)
 }
 
 #[cfg(test)]
