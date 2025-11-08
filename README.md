@@ -41,6 +41,6 @@ Note that these are in UTF-16 encoding.
 There are test xml files in UTF-8 encoding in the `tests/data/` folder of this repo.
 
 ```
-cargo run -- parse-tipitaka-xml path/to/tipitaka-xml/romn/s0201m.mul.xml --fragments-db fragments.sqlite3
+cargo run -- parse-tipitaka-xml --xml-file path/to/tipitaka-xml/romn/s0201m.mul.xml --fragments-db fragments.sqlite3
 ```
 

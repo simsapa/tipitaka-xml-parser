@@ -9,7 +9,9 @@ use tipitaka_xml_parser::logger;
 
 /// Parse Tipitaka XML files with fragment-based parser
 fn parse_tipitaka_xml(
-    input_path: &Path,
+    xml_file: Option<&Path>,
+    xml_dir: Option<&Path>,
+    xml_list: Option<&Path>,
     fragments_db: Option<&Path>,
     dry_run: bool,
 ) -> Result<(), String> {
@@ -31,12 +33,24 @@ fn parse_tipitaka_xml(
     };
 
     // Collect XML files to process
-    let xml_files: Vec<PathBuf> = if input_path.is_file() {
-        logger::info(&format!("Processing single file: {:?}", input_path));
-        vec![input_path.to_path_buf()]
-    } else if input_path.is_dir() {
-        logger::info(&format!("Processing folder: {:?}", input_path));
-        let files: Vec<PathBuf> = fs::read_dir(input_path)
+    let xml_files: Vec<PathBuf> = if let Some(file_path) = xml_file {
+        logger::info(&format!("Processing single file: {:?}", file_path));
+        if !file_path.exists() {
+            return Err(format!("XML file does not exist: {:?}", file_path));
+        }
+        if !file_path.is_file() {
+            return Err(format!("Path is not a file: {:?}", file_path));
+        }
+        vec![file_path.to_path_buf()]
+    } else if let Some(dir_path) = xml_dir {
+        logger::info(&format!("Processing folder: {:?}", dir_path));
+        if !dir_path.exists() {
+            return Err(format!("Directory does not exist: {:?}", dir_path));
+        }
+        if !dir_path.is_dir() {
+            return Err(format!("Path is not a directory: {:?}", dir_path));
+        }
+        let files: Vec<PathBuf> = fs::read_dir(dir_path)
             .map_err(|e| format!("Failed to read directory: {}", e))?
             .filter_map(|entry| entry.ok())
             .map(|entry| entry.path())
@@ -50,8 +64,40 @@ fn parse_tipitaka_xml(
 
         logger::info(&format!("Found {} XML files", files.len()));
         files
+    } else if let Some(list_path) = xml_list {
+        logger::info(&format!("Processing file list: {:?}", list_path));
+        if !list_path.exists() {
+            return Err(format!("List file does not exist: {:?}", list_path));
+        }
+        if !list_path.is_file() {
+            return Err(format!("Path is not a file: {:?}", list_path));
+        }
+        let list_content = fs::read_to_string(list_path)
+            .map_err(|e| format!("Failed to read list file: {}", e))?;
+        
+        let files: Vec<PathBuf> = list_content
+            .lines()
+            .map(|line| line.trim())
+            .filter(|line| !line.is_empty())
+            .map(PathBuf::from)
+            .collect();
+
+        logger::info(&format!("Found {} XML files in list", files.len()));
+        
+        // Validate that all files exist
+        for file_path in &files {
+            if !file_path.exists() {
+                return Err(format!("XML file from list does not exist: {:?}", file_path));
+            }
+            if !file_path.is_file() {
+                return Err(format!("Path from list is not a file: {:?}", file_path));
+            }
+        }
+        
+        files
     } else {
-        return Err(format!("Input path does not exist: {:?}", input_path));
+        // This should never happen due to validation in main()
+        return Err("No input source specified".to_string());
     };
 
     if xml_files.is_empty() {
@@ -144,9 +190,17 @@ enum Commands {
     /// Parse VRI CST Tipitaka XML files with fragment-based parser
     #[command(arg_required_else_help = true)]
     ParseTipitakaXml {
-        /// Path to a single XML file or folder containing XML files
-        #[arg(value_name = "INPUT_PATH")]
-        input_path: PathBuf,
+        /// Path to a single XML file
+        #[arg(long, value_name = "XML_FILE")]
+        xml_file: Option<PathBuf>,
+
+        /// Path to a folder containing XML files
+        #[arg(long, value_name = "XML_DIR")]
+        xml_dir: Option<PathBuf>,
+
+        /// Path to a file containing a list of XML files (one per line)
+        #[arg(long, value_name = "XML_LIST")]
+        xml_list: Option<PathBuf>,
 
         /// Optional path to SQLite database for exporting fragments
         #[arg(long, value_name = "FRAGMENTS_DB_PATH")]
@@ -195,8 +249,26 @@ fn main() {
     // === Execute the requested command ===
 
     let command_result = match cli.command {
-        Commands::ParseTipitakaXml { input_path, fragments_db, dry_run } => {
-            parse_tipitaka_xml(&input_path, fragments_db.as_deref(), dry_run)
+        Commands::ParseTipitakaXml { xml_file, xml_dir, xml_list, fragments_db, dry_run } => {
+            // Validate that exactly one input source is specified
+            let input_count = [xml_file.is_some(), xml_dir.is_some(), xml_list.is_some()]
+                .iter()
+                .filter(|&&x| x)
+                .count();
+            
+            if input_count == 0 {
+                Err("Error: Must specify exactly one of --xml-file, --xml-dir, or --xml-list".to_string())
+            } else if input_count > 1 {
+                Err("Error: Cannot specify more than one of --xml-file, --xml-dir, or --xml-list".to_string())
+            } else {
+                parse_tipitaka_xml(
+                    xml_file.as_deref(),
+                    xml_dir.as_deref(),
+                    xml_list.as_deref(),
+                    fragments_db.as_deref(),
+                    dry_run
+                )
+            }
         }
 
         Commands::ReconstructXmlFromFragments { fragments_db_path, xml_filename, output_path } => {
