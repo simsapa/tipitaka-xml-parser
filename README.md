@@ -2,12 +2,24 @@
 
 A cli tool which attempts to parse [tipitaka-xml](https://github.com/VipassanaTech/tipitaka-xml) `romn/` xml files into suttas in an sqlite database.
 
-⚠️ **Warning** ⚠️ **Work-In-Progress.** The parser produces some okay results for some nikāyas, while it can't handle some others due to the irregular structure of the xml files.
+⚠️ **Warning** ⚠️ **Work-In-Progress.** The parser produces some okay results for
+some nikāyas, but it still can't handle many cases due to the irregular structure
+of the xml files.
 
-The parser results can be still improved with extra code to handle various cases, after which manual checking and correction will be necessary.
+There is still room for improving the parser results with with more code to
+handle various cases.
 
-[Simsapa Dhamma Reader](https://github.com/simsapa/simsapa-ng) uses it to
-bootstrap the CST4 suttas into its database.
+After that, manual checking and correction will be necessary, I am thinking a
+small web GUI could help to quickly move through the rows, typing in missing
+values and adjusting xml fragment boundaries.
+
+## Use-case
+
+The intended result would be an sqlite database which sutta reader apps can use
+to import CST4 suttas (mūla, aṭṭhakathā, ṭīkā) with SuttaCentral reference codes
+where possible.
+
+[Simsapa Dhamma Reader](https://github.com/simsapa/simsapa-ng) uses it to bootstrap the CST4 suttas into its database.
 
 The cli tool produces an sqlite database. The `xml_fragments` table contains
 suttas with their metadata, the xml slice and its start- and end position in the
