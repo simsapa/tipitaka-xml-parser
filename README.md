@@ -3,8 +3,8 @@
 A cli tool which attempts to parse [tipitaka-xml](https://github.com/VipassanaTech/tipitaka-xml) `romn/` xml files into suttas in an sqlite database.
 
 ⚠️ **Warning** ⚠️ **Work-In-Progress.** The parser produces some okay results for
-some nikāyas, but it still can't handle many cases due to the irregular structure
-of the xml files.
+some nikāyas (tested with the xml in [tests/data/](tests/data/)), but it still
+can't handle many cases due to the irregular structure of the xml files.
 
 There is still room for improving the parser results with with more code to
 handle various cases.
