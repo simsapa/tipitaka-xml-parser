@@ -136,6 +136,75 @@ fn insert_fragments(
     Ok(count)
 }
 
+/// Statistics for database validation
+#[derive(Debug, Clone, Default)]
+pub struct ValidationStats {
+    pub total_sutta_fragments: usize,
+    pub empty_cst_code: usize,
+    pub empty_sc_code: usize,
+    pub empty_both_codes: usize,
+}
+
+/// Validate the fragments database and return statistics
+///
+/// Checks Sutta type xml_fragments for missing cst_code or sc_code values
+///
+/// # Arguments
+/// * `db_path` - Path to the fragments database
+///
+/// # Returns
+/// ValidationStats with counts of fragments with missing codes
+pub fn validate_fragments_db(db_path: &Path) -> Result<ValidationStats> {
+    let mut conn = SqliteConnection::establish(db_path.to_str().unwrap())
+        .context("Failed to connect to fragments database")?;
+    
+    #[derive(QueryableByName)]
+    struct CountResult {
+        #[diesel(sql_type = diesel::sql_types::BigInt)]
+        count: i64,
+    }
+    
+    // Count total Sutta fragments
+    let total_suttas: CountResult = diesel::sql_query(
+        "SELECT COUNT(*) as count FROM xml_fragments WHERE frag_type = 'Sutta'"
+    )
+    .get_result(&mut conn)
+    .context("Failed to count total Sutta fragments")?;
+    
+    // Count Suttas with empty or null cst_code
+    let empty_cst: CountResult = diesel::sql_query(
+        "SELECT COUNT(*) as count FROM xml_fragments 
+         WHERE frag_type = 'Sutta' AND (cst_code IS NULL OR cst_code = '')"
+    )
+    .get_result(&mut conn)
+    .context("Failed to count fragments with empty cst_code")?;
+    
+    // Count Suttas with empty or null sc_code
+    let empty_sc: CountResult = diesel::sql_query(
+        "SELECT COUNT(*) as count FROM xml_fragments 
+         WHERE frag_type = 'Sutta' AND (sc_code IS NULL OR sc_code = '')"
+    )
+    .get_result(&mut conn)
+    .context("Failed to count fragments with empty sc_code")?;
+    
+    // Count Suttas with both codes empty
+    let empty_both: CountResult = diesel::sql_query(
+        "SELECT COUNT(*) as count FROM xml_fragments 
+         WHERE frag_type = 'Sutta' 
+         AND (cst_code IS NULL OR cst_code = '') 
+         AND (sc_code IS NULL OR sc_code = '')"
+    )
+    .get_result(&mut conn)
+    .context("Failed to count fragments with both codes empty")?;
+    
+    Ok(ValidationStats {
+        total_sutta_fragments: total_suttas.count as usize,
+        empty_cst_code: empty_cst.count as usize,
+        empty_sc_code: empty_sc.count as usize,
+        empty_both_codes: empty_both.count as usize,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -351,5 +420,131 @@ mod tests {
         .get_result(&mut conn)
         .unwrap();
         assert_eq!(majjhima_fragments.count, 1, "Majjhima nikaya should have 1 fragment");
+    }
+
+    #[test]
+    fn test_validate_fragments_db() {
+        let temp_db = NamedTempFile::new().unwrap();
+        let db_path = temp_db.path();
+        
+        // Create test data with some fragments missing codes
+        let structure = NikayaStructure {
+            nikaya: "digha".to_string(),
+            levels: vec![GroupType::Nikaya, GroupType::Book, GroupType::Sutta],
+        };
+        
+        let fragments = vec![
+            // Fragment with both codes
+            XmlFragment {
+                nikaya: "digha".to_string(),
+                frag_type: FragmentType::Sutta,
+                content_xml: "<p>Fragment with both codes</p>".to_string(),
+                start_line: 1,
+                end_line: 1,
+                start_char: 0,
+                end_char: 30,
+                group_levels: vec![],
+                cst_file: "test.xml".to_string(),
+                frag_idx: 0,
+                frag_review: None,
+                cst_code: Some("dn1.1".to_string()),
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: Some("dn1".to_string()),
+                sc_sutta: None,
+            },
+            // Fragment with only cst_code
+            XmlFragment {
+                nikaya: "digha".to_string(),
+                frag_type: FragmentType::Sutta,
+                content_xml: "<p>Fragment with only cst_code</p>".to_string(),
+                start_line: 2,
+                end_line: 2,
+                start_char: 0,
+                end_char: 33,
+                group_levels: vec![],
+                cst_file: "test.xml".to_string(),
+                frag_idx: 1,
+                frag_review: None,
+                cst_code: Some("dn1.2".to_string()),
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: None,
+                sc_sutta: None,
+            },
+            // Fragment with only sc_code
+            XmlFragment {
+                nikaya: "digha".to_string(),
+                frag_type: FragmentType::Sutta,
+                content_xml: "<p>Fragment with only sc_code</p>".to_string(),
+                start_line: 3,
+                end_line: 3,
+                start_char: 0,
+                end_char: 32,
+                group_levels: vec![],
+                cst_file: "test.xml".to_string(),
+                frag_idx: 2,
+                frag_review: None,
+                cst_code: None,
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: Some("dn3".to_string()),
+                sc_sutta: None,
+            },
+            // Fragment with neither code
+            XmlFragment {
+                nikaya: "digha".to_string(),
+                frag_type: FragmentType::Sutta,
+                content_xml: "<p>Fragment with no codes</p>".to_string(),
+                start_line: 4,
+                end_line: 4,
+                start_char: 0,
+                end_char: 28,
+                group_levels: vec![],
+                cst_file: "test.xml".to_string(),
+                frag_idx: 3,
+                frag_review: None,
+                cst_code: None,
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: None,
+                sc_sutta: None,
+            },
+            // Header fragment (should not be counted in validation)
+            XmlFragment {
+                nikaya: "digha".to_string(),
+                frag_type: FragmentType::Header,
+                content_xml: "<p>Header</p>".to_string(),
+                start_line: 5,
+                end_line: 5,
+                start_char: 0,
+                end_char: 13,
+                group_levels: vec![],
+                cst_file: "test.xml".to_string(),
+                frag_idx: 4,
+                frag_review: None,
+                cst_code: None,
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: None,
+                sc_sutta: None,
+            },
+        ];
+        
+        // Export fragments
+        export_fragments_to_db(&fragments, &structure, db_path).unwrap();
+        
+        // Validate
+        let stats = super::validate_fragments_db(db_path).unwrap();
+        
+        assert_eq!(stats.total_sutta_fragments, 4, "Should have 4 Sutta fragments");
+        assert_eq!(stats.empty_cst_code, 2, "Should have 2 fragments with empty cst_code");
+        assert_eq!(stats.empty_sc_code, 2, "Should have 2 fragments with empty sc_code");
+        assert_eq!(stats.empty_both_codes, 1, "Should have 1 fragment with both codes empty");
     }
 }

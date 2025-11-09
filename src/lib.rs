@@ -27,6 +27,6 @@ pub use types::{FragmentType, GroupType, GroupLevel, XmlFragment, FragmentAdjust
 pub use nikaya_structure::NikayaStructure;
 pub use nikaya_detector::detect_nikaya_structure;
 pub use fragment_parser::parse_into_fragments;
-pub use fragment_exporter::export_fragments_to_db;
+pub use fragment_exporter::{export_fragments_to_db, validate_fragments_db, ValidationStats};
 pub use fragment_reconstructor::reconstruct_xml_from_db;
 pub use integration::{TipitakaImporter, FileImportStats, ProcessingStats};

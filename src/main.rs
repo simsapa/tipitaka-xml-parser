@@ -146,6 +146,39 @@ fn parse_tipitaka_xml(
         logger::error(&format!("Total errors: {}", errors));
     }
 
+    // Validate the fragments database if it was used
+    if let Some(frag_db_path) = fragments_db {
+        if !dry_run {
+            use tipitaka_xml_parser::validate_fragments_db;
+            
+            logger::info("Validating fragments database...");
+            match validate_fragments_db(frag_db_path) {
+                Ok(stats) => {
+                    logger::info(&format!("Validation complete: {} total Sutta fragments", stats.total_sutta_fragments));
+                    
+                    // Print warnings for missing codes
+                    if stats.empty_cst_code > 0 {
+                        logger::warn(&format!("{} Sutta fragments have empty cst_code", stats.empty_cst_code));
+                    }
+                    if stats.empty_sc_code > 0 {
+                        logger::warn(&format!("{} Sutta fragments have empty sc_code", stats.empty_sc_code));
+                    }
+                    if stats.empty_both_codes > 0 {
+                        logger::warn(&format!("{} Sutta fragments have BOTH cst_code and sc_code empty", stats.empty_both_codes));
+                    }
+                    
+                    // Summary message if everything is good
+                    if stats.empty_cst_code == 0 && stats.empty_sc_code == 0 {
+                        logger::info("All Sutta fragments have both cst_code and sc_code");
+                    }
+                }
+                Err(e) => {
+                    logger::error(&format!("Failed to validate fragments database: {}", e));
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
