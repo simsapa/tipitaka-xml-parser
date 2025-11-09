@@ -44,11 +44,11 @@ fn test_dn_s0101m_sutta_count() {
     
     let structure = detect_nikaya_structure(&xml_content).expect("Failed to detect nikaya");
     
-    let fragments = parse_into_fragments(&xml_content, &structure, "s0101m.mul.xml", None).expect("Failed to parse fragments");
+    let fragments = parse_into_fragments(&xml_content, &structure, "s0101m.mul.xml", None, false).expect("Failed to parse fragments");
     
     // Count sutta fragments
     let sutta_fragments: Vec<_> = fragments.iter()
-        .filter(|f| matches!(f.fragment_type, FragmentType::Sutta))
+        .filter(|f| matches!(f.frag_type, FragmentType::Sutta))
         .collect();
     
     println!("Parsed sutta fragments: {}", sutta_fragments.len());
@@ -64,9 +64,9 @@ fn test_dn_s0101m_sutta_count() {
 
 #[test]
 fn test_mn_s0201m_sutta_count() {
-    use simsapa_cli::tipitaka_xml_parser::{detect_nikaya_structure, parse_into_fragments};
-    use simsapa_cli::tipitaka_xml_parser_tsv::encoding::read_xml_file;
-    use simsapa_cli::tipitaka_xml_parser::FragmentType;
+    use tipitaka_xml_parser::{detect_nikaya_structure, parse_into_fragments};
+    use tipitaka_xml_parser::encoding::read_xml_file;
+    use tipitaka_xml_parser::FragmentType;
     
     // Load expected suttas from TSV
     let expected_suttas = load_tsv_suttas("romn/s0201m.mul.xml");
@@ -84,11 +84,11 @@ fn test_mn_s0201m_sutta_count() {
     
     let structure = detect_nikaya_structure(&xml_content).expect("Failed to detect nikaya");
     
-    let fragments = parse_into_fragments(&xml_content, &structure, "s0201m.mul.xml", None).expect("Failed to parse fragments");
+    let fragments = parse_into_fragments(&xml_content, &structure, "s0201m.mul.xml", None, false).expect("Failed to parse fragments");
     
     // Count sutta fragments
     let sutta_fragments: Vec<_> = fragments.iter()
-        .filter(|f| matches!(f.fragment_type, FragmentType::Sutta))
+        .filter(|f| matches!(f.frag_type, FragmentType::Sutta))
         .collect();
     
     println!("Parsed sutta fragments: {}", sutta_fragments.len());
@@ -104,9 +104,9 @@ fn test_mn_s0201m_sutta_count() {
 
 #[test]
 fn test_mn_vagga_div_in_correct_fragment() {
-    use simsapa_cli::tipitaka_xml_parser::{detect_nikaya_structure, parse_into_fragments};
-    use simsapa_cli::tipitaka_xml_parser_tsv::encoding::read_xml_file;
-    use simsapa_cli::tipitaka_xml_parser::FragmentType;
+    use tipitaka_xml_parser::{detect_nikaya_structure, parse_into_fragments};
+    use tipitaka_xml_parser::encoding::read_xml_file;
+    use tipitaka_xml_parser::FragmentType;
     
     // Parse the XML file
     let xml_path = PathBuf::from("tests/data/s0201m.mul.xml");
@@ -114,44 +114,44 @@ fn test_mn_vagga_div_in_correct_fragment() {
     
     let structure = detect_nikaya_structure(&xml_content).expect("Failed to detect nikaya");
     
-    let fragments = parse_into_fragments(&xml_content, &structure, "s0201m.mul.xml", None).expect("Failed to parse fragments");
+    let fragments = parse_into_fragments(&xml_content, &structure, "s0201m.mul.xml", None, false).expect("Failed to parse fragments");
     
     // Find the fragment containing the second vagga (line 1667: <div id="mn1_2" n="mn1_2" type="vagga">)
     // This should be in the same fragment as the first sutta of that vagga (line 1674: "1. Cūḷasīhanādasuttaṃ")
     let sutta_fragments: Vec<_> = fragments.iter()
-        .filter(|f| matches!(f.fragment_type, FragmentType::Sutta))
+        .filter(|f| matches!(f.frag_type, FragmentType::Sutta))
         .collect();
     
     // Find the fragment that contains "Cūḷasīhanādasuttaṃ" (first sutta of second vagga)
     let culasutta_fragment = sutta_fragments.iter()
-        .find(|f| f.content.contains("Cūḷasīhanādasuttaṃ"))
+        .find(|f| f.content_xml.contains("Cūḷasīhanādasuttaṃ"))
         .expect("Should find fragment containing Cūḷasīhanādasuttaṃ");
     
     // Verify that the vagga div is in the same fragment
     assert!(
-        culasutta_fragment.content.contains(r#"<div id="mn1_2" n="mn1_2" type="vagga">"#),
+        culasutta_fragment.content_xml.contains(r#"<div id="mn1_2" n="mn1_2" type="vagga">"#),
         "The vagga opening <div> tag should be in the same fragment as its first sutta.\n\
          Fragment start line: {}, end line: {}\n\
          Fragment content (first 200 chars): {}",
         culasutta_fragment.start_line,
         culasutta_fragment.end_line,
-        &culasutta_fragment.content[..culasutta_fragment.content.len().min(200)]
+        &culasutta_fragment.content_xml[..culasutta_fragment.content_xml.len().min(200)]
     );
     
     // Also verify the vagga title is present
     assert!(
-        culasutta_fragment.content.contains("Sīhanādavaggo"),
+        culasutta_fragment.content_xml.contains("Sīhanādavaggo"),
         "The vagga title should be in the same fragment"
     );
     
     // Find the previous sutta fragment (which should contain "Sallekhasammādiṭṭhisatipaṭṭhaṃ" from line 1664)
     // and verify that the vagga div is NOT in that fragment
     let previous_fragment = sutta_fragments.iter()
-        .find(|f| f.content.contains("Sallekhasammādiṭṭhisatipaṭṭhaṃ"))
+        .find(|f| f.content_xml.contains("Sallekhasammādiṭṭhisatipaṭṭhaṃ"))
         .expect("Should find previous sutta fragment");
     
     assert!(
-        !previous_fragment.content.contains(r#"<div id="mn1_2" n="mn1_2" type="vagga">"#),
+        !previous_fragment.content_xml.contains(r#"<div id="mn1_2" n="mn1_2" type="vagga">"#),
         "The vagga opening <div> tag should NOT be in the previous sutta's fragment.\n\
          Previous fragment lines: {}-{}",
         previous_fragment.start_line,

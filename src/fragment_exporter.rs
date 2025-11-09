@@ -305,9 +305,9 @@ mod tests {
         #[derive(QueryableByName)]
         struct NikayaIdResult {
             #[diesel(sql_type = diesel::sql_types::BigInt)]
-            nikaya_id: i64,
+            _nikaya_id: i64,
         }
-        
+
         // Check we have 2 nikayas
         let nikaya_count: CountResult = diesel::sql_query("SELECT COUNT(*) as count FROM nikaya_structures")
             .get_result(&mut conn)

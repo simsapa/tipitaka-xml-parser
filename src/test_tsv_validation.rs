@@ -4,8 +4,6 @@
 //! XML fragments match the expected values in the TSV mapping file.
 
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::Path;
 use anyhow::{Result, Context};
 
@@ -14,6 +12,10 @@ use crate::{
     parse_into_fragments,
 };
 use crate::encoding::read_xml_file;
+use crate::sutta_builder::TsvRecord;
+
+// Import the static TSV data
+static CST_VS_SC_TSV: &str = include_str!("../assets/cst-vs-sc.tsv");
 
 #[derive(Debug, Clone)]
 struct TsvExpectation {
@@ -24,59 +26,38 @@ struct TsvExpectation {
 }
 
 /// Load TSV expectations for a given XML file
-fn load_tsv_expectations(tsv_path: &Path, cst_file: &str) -> Result<Vec<TsvExpectation>> {
-    let file = File::open(tsv_path)
-        .with_context(|| format!("Failed to open TSV file: {:?}", tsv_path))?;
+fn load_tsv_expectations(cst_file: &str) -> Result<Vec<TsvExpectation>> {
+    // Deserialize all TSV records
+    let mut reader = csv::ReaderBuilder::new()
+        .delimiter(b'\t')
+        .from_reader(CST_VS_SC_TSV.as_bytes());
     
-    let reader = BufReader::new(file);
-    let mut lines = reader.lines();
-    
-    // Read header to find column indices
-    let header = lines.next()
-        .ok_or_else(|| anyhow::anyhow!("TSV file is empty"))?
-        .context("Failed to read header")?;
-    
-    let columns: Vec<&str> = header.split('\t').collect();
-    let cst_code_idx = columns.iter().position(|&c| c == "cst_code")
-        .ok_or_else(|| anyhow::anyhow!("Missing 'cst_code' column"))?;
-    let cst_file_idx = columns.iter().position(|&c| c == "cst_file")
-        .ok_or_else(|| anyhow::anyhow!("Missing 'cst_file' column"))?;
-    let cst_sutta_idx = columns.iter().position(|&c| c == "cst_sutta")
-        .ok_or_else(|| anyhow::anyhow!("Missing 'cst_sutta' column"))?;
-    let sc_code_idx = columns.iter().position(|&c| c == "code")
-        .ok_or_else(|| anyhow::anyhow!("Missing 'code' column"))?;
+    let records: Vec<TsvRecord> = reader
+        .deserialize()
+        .collect::<Result<Vec<TsvRecord>, csv::Error>>()
+        .context("Failed to deserialize TSV records")?;
     
     // Normalize filename for comparison (handle both with and without "romn/" prefix)
     let normalized_filename = cst_file.trim_start_matches("romn/");
     
-    // Collect matching rows
-    let mut expectations = Vec::new();
-    
-    for line_result in lines {
-        let line = line_result.context("Failed to read TSV line")?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        
-        let fields: Vec<&str> = line.split('\t').collect();
-        
-        if let Some(&file_field) = fields.get(cst_file_idx) {
-            let file_normalized = file_field.trim_start_matches("romn/");
+    // Filter records matching the cst_file and convert to TsvExpectation
+    let expectations: Vec<TsvExpectation> = records
+        .into_iter()
+        .filter_map(|record| {
+            let file_normalized = record.tsv_cst_file.trim_start_matches("romn/");
             
             if file_normalized == normalized_filename {
-                if let (Some(&cst_code), Some(&cst_sutta), Some(&sc_code)) = 
-                    (fields.get(cst_code_idx), fields.get(cst_sutta_idx), fields.get(sc_code_idx)) {
-                    
-                    expectations.push(TsvExpectation {
-                        cst_code: cst_code.to_string(),
-                        cst_file: file_field.to_string(),
-                        cst_sutta: cst_sutta.to_string(),
-                        sc_code: sc_code.to_string(),
-                    });
-                }
+                Some(TsvExpectation {
+                    cst_code: record.tsv_cst_code,
+                    cst_file: record.tsv_cst_file,
+                    cst_sutta: record.tsv_cst_sutta,
+                    sc_code: record.tsv_sc_code,
+                })
+            } else {
+                None
             }
-        }
-    }
+        })
+        .collect();
     
     Ok(expectations)
 }
@@ -84,10 +65,9 @@ fn load_tsv_expectations(tsv_path: &Path, cst_file: &str) -> Result<Vec<TsvExpec
 #[test]
 fn test_parse_matches_tsv_s0101m() {
     let xml_path = Path::new("tests/data/s0101m.mul.xml");
-    let tsv_path = Path::new("assets/cst-vs-sc.tsv");
     
     // Load expectations from TSV
-    let expectations = load_tsv_expectations(tsv_path, "s0101m.mul.xml")
+    let expectations = load_tsv_expectations("s0101m.mul.xml")
         .expect("Failed to load TSV expectations");
     
     assert!(!expectations.is_empty(), "No TSV expectations found for s0101m.mul.xml");
@@ -162,10 +142,9 @@ fn test_parse_matches_tsv_s0101m() {
 #[test]
 fn test_parse_matches_tsv_s0201m() {
     let xml_path = Path::new("tests/data/s0201m.mul.xml");
-    let tsv_path = Path::new("assets/cst-vs-sc.tsv");
     
     // Load expectations from TSV
-    let expectations = load_tsv_expectations(tsv_path, "s0201m.mul.xml")
+    let expectations = load_tsv_expectations("s0201m.mul.xml")
         .expect("Failed to load TSV expectations");
     
     assert!(!expectations.is_empty(), "No TSV expectations found for s0201m.mul.xml");
@@ -244,8 +223,7 @@ fn test_s0201m_first_sutta_fragment() {
     // This ensures the preamble is correctly included with the first sutta.
     
     let xml_path = Path::new("tests/data/s0201m.mul.xml");
-    let tsv_path = Path::new("assets/cst-vs-sc.tsv");
-    
+
     // Parse XML file
     let xml_content = read_xml_file(xml_path)
         .expect("Failed to read XML file");

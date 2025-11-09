@@ -123,9 +123,7 @@ mod tests {
     use super::*;
     use tempfile::NamedTempFile;
     use crate::{detect_nikaya_structure, parse_into_fragments, export_fragments_to_db};
-    use crate::encoding::read_xml_file;
-    use std::path::PathBuf;
-    
+
     #[test]
     fn test_roundtrip_reconstruction() {
         // Create a simple XML sample

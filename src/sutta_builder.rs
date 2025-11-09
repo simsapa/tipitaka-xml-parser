@@ -234,7 +234,6 @@ pub fn cst_code_to_sc_code_map() -> Result<HashMap<String, (String, String)>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn test_load_tsv_mapping() {
@@ -247,18 +246,18 @@ mod tests {
         
         // Verify first record has expected fields populated
         let first = &records[0];
-        assert!(!first.cst_file.is_empty(), "cst_file should not be empty");
-        assert!(!first.cst_code.is_empty(), "cst_code should not be empty");
-        assert!(!first.sc_code.is_empty(), "sc_code should not be empty");
+        assert!(!first.tsv_cst_file.is_empty(), "cst_file should not be empty");
+        assert!(!first.tsv_cst_code.is_empty(), "cst_code should not be empty");
+        assert!(!first.tsv_sc_code.is_empty(), "sc_code should not be empty");
         
         // Verify known record (DN1) exists with correct mapping
-        let dn1 = records.iter().find(|r| r.sc_code == "dn1");
+        let dn1 = records.iter().find(|r| r.tsv_sc_code == "dn1");
         assert!(dn1.is_some(), "Should find DN 1 record");
         
         if let Some(dn1) = dn1 {
-            assert_eq!(dn1.cst_file.trim_start_matches("romn/").trim_start_matches("mula/"), "s0101m.mul.xml");
-            assert_eq!(dn1.cst_sutta, "1. Brahmajālasuttaṃ");
-            assert_eq!(dn1.cst_vagga, "");
+            assert_eq!(dn1.tsv_cst_file.trim_start_matches("romn/").trim_start_matches("mula/"), "s0101m.mul.xml");
+            assert_eq!(dn1.tsv_cst_sutta, "1. Brahmajālasuttaṃ");
+            assert_eq!(dn1.tsv_cst_vagga, "");
         }
     }
 }
