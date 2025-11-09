@@ -158,13 +158,19 @@ fn parse_tipitaka_xml(
                     
                     // Print warnings for missing codes
                     if stats.empty_cst_code > 0 {
-                        logger::warn(&format!("{} Sutta fragments have empty cst_code", stats.empty_cst_code));
+                        let msg = format!("{} Sutta fragments have empty cst_code", stats.empty_cst_code);
+                        logger::error(&msg);
+                        eprintln!(msg);
                     }
                     if stats.empty_sc_code > 0 {
-                        logger::warn(&format!("{} Sutta fragments have empty sc_code", stats.empty_sc_code));
+                        let msg = format!("{} Sutta fragments have empty sc_code", stats.empty_sc_code);
+                        logger::warn(&msg);
+                        eprintln!(msg);
                     }
                     if stats.empty_both_codes > 0 {
-                        logger::warn(&format!("{} Sutta fragments have BOTH cst_code and sc_code empty", stats.empty_both_codes));
+                        let msg = format!("{} Sutta fragments have BOTH cst_code and sc_code empty", stats.empty_both_codes);
+                        logger::warn(&msg);
+                        eprintln!(msg);
                     }
                     
                     // Summary message if everything is good
