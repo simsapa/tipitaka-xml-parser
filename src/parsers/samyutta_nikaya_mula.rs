@@ -219,9 +219,12 @@ impl<'a> FragmentBoundaryDetector<'a> {
             },
             "head" if attributes.get("rend") == Some(&"chapter".to_string()) => {
                 // In DN, chapter = Sutta
+                // In SN, chapter = Samyutta
                 // In MN/AN, chapter = Vagga
                 if self.nikaya_structure.nikaya == "digha" {
                     Some((GroupType::Sutta, String::new(), None, None))
+                } else if self.nikaya_structure.nikaya == "samyutta" {
+                    Some((GroupType::Samyutta, String::new(), None, None))
                 } else {
                     Some((GroupType::Vagga, String::new(), None, None))
                 }
@@ -602,6 +605,7 @@ fn derive_cst_code(fragment: &XmlFragment, nikaya_structure: &NikayaStructure, c
         }
         "samyutta" => {
             // SN style: sn{book}.{samyutta}.{vagga}.{sutta}
+            // Some samyuttas (like Bhikkhunīsaṃyuttaṃ) don't have vaggas, so use 0 as the vagga number
             match (book_id, samyutta_number, vagga_number, sutta_number) {
                 (Some(book), Some(samyutta), Some(vagga), Some(sutta)) => {
                     Some(format!("{}.{}.{}.{}", book, samyutta, vagga, sutta))
@@ -609,6 +613,10 @@ fn derive_cst_code(fragment: &XmlFragment, nikaya_structure: &NikayaStructure, c
                 (Some(book), Some(samyutta), Some(vagga), None) => {
                     // SN vagga 0 (introduction/preamble) in commentary files: sn1.1.0.0
                     Some(format!("{}.{}.{}.0", book, samyutta, vagga))
+                }
+                (Some(book), Some(samyutta), None, Some(sutta)) => {
+                    // SN without vaggas (like Bhikkhunīsaṃyuttaṃ): use 0 as vagga number
+                    Some(format!("{}.{}.0.{}", book, samyutta, sutta))
                 }
                 _ => None,
             }
@@ -828,12 +836,19 @@ pub fn parse_into_fragments(
                                         sc_code: None,
                                         sc_sutta: None,
                                     });
-                                }
-                                
+                                 }
+                                 
                                         // Start new fragment at the adjusted end position of the previous fragment
                                         // This ensures no gap in XML reconstruction when adjustments are used
+                                        // For Samyutta boundaries in SN, we still capture the position but wait
+                                        // for the first actual sutta subhead before setting the fragment type
                                         current_fragment_start = Some((end_pos, end_line, end_char));
-                                        current_frag_type = Some(FragmentType::Sutta);
+                                        
+                                        // For Samyutta boundaries, don't set fragment type yet - wait for actual sutta
+                                        // For other boundaries (Vagga, Sutta), set fragment type immediately
+                                        if !matches!(group_type, GroupType::Samyutta) {
+                                            current_frag_type = Some(FragmentType::Sutta);
+                                        }
                                         // Note: we'll update group_levels AFTER entering the new level
                                     }
                                 }
@@ -999,9 +1014,10 @@ pub fn parse_into_fragments(
                             };
                         
                         // Close current sutta fragment (excluding this tag)
-                        if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) = 
-                            (current_fragment_start, current_frag_type.as_ref()) {
-                            
+                        // Note: current_frag_type might be None if we closed at a Samyutta boundary
+                        // and are now at the first actual sutta. In that case, we need to push the
+                        // intermediate content (samyutta heading, vagga heading) as a non-sutta fragment.
+                        if let Some((frag_start_pos, frag_start_line, frag_start_char)) = current_fragment_start {
                             // Apply adjustments if any
                             let (end_pos, end_line, end_char) = apply_fragment_adjustment(
                                 xml_content,
@@ -1014,36 +1030,41 @@ pub fn parse_into_fragments(
                             );
                             
                             let content_xml = xml_content[frag_start_pos..end_pos].to_string();
-                                 if !content_xml.trim().is_empty() {
-                                    fragments.push(XmlFragment {
-                                        nikaya: nikaya_structure.nikaya.clone(),
-                                        frag_type: frag_type.clone(),
-                                        content_xml: content_xml,
-                                        start_line: frag_start_line,
-                                        end_line,
-                                        start_char: frag_start_char,
-                                        end_char,
-                                        group_levels: current_fragment_group_levels.clone(),
-                                        cst_file: cst_file.to_string(),
-                                        frag_idx: fragments.len(),
-                                        frag_review: None,
-                                        cst_code: None,
-                                        cst_vagga: None,
-                                        cst_sutta: None,
-                                        cst_paranum: None,
-                                        sc_code: None,
-                                        sc_sutta: None,
-                                    });
-                                    
-                                    // If we adjusted the end position, start the next fragment there
-                                    // to avoid gaps in XML reconstruction
-                                    current_fragment_start = Some((end_pos, end_line, end_char));
-                                } else {
-                                    // No content was written, start from the original position
-                                    current_fragment_start = Some((start_pos, start_line, start_char));
-                                }
+                            
+                            // Only push if there's content AND it's a proper Sutta fragment
+                            // If current_frag_type is None, this is just samyutta/vagga headings
+                            // which should not create a fragment
+                            if !content_xml.trim().is_empty() && current_frag_type.is_some() {
+                                fragments.push(XmlFragment {
+                                    nikaya: nikaya_structure.nikaya.clone(),
+                                    frag_type: current_frag_type.clone().unwrap(),
+                                    content_xml: content_xml,
+                                    start_line: frag_start_line,
+                                    end_line,
+                                    start_char: frag_start_char,
+                                    end_char,
+                                    group_levels: current_fragment_group_levels.clone(),
+                                    cst_file: cst_file.to_string(),
+                                    frag_idx: fragments.len(),
+                                    frag_review: None,
+                                    cst_code: None,
+                                    cst_vagga: None,
+                                    cst_sutta: None,
+                                    cst_paranum: None,
+                                    sc_code: None,
+                                    sc_sutta: None,
+                                });
+                                
+                                // If we adjusted the end position, start the next fragment there
+                                // to avoid gaps in XML reconstruction
+                                current_fragment_start = Some((end_pos, end_line, end_char));
+                            } else {
+                                // No fragment was written (either empty or no frag_type)
+                                // Start from the original position
+                                current_fragment_start = Some((start_pos, start_line, start_char));
+                            }
                         } else {
-                            // No previous fragment to close, start from the original position
+                            // No previous fragment start position, start from the current position
                             current_fragment_start = Some((start_pos, start_line, start_char));
                         }
                         
@@ -1097,6 +1118,13 @@ pub fn parse_into_fragments(
                             pending_vagga_div_pos = None;
                             // Update hierarchy with sutta title
                             hierarchy.enter_level(GroupType::Sutta, text.clone(), None, None);
+                            
+                            // If current_frag_type is None (after Samyutta boundary), update fragment start
+                            // to point to this sutta subhead, effectively discarding the intermediate content
+                            if current_frag_type.is_none() {
+                                current_fragment_start = Some((subhead_pos, subhead_line, subhead_char));
+                            }
+                            
                             // Update group_levels to include the new Sutta level
                             current_fragment_group_levels = hierarchy.get_current_levels();
                             // Continue with the current fragment
@@ -1114,60 +1142,62 @@ pub fn parse_into_fragments(
                                      subhead_pos, subhead_line, subhead_char)
                                 };
                             
-                            // Already in a sutta - close current and start new
-                            if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) = 
-                                (current_fragment_start, current_frag_type.as_ref()) {
-                                
-                                // Apply adjustments if any
-                                let (end_pos, end_line, end_char) = apply_fragment_adjustment(
-                                    xml_content,
-                                    close_pos,
-                                    close_line,
-                                    close_char,
-                                    cst_file,
-                                    fragments.len(),
-                                    adjustments,
-                                );
-                                
-                                let content_xml = xml_content[frag_start_pos..end_pos].to_string();
-                                if !content_xml.trim().is_empty() {
-                                    fragments.push(XmlFragment {
-                                        nikaya: nikaya_structure.nikaya.clone(),
-                                        frag_type: frag_type.clone(),
-                                        content_xml: content_xml,
-                                        start_line: frag_start_line,
-                                        end_line,
-                                        start_char: frag_start_char,
-                                        end_char,
-                                        group_levels: current_fragment_group_levels.clone(),
-                                        cst_file: cst_file.to_string(),
-                                        frag_idx: fragments.len(),
-                                        frag_review: None,
-                                        cst_code: None,
-                                        cst_vagga: None,
-                                        cst_sutta: None,
-                                        cst_paranum: None,
-                                        sc_code: None,
-                                        sc_sutta: None,
-                                    });
+                            // Close current sutta fragment (if any)
+                            // Note: current_frag_type might be None if we're at the first sutta after a Samyutta boundary
+                            if let Some((frag_start_pos, frag_start_line, frag_start_char)) = current_fragment_start {
+                                // If current_frag_type is None, we're at the first sutta after a Samyutta boundary
+                                // Don't create a fragment, and DON'T update the start position
+                                // This keeps the start at the samyutta div, so the first sutta includes the headings
+                                if current_frag_type.is_some() {
+                                    // Normal case: close the previous sutta fragment
+                                    // Apply adjustments if any
+                                    let (end_pos, end_line, end_char) = apply_fragment_adjustment(
+                                        xml_content,
+                                        close_pos,
+                                        close_line,
+                                        close_char,
+                                        cst_file,
+                                        fragments.len(),
+                                        adjustments,
+                                    );
                                     
-                                    // If we adjusted the end position, start the next fragment there
-                                    // to avoid gaps in XML reconstruction
+                                    let content_xml = xml_content[frag_start_pos..end_pos].to_string();
+                                    
+                                    if !content_xml.trim().is_empty() {
+                                        fragments.push(XmlFragment {
+                                            nikaya: nikaya_structure.nikaya.clone(),
+                                            frag_type: current_frag_type.clone().unwrap(),
+                                            content_xml: content_xml,
+                                            start_line: frag_start_line,
+                                            end_line,
+                                            start_char: frag_start_char,
+                                            end_char,
+                                            group_levels: current_fragment_group_levels.clone(),
+                                            cst_file: cst_file.to_string(),
+                                            frag_idx: fragments.len(),
+                                            frag_review: None,
+                                            cst_code: None,
+                                            cst_vagga: None,
+                                            cst_sutta: None,
+                                            cst_paranum: None,
+                                            sc_code: None,
+                                            sc_sutta: None,
+                                        });
+                                    }
+                                    
+                                    // Start the next fragment at the adjusted end position
                                     current_fragment_start = Some((end_pos, end_line, end_char));
-                                } else {
-                                    // No content was written, start from the original position
-                                    current_fragment_start = Some((start_pos, start_line, start_char));
                                 }
-                            } else {
-                                // No previous fragment to close, start from the original position
-                                current_fragment_start = Some((start_pos, start_line, start_char));
-                            }
-                            
-                            // Update hierarchy with new sutta title
-                            hierarchy.enter_level(GroupType::Sutta, text.clone(), None, None);
-                            
-                            current_frag_type = Some(FragmentType::Sutta);
-                            current_fragment_group_levels = hierarchy.get_current_levels();
+                        } else {
+                            // No previous fragment start position, start from the current position
+                            current_fragment_start = Some((start_pos, start_line, start_char));
+                        }
+                        
+                        // Update hierarchy with new sutta title
+                        hierarchy.enter_level(GroupType::Sutta, text.clone(), None, None);
+                        
+                        current_frag_type = Some(FragmentType::Sutta);
+                        current_fragment_group_levels = hierarchy.get_current_levels();
                         }
                     }
                     // If not numbered, it's just a section heading within a sutta - ignore
