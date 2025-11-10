@@ -9,7 +9,10 @@ use crate::nikaya_structure::NikayaStructure;
 use crate::xml_file_type::XmlFileType;
 use crate::xml_type_detector::detect_xml_file_type;
 use crate::xml_parser_trait::XmlParser;
-use crate::parsers::GeneralParser;
+use crate::parsers::{
+    DighaNikayaMulaParser,
+    GeneralParser,
+};
 
 /// Parse XML content into fragments with automatic type detection
 ///
@@ -38,8 +41,11 @@ pub fn parse_into_fragments(
     // Dispatch to the appropriate parser based on type
     // For now, all types use the general parser
     let parser: Box<dyn XmlParser> = match xml_type {
-        XmlFileType::DighaNikayaMula 
-        | XmlFileType::DighaNikayaAtthakatha 
+        XmlFileType::DighaNikayaMula => {
+            Box::new(DighaNikayaMulaParser::new())
+        }
+
+        XmlFileType::DighaNikayaAtthakatha
         | XmlFileType::DighaNikayaTika
         | XmlFileType::MajjhimaNikayaMula 
         | XmlFileType::MajjhimaNikayaAtthakatha 

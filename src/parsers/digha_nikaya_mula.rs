@@ -1,8 +1,4 @@
-//! General XML fragment parser
-//!
-//! This module provides the general-purpose XML parser that handles
-//! all nikaya structures. It contains the original fragment parsing
-//! logic that works for all XML file types.
+//! Dīgha Nikāya Mūla (root texts) XML fragment parser
 
 use anyhow::{Result, Context};
 use quick_xml::events::Event;
@@ -19,17 +15,11 @@ use crate::parsers::helpers::{
     populate_sc_fields_from_tsv,
 };
 
-/// General XML parser implementation
-///
-/// This parser handles all nikaya structures using a unified approach.
-/// It serves as the default fallback parser and the base implementation
-/// for nikaya-specific parsers.
-pub struct GeneralParser;
+pub struct DighaNikayaMulaParser;
 
-impl GeneralParser {
-    /// Create a new general parser instance
+impl DighaNikayaMulaParser {
     pub fn new() -> Self {
-        GeneralParser
+        DighaNikayaMulaParser
     }
 }
 
@@ -1344,8 +1334,7 @@ pub fn parse_into_fragments(
     Ok(fragments)
 }
 
-/// Trait implementation for GeneralParser
-impl XmlParser for GeneralParser {
+impl XmlParser for DighaNikayaMulaParser {
     fn parse_into_fragments(
         &self,
         xml_content: &str,

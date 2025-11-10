@@ -2,7 +2,9 @@
 //!
 //! This module contains specialized parsers for different nikaya structures.
 
+pub mod helpers;
+pub mod digha_nikaya_mula;
 pub mod general;
 
-// Re-export the general parser
+pub use digha_nikaya_mula::DighaNikayaMulaParser;
 pub use general::GeneralParser;
