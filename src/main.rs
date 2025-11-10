@@ -300,6 +300,18 @@ enum Commands {
         #[arg(value_name = "OUTPUT_TSV_PATH")]
         output_tsv_path: PathBuf,
     },
+
+    /// Check if TSV export differences have no regressions
+    #[command(arg_required_else_help = true)]
+    CheckTsvRegressions {
+        /// Path to the older TSV export
+        #[arg(value_name = "OLD_TSV_PATH")]
+        old_tsv_path: PathBuf,
+
+        /// Path to the newer TSV export
+        #[arg(value_name = "NEW_TSV_PATH")]
+        new_tsv_path: PathBuf,
+    },
 }
 
 fn main() {
@@ -376,6 +388,55 @@ fn main() {
                     }
                     Err(e) => {
                         let error_msg = format!("Failed to export fragments to TSV: {}", e);
+                        logger::error(&error_msg);
+                        eprintln!("{}", error_msg);
+                        Err(error_msg)
+                    }
+                }
+            }
+        }
+
+        Commands::CheckTsvRegressions { old_tsv_path, new_tsv_path } => {
+            use tipitaka_xml_parser::check_tsv_improvements;
+
+            if !old_tsv_path.exists() {
+                Err(format!("Old TSV file does not exist: {:?}", old_tsv_path))
+            } else if !old_tsv_path.is_file() {
+                Err(format!("Old TSV path is not a file: {:?}", old_tsv_path))
+            } else if !new_tsv_path.exists() {
+                Err(format!("New TSV file does not exist: {:?}", new_tsv_path))
+            } else if !new_tsv_path.is_file() {
+                Err(format!("New TSV path is not a file: {:?}", new_tsv_path))
+            } else {
+                match check_tsv_improvements(&old_tsv_path, &new_tsv_path) {
+                    Ok(result) => {
+                        logger::info(&format!("Checked {} total rows, {} rows differ", 
+                            result.total_rows, result.differing_rows));
+                        println!("Total rows: {}", result.total_rows);
+                        println!("Differing rows: {}", result.differing_rows);
+                        
+                        if result.validation_errors.is_empty() {
+                            println!("\nNo regressions detected - all differing rows are improvements");
+                            logger::info("No regressions detected - all differing rows are improvements");
+                            Ok(())
+                        } else {
+                            println!("\nFound {} regressions (values that were correct in old file are now incorrect):\n", result.validation_errors.len());
+                            logger::error(&format!("Found {} regressions", result.validation_errors.len()));
+                            
+                            for error in &result.validation_errors {
+                                println!("REGRESSION - File: {}, Fragment: {}", error.cst_file, error.frag_idx);
+                                println!("  CST Code: {}", error.cst_code);
+                                println!("  Old value was CORRECT, new value is INCORRECT");
+                                println!("  New cst_sutta: {:?}", error.actual_cst_sutta);
+                                println!("  Expected cst_sutta: {}", error.expected_cst_sutta);
+                                println!();
+                            }
+                            
+                            Err(format!("Found {} regressions in TSV - values that were correct are now incorrect", result.validation_errors.len()))
+                        }
+                    }
+                    Err(e) => {
+                        let error_msg = format!("Failed to check TSV improvements: {}", e);
                         logger::error(&error_msg);
                         eprintln!("{}", error_msg);
                         Err(error_msg)

@@ -31,3 +31,5 @@ cd "$CUR_DIR"
 ENABLE_PRINT_LOG=false $XML_PARSER_DIR/target/debug/tipitaka_xml_parser parse-tipitaka-xml --xml-list "$XML_LIST_PATH".full --fragments-db "$FRAGMENTS_DB_PATH"
 
 ENABLE_PRINT_LOG=false $XML_PARSER_DIR/target/debug/tipitaka_xml_parser export-fragments-to-tsv "$FRAGMENTS_DB_PATH" "$FRAGMENTS_TSV_PATH"
+
+ENABLE_PRINT_LOG=false $XML_PARSER_DIR/target/debug/tipitaka_xml_parser check-tsv-regressions "$FRAGMENTS_TSV_PATH" "$FRAGMENTS_TSV_PATH".reference
