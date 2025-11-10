@@ -20,9 +20,9 @@ use crate::nikaya_structure::NikayaStructure;
 /// The detected XmlFileType
 ///
 /// # File naming patterns
-/// - `.mul.xml` or `m.mul.xml` or `m2.mul.xml` - mūla text
-/// - `.att.xml` or `a.att.xml` - aṭṭhakathā (commentary)
-/// - `.tik.xml` or `t.tik.xml` - ṭīkā (sub-commentary)
+/// - `.mul.xml` - mūla text
+/// - `.att.xml` - aṭṭhakathā (commentary)
+/// - `.tik.xml` - ṭīkā (sub-commentary)
 pub fn detect_xml_file_type(xml_content: &str, cst_file: &str) -> Result<XmlFileType> {
     // First, detect the nikaya from content
     let nikaya_name = detect_nikaya_from_content(xml_content)?;
@@ -102,21 +102,17 @@ fn detect_nikaya_from_content(xml_content: &str) -> Result<String> {
 /// Detect text type from filename
 ///
 /// # File naming patterns
-/// - `.mul.xml` or `m.mul.xml` or `m2.mul.xml` - mūla text
-/// - `.att.xml` or `a.att.xml` - aṭṭhakathā (commentary)
-/// - `.tik.xml` or `t.tik.xml` - ṭīkā (sub-commentary)
+/// - `.mul.xml` - mūla text
+/// - `.att.xml` - aṭṭhakathā (commentary)
+/// - `.tik.xml` - ṭīkā (sub-commentary)
 fn detect_text_type_from_filename(filename: &str) -> TextType {
     let filename_lower = filename.to_lowercase();
     
-    if filename_lower.ends_with(".mul.xml") 
-        || filename_lower.contains("m.mul.xml")
-        || filename_lower.contains("m2.mul.xml") {
+    if filename_lower.ends_with(".mul.xml") {
         TextType::Mula
-    } else if filename_lower.ends_with(".att.xml") 
-        || filename_lower.contains("a.att.xml") {
+    } else if filename_lower.ends_with(".att.xml") {
         TextType::Atthakatha
-    } else if filename_lower.ends_with(".tik.xml") 
-        || filename_lower.contains("t.tik.xml") {
+    } else if filename_lower.ends_with(".tik.xml")  {
         TextType::Tika
     } else {
         // Default to Mula if unclear
