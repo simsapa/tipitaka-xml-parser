@@ -16,6 +16,7 @@ CUR_DIR="$PWD"
 
 XML_LIST_PATH=xml_list.txt
 FRAGMENTS_DB_PATH=fragments.sqlite3
+FRAGMENTS_TSV_PATH=fragments.tsv
 
 # NOTE: No trailing slash
 XML_PARSER_DIR=..
@@ -29,5 +30,6 @@ cargo build
 cd "$CUR_DIR"
 ENABLE_PRINT_LOG=false $XML_PARSER_DIR/target/debug/tipitaka_xml_parser parse-tipitaka-xml --xml-list "$XML_LIST_PATH".full --fragments-db "$FRAGMENTS_DB_PATH"
 
-# FIXME save final stats, errors must not increase
-# FIXME export the db to tsv
+ENABLE_PRINT_LOG=false $XML_PARSER_DIR/target/debug/tipitaka_xml_parser export-fragments-to-tsv "$FRAGMENTS_DB_PATH" "$FRAGMENTS_TSV_PATH"
+
+# diff -q "$FRAGMENTS_TSV_PATH" "$FRAGMENTS_TSV_PATH".reference

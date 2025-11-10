@@ -124,6 +124,7 @@ fn parse_tipitaka_xml(
                               idx + 1, xml_files.len(), xml_file.file_name().unwrap_or_default()));
 
         // Handle fragments export if specified (unique feature of new parser)
+        // Export includes automatic reconstruction verification to ensure data integrity
         if let Some(frag_db_path) = fragments_db {
             if !dry_run {
                 match importer.export_fragments(xml_file, frag_db_path) {
@@ -131,7 +132,19 @@ fn parse_tipitaka_xml(
                         logger::info(&format!("Exported {} fragments to {:?}", count, frag_db_path));
                     }
                     Err(e) => {
-                        logger::error(&format!("Error exporting fragments: {}", e));
+                        let error_msg = format!("Error exporting fragments from {:?}: {}", 
+                            xml_file.file_name().unwrap_or_default(), e);
+                        logger::error(&error_msg);
+                        eprintln!("{}", error_msg);
+                        
+                        // If this is a reconstruction failure, exit immediately
+                        // This is a critical error that indicates the fragment parser
+                        // is not correctly splitting/storing the XML content
+                        if e.to_string().contains("Reconstruction verification failed") {
+                            eprintln!("Xml reconstruction verification failed, exiting.");
+                            return Err(error_msg);
+                        }
+                        
                         errors += 1;
                         continue;
                     }
@@ -143,7 +156,9 @@ fn parse_tipitaka_xml(
     }
 
     if errors > 0 {
-        logger::error(&format!("Total errors: {}", errors));
+        let error_msg = format!("Processing completed with {} errors", errors);
+        logger::error(&error_msg);
+        return Err(error_msg);
     }
 
     // Validate the fragments database if it was used
@@ -277,6 +292,18 @@ enum Commands {
         #[arg(value_name = "OUTPUT_PATH")]
         output_path: PathBuf,
     },
+
+    /// Export xml_fragments table to TSV format
+    #[command(arg_required_else_help = true)]
+    ExportFragmentsToTsv {
+        /// Path to the fragments SQLite database
+        #[arg(value_name = "FRAGMENTS_DB_PATH")]
+        fragments_db_path: PathBuf,
+
+        /// Path to write the TSV output
+        #[arg(value_name = "OUTPUT_TSV_PATH")]
+        output_tsv_path: PathBuf,
+    },
 }
 
 fn main() {
@@ -334,6 +361,29 @@ fn main() {
                         }
                     }
                     Err(e) => Err(format!("Failed to read XML file: {}", e)),
+                }
+            }
+        }
+
+        Commands::ExportFragmentsToTsv { fragments_db_path, output_tsv_path } => {
+            use tipitaka_xml_parser::export_fragments_to_tsv;
+
+            if !fragments_db_path.exists() {
+                Err(format!("Fragments database does not exist: {:?}", fragments_db_path))
+            } else if !fragments_db_path.is_file() {
+                Err(format!("Fragments database path is not a file: {:?}", fragments_db_path))
+            } else {
+                match export_fragments_to_tsv(&fragments_db_path, &output_tsv_path) {
+                    Ok(count) => {
+                        logger::info(&format!("Exported {} fragments to TSV: {:?}", count, output_tsv_path));
+                        Ok(())
+                    }
+                    Err(e) => {
+                        let error_msg = format!("Failed to export fragments to TSV: {}", e);
+                        logger::error(&error_msg);
+                        eprintln!("{}", error_msg);
+                        Err(error_msg)
+                    }
                 }
             }
         }
