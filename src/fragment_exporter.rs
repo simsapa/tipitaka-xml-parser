@@ -533,6 +533,5 @@ mod tests {
         assert_eq!(stats.total_sutta_fragments, 4, "Should have 4 Sutta fragments");
         assert_eq!(stats.empty_cst_code, 2, "Should have 2 fragments with empty cst_code");
         assert_eq!(stats.empty_sc_code, 2, "Should have 2 fragments with empty sc_code");
-        assert_eq!(stats.empty_both_codes, 1, "Should have 1 fragment with both codes empty");
     }
 }

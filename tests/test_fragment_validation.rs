@@ -27,7 +27,7 @@ fn load_tsv_suttas(file_pattern: &str) -> Vec<String> {
 #[test]
 fn test_dn_s0101m_sutta_count() {
     use tipitaka_xml_parser::nikaya_detector::detect_nikaya_structure;
-    use tipitaka_xml_parser::fragment_parser::parse_into_fragments;
+    use tipitaka_xml_parser::parse_into_fragments;
     use tipitaka_xml_parser::encoding::read_xml_file;
     use tipitaka_xml_parser::types::FragmentType;
     

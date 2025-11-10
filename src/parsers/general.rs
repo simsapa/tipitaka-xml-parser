@@ -1,7 +1,8 @@
-//! Fragment parsing with line tracking
+//! General XML fragment parser
 //!
-//! This module provides functionality to parse XML files into fragments
-//! while tracking line numbers and hierarchy.
+//! This module provides the general-purpose XML parser that handles
+//! all nikaya structures. It contains the original fragment parsing
+//! logic that works for all XML file types.
 
 use anyhow::{Result, Context};
 use quick_xml::Reader;
@@ -11,6 +12,21 @@ use std::collections::HashMap;
 use crate::types::{XmlFragment, FragmentType, GroupType, GroupLevel, FragmentAdjustments, FragmentKey};
 use crate::nikaya_structure::NikayaStructure;
 use crate::sutta_builder::cst_code_to_sc_code_map;
+use crate::xml_parser_trait::XmlParser;
+
+/// General XML parser implementation
+///
+/// This parser handles all nikaya structures using a unified approach.
+/// It serves as the default fallback parser and the base implementation
+/// for nikaya-specific parsers.
+pub struct GeneralParser;
+
+impl GeneralParser {
+    /// Create a new general parser instance
+    pub fn new() -> Self {
+        GeneralParser
+    }
+}
 
 /// Line and character position tracking for XML reader
 ///
@@ -1573,6 +1589,21 @@ pub fn parse_into_fragments(
     }
     
     Ok(fragments)
+}
+
+/// Trait implementation for GeneralParser
+impl XmlParser for GeneralParser {
+    fn parse_into_fragments(
+        &self,
+        xml_content: &str,
+        nikaya_structure: &NikayaStructure,
+        cst_file: &str,
+        adjustments: Option<&FragmentAdjustments>,
+        populate_sc_fields: bool,
+    ) -> Result<Vec<XmlFragment>> {
+        // Delegate to the public function
+        parse_into_fragments(xml_content, nikaya_structure, cst_file, adjustments, populate_sc_fields)
+    }
 }
 
 /// Populate SC fields from embedded TSV mapping

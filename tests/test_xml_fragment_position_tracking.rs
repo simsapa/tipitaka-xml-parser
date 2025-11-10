@@ -28,7 +28,7 @@
 //! # Implementation Details
 //!
 //! The `extract_slice_from_xml()` helper function replicates the position tracking
-//! logic from `LineTrackingReader` in fragment_parser.rs:
+//! logic from `LineTrackingReader` in parsers/general.rs:
 //! - Iterates through bytes in the XML content
 //! - Tracks line numbers (1-indexed) and character positions (0-indexed byte offsets)
 //! - Increments line on '\n', resets char to 0
@@ -127,7 +127,7 @@ fn extract_slice_from_xml(
 /// Test helper that parses an XML file and validates position tracking
 fn test_position_tracking_for_file(xml_path: &str, xml_filename: &str) {
     use tipitaka_xml_parser::nikaya_detector::detect_nikaya_structure;
-    use tipitaka_xml_parser::fragment_parser::parse_into_fragments;
+    use tipitaka_xml_parser::parse_into_fragments;
     use tipitaka_xml_parser::encoding::read_xml_file;
     
     let path = PathBuf::from(xml_path);
