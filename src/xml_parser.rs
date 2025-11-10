@@ -10,7 +10,18 @@ use crate::xml_file_type::XmlFileType;
 use crate::xml_type_detector::detect_xml_file_type;
 use crate::xml_parser_trait::XmlParser;
 use crate::parsers::{
-    DighaNikayaMulaParser,
+    DighaNikayaMula,
+    DighaNikayaAtthakatha,
+    DighaNikayaTika,
+    MajjhimaNikayaMula,
+    MajjhimaNikayaAtthakatha,
+    MajjhimaNikayaTika,
+    SamyuttaNikayaMula,
+    SamyuttaNikayaAtthakatha,
+    SamyuttaNikayaTika,
+    AnguttaraNikayaMula,
+    AnguttaraNikayaAtthakatha,
+    AnguttaraNikayaTika,
     GeneralParser,
 };
 
@@ -39,24 +50,48 @@ pub fn parse_into_fragments(
     let xml_type = detect_xml_file_type(xml_content, cst_file)?;
     
     // Dispatch to the appropriate parser based on type
-    // For now, all types use the general parser
     let parser: Box<dyn XmlParser> = match xml_type {
         XmlFileType::DighaNikayaMula => {
-            Box::new(DighaNikayaMulaParser::new())
+            Box::new(DighaNikayaMula::new())
         }
-
-        XmlFileType::DighaNikayaAtthakatha
-        | XmlFileType::DighaNikayaTika
-        | XmlFileType::MajjhimaNikayaMula 
-        | XmlFileType::MajjhimaNikayaAtthakatha 
-        | XmlFileType::MajjhimaNikayaTika
-        | XmlFileType::SamyuttaNikayaMula 
-        | XmlFileType::SamyuttaNikayaAtthakatha 
-        | XmlFileType::SamyuttaNikayaTika
-        | XmlFileType::AnguttaraNikayaMula 
-        | XmlFileType::AnguttaraNikayaAtthakatha 
-        | XmlFileType::AnguttaraNikayaTika
-        | XmlFileType::KhuddakaNikaya
+        XmlFileType::DighaNikayaAtthakatha => {
+            Box::new(DighaNikayaAtthakatha::new())
+        }
+        XmlFileType::DighaNikayaTika => {
+            Box::new(DighaNikayaTika::new())
+        }
+        
+        XmlFileType::MajjhimaNikayaMula => {
+            Box::new(MajjhimaNikayaMula::new())
+        }
+        XmlFileType::MajjhimaNikayaAtthakatha => {
+            Box::new(MajjhimaNikayaAtthakatha::new())
+        }
+        XmlFileType::MajjhimaNikayaTika => {
+            Box::new(MajjhimaNikayaTika::new())
+        }
+        
+        XmlFileType::SamyuttaNikayaMula => {
+            Box::new(SamyuttaNikayaMula::new())
+        }
+        XmlFileType::SamyuttaNikayaAtthakatha => {
+            Box::new(SamyuttaNikayaAtthakatha::new())
+        }
+        XmlFileType::SamyuttaNikayaTika => {
+            Box::new(SamyuttaNikayaTika::new())
+        }
+        
+        XmlFileType::AnguttaraNikayaMula => {
+            Box::new(AnguttaraNikayaMula::new())
+        }
+        XmlFileType::AnguttaraNikayaAtthakatha => {
+            Box::new(AnguttaraNikayaAtthakatha::new())
+        }
+        XmlFileType::AnguttaraNikayaTika => {
+            Box::new(AnguttaraNikayaTika::new())
+        }
+        
+        XmlFileType::KhuddakaNikaya
         | XmlFileType::General => {
             Box::new(GeneralParser::new())
         }

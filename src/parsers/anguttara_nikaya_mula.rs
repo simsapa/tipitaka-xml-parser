@@ -1,4 +1,4 @@
-//! Dīgha Nikāya Mūla (root texts) XML fragment parser
+//! Aṅguttara Nikāya Mūla (root texts) XML fragment parser
 
 use anyhow::{Result, Context};
 use quick_xml::events::Event;
@@ -15,11 +15,11 @@ use crate::parsers::helpers::{
     populate_sc_fields_from_tsv,
 };
 
-pub struct DighaNikayaMula;
+pub struct AnguttaraNikayaMula;
 
-impl DighaNikayaMula {
+impl AnguttaraNikayaMula {
     pub fn new() -> Self {
-        DighaNikayaMula
+        AnguttaraNikayaMula
     }
 }
 
@@ -1334,7 +1334,7 @@ pub fn parse_into_fragments(
     Ok(fragments)
 }
 
-impl XmlParser for DighaNikayaMula {
+impl XmlParser for AnguttaraNikayaMula {
     fn parse_into_fragments(
         &self,
         xml_content: &str,
