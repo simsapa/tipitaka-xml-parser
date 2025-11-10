@@ -142,7 +142,6 @@ pub struct ValidationStats {
     pub total_sutta_fragments: usize,
     pub empty_cst_code: usize,
     pub empty_sc_code: usize,
-    pub empty_both_codes: usize,
 }
 
 /// Validate the fragments database and return statistics
@@ -187,21 +186,10 @@ pub fn validate_fragments_db(db_path: &Path) -> Result<ValidationStats> {
     .get_result(&mut conn)
     .context("Failed to count fragments with empty sc_code")?;
     
-    // Count Suttas with both codes empty
-    let empty_both: CountResult = diesel::sql_query(
-        "SELECT COUNT(*) as count FROM xml_fragments 
-         WHERE frag_type = 'Sutta' 
-         AND (cst_code IS NULL OR cst_code = '') 
-         AND (sc_code IS NULL OR sc_code = '')"
-    )
-    .get_result(&mut conn)
-    .context("Failed to count fragments with both codes empty")?;
-    
     Ok(ValidationStats {
         total_sutta_fragments: total_suttas.count as usize,
         empty_cst_code: empty_cst.count as usize,
         empty_sc_code: empty_sc.count as usize,
-        empty_both_codes: empty_both.count as usize,
     })
 }
 

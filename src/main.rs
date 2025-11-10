@@ -120,8 +120,9 @@ fn parse_tipitaka_xml(
     let mut errors = 0;
 
     for (idx, xml_file) in xml_files.iter().enumerate() {
-        logger::info(&format!("[{}/{}] Processing: {:?}",
-                              idx + 1, xml_files.len(), xml_file.file_name().unwrap_or_default()));
+        let msg = format!("[{}/{}] Processing: {:?}", idx + 1, xml_files.len(), xml_file.file_name().unwrap_or_default());
+        logger::info(&msg);
+        println!("{}", msg);
 
         // Handle fragments export if specified (unique feature of new parser)
         // Export includes automatic reconstruction verification to ensure data integrity
@@ -182,12 +183,7 @@ fn parse_tipitaka_xml(
                         logger::error(&msg);
                         eprintln!("{}", msg);
                     }
-                    if stats.empty_both_codes > 0 {
-                        let msg = format!("{} Sutta fragments have BOTH cst_code and sc_code empty", stats.empty_both_codes);
-                        logger::error(&msg);
-                        eprintln!("{}", msg);
-                    }
-                    
+
                     // Summary message if everything is good
                     if stats.empty_cst_code == 0 && stats.empty_sc_code == 0 {
                         logger::info("All Sutta fragments have both cst_code and sc_code");

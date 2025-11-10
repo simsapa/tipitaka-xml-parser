@@ -32,4 +32,4 @@ ENABLE_PRINT_LOG=false $XML_PARSER_DIR/target/debug/tipitaka_xml_parser parse-ti
 
 ENABLE_PRINT_LOG=false $XML_PARSER_DIR/target/debug/tipitaka_xml_parser export-fragments-to-tsv "$FRAGMENTS_DB_PATH" "$FRAGMENTS_TSV_PATH"
 
-# diff -q "$FRAGMENTS_TSV_PATH" "$FRAGMENTS_TSV_PATH".reference
+diff -q "$FRAGMENTS_TSV_PATH" "$FRAGMENTS_TSV_PATH".reference
