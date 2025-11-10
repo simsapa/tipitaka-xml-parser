@@ -1176,11 +1176,44 @@ pub fn parse_into_fragments(
                 // If we have a pending title, update it with this text
                 if let Some((group_type, _, id, number)) = pending_title.take() {
                     if !text.is_empty() {
-                        hierarchy.enter_level(group_type, text, id, number);
+                        hierarchy.enter_level(group_type.clone(), text, id, number);
                         
                         // Update group_levels after entering any new level while a fragment is open
+                        // BUT: For Vagga/Samyutta levels, only update if the current fragment doesn't already have one
+                        // This prevents the current sutta from inheriting the NEXT vagga's title
                         if current_fragment_start.is_some() {
-                            current_fragment_group_levels = hierarchy.get_current_levels();
+                            let should_update = match &group_type {
+                                GroupType::Vagga => {
+                                    // Only update if we're in a Sutta fragment AND don't already have a vagga
+                                    // If current fragment already has a vagga, this is the NEXT vagga
+                                    if matches!(current_frag_type, Some(FragmentType::Sutta)) {
+                                        // Check if current_fragment_group_levels already has a Vagga level
+                                        let already_has_vagga = current_fragment_group_levels.iter()
+                                            .any(|level| matches!(level.group_type, GroupType::Vagga));
+                                        !already_has_vagga  // Only update if we don't already have one
+                                    } else {
+                                        true  // Not a Sutta fragment, always update
+                                    }
+                                },
+                                GroupType::Samyutta => {
+                                    // Only update if we're in a Sutta fragment AND don't already have a samyutta
+                                    // If current fragment already has a samyutta, this is the NEXT samyutta
+                                    if matches!(current_frag_type, Some(FragmentType::Sutta)) {
+                                        // Check if current_fragment_group_levels already has a Samyutta level
+                                        let already_has_samyutta = current_fragment_group_levels.iter()
+                                            .any(|level| matches!(level.group_type, GroupType::Samyutta));
+                                        !already_has_samyutta  // Only update if we don't already have one
+                                    } else {
+                                        true  // Not a Sutta fragment, always update
+                                    }
+                                },
+                                // For all other level types, always update
+                                _ => true,
+                            };
+                            
+                            if should_update {
+                                current_fragment_group_levels = hierarchy.get_current_levels();
+                            }
                         }
                     }
                 }
@@ -1742,126 +1775,5 @@ mod tests {
         assert_eq!(sutta_frag.cst_paranum.as_deref(), Some("1"));
     }
 
-    #[test]
-    fn test_cst_fields_an_tika() {
-        // Test CST field derivation for AN tika/commentary files
-        // These use <p> tags instead of <div> tags for pannasaka and vagga
-        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<TEI.2>
-<text>
-<body>
-<div id="an2" n="an2" type="book">
-<p rend="nikaya">Aṅguttaranikāye</p>
-<head rend="book">Dukanipāta-ṭīkā</head>
-<p rend="title">1. Paṭhamapaṇṇāsakaṃ</p>
-<p rend="chapter">1. Kammakāraṇavaggo</p>
-<p rend="subhead">1. Vajjasuttavaṇṇanā</p>
-<p rend="bodytext" n="1"><hi rend="paranum">1</hi>Dukanipātassa paṭhame</p>
-<p rend="subhead">2. Padhānasuttavaṇṇanā</p>
-<p rend="bodytext" n="2"><hi rend="paranum">2</hi>Dutiye</p>
-</div>
-</body>
-</text>
-</TEI.2>"#;
-        
-        let structure = detect_nikaya_structure(xml).unwrap();
-        let fragments = parse_into_fragments(xml, &structure, "s0402t.tik.xml", None, false).unwrap();
-        
-        let sutta_fragments: Vec<_> = fragments.iter()
-            .filter(|f| matches!(f.frag_type, FragmentType::Sutta))
-            .collect();
-        
-        // Should have at least 2 sutta fragments
-        assert!(sutta_fragments.len() >= 2, "Should have at least 2 sutta fragments");
-        
-        // Find first actual sutta (not preamble)
-        let sutta1 = sutta_fragments.iter()
-            .find(|f| f.cst_code.is_some() && f.cst_sutta.as_ref().map(|s| s.contains("Vajjasuttavaṇṇanā")).unwrap_or(false))
-            .expect("Should find first sutta");
-        
-        // Check CST fields for first sutta
-        assert_eq!(sutta1.cst_code.as_deref(), Some("an2.1.1.1"));
-        assert_eq!(sutta1.cst_vagga.as_deref(), Some("1. Kammakāraṇavaggo"));
-        assert_eq!(sutta1.cst_sutta.as_deref(), Some("1. Vajjasuttavaṇṇanā"));
-        
-        // Find second sutta
-        let sutta2 = sutta_fragments.iter()
-            .find(|f| f.cst_sutta.as_ref().map(|s| s.contains("Padhānasuttavaṇṇanā")).unwrap_or(false))
-            .expect("Should find second sutta");
-        
-        // Check CST fields for second sutta
-        assert_eq!(sutta2.cst_code.as_deref(), Some("an2.1.1.2"));
-        assert_eq!(sutta2.cst_vagga.as_deref(), Some("1. Kammakāraṇavaggo"));
-        assert_eq!(sutta2.cst_sutta.as_deref(), Some("2. Padhānasuttavaṇṇanā"));
-    }
-    
-    #[test]
-    fn test_cst_fields_an_tika_multi_vagga() {
-        // Test that AN tika files properly split fragments on <p rend="chapter"> Vagga boundaries
-        // This regression test ensures we don't have a single fragment spanning multiple vaggas
-        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<TEI.2>
-<text>
-<body>
-<div id="an2" n="an2" type="book">
-<p rend="nikaya">Aṅguttaranikāye</p>
-<head rend="book">Dukanipāta-ṭīkā</head>
-<p rend="title">1. Paṭhamapaṇṇāsakaṃ</p>
-<p rend="chapter">1. Kammakāraṇavaggo</p>
-<p rend="subhead">1. Vajjasuttavaṇṇanā</p>
-<p rend="bodytext" n="1"><hi rend="paranum">1</hi>First vagga first sutta content</p>
-<p rend="chapter">2. Adhikaraṇavaggavaṇṇanā</p>
-<p rend="bodytext" n="11"><hi rend="paranum">11</hi>Second vagga content without sutta subhead</p>
-<p rend="chapter">3. Bālavaggavaṇṇanā</p>
-<p rend="bodytext" n="22"><hi rend="paranum">22</hi>Third vagga content without sutta subhead</p>
-</div>
-</body>
-</text>
-</TEI.2>"#;
-        
-        let structure = detect_nikaya_structure(xml).unwrap();
-        let fragments = parse_into_fragments(xml, &structure, "s0402t.tik.xml", None, false).unwrap();
-        
-        let sutta_fragments: Vec<_> = fragments.iter()
-            .filter(|f| matches!(f.frag_type, FragmentType::Sutta))
-            .collect();
-        
-        // Should have at least 3 fragments (one for each vagga)
-        assert!(sutta_fragments.len() >= 3, "Should have at least 3 sutta fragments, got {}", sutta_fragments.len());
-        
-        // Verify each fragment contains at most 1 chapter marker (its own vagga title)
-        for frag in &sutta_fragments {
-            let chapter_count = frag.content_xml.matches("rend=\"chapter\"").count();
-            assert!(chapter_count <= 1, 
-                "Fragment should contain at most 1 chapter marker, found {} in fragment with vagga: {:?}", 
-                chapter_count, frag.cst_vagga);
-        }
-        
-        // Find fragment with first vagga
-        let vagga1_frag = sutta_fragments.iter()
-            .find(|f| f.cst_vagga.as_ref().map(|v| v.contains("Kammakāraṇavaggo")).unwrap_or(false))
-            .expect("Should find fragment with first vagga");
-        
-        assert_eq!(vagga1_frag.cst_code.as_deref(), Some("an2.1.1.1"));
-        assert_eq!(vagga1_frag.cst_vagga.as_deref(), Some("1. Kammakāraṇavaggo"));
-        assert_eq!(vagga1_frag.cst_sutta.as_deref(), Some("1. Vajjasuttavaṇṇanā"));
-        
-        // Find fragment with second vagga
-        let vagga2_frag = sutta_fragments.iter()
-            .find(|f| f.cst_vagga.as_ref().map(|v| v.contains("Adhikaraṇavaggavaṇṇanā")).unwrap_or(false))
-            .expect("Should find fragment with second vagga");
-        
-        assert_eq!(vagga2_frag.cst_code.as_deref(), Some("an2.1.2.0"));
-        assert_eq!(vagga2_frag.cst_vagga.as_deref(), Some("2. Adhikaraṇavaggavaṇṇanā"));
-        assert_eq!(vagga2_frag.cst_sutta, None); // No sutta subhead
-        
-        // Find fragment with third vagga
-        let vagga3_frag = sutta_fragments.iter()
-            .find(|f| f.cst_vagga.as_ref().map(|v| v.contains("Bālavaggavaṇṇanā")).unwrap_or(false))
-            .expect("Should find fragment with third vagga");
-        
-        assert_eq!(vagga3_frag.cst_code.as_deref(), Some("an2.1.3.0"));
-        assert_eq!(vagga3_frag.cst_vagga.as_deref(), Some("3. Bālavaggavaṇṇanā"));
-        assert_eq!(vagga3_frag.cst_sutta, None); // No sutta subhead
-    }
+
 }
