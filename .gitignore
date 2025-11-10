@@ -5,6 +5,10 @@ tipitaka_xml_parser_log.txt
 
 fragments.sqlite3
 
+scripts/fragments.sqlite3
+scripts/*.txt.full
+scripts/*_log.txt
+
 # build folders
 /target
 .cache/

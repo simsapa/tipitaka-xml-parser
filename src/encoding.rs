@@ -1,5 +1,6 @@
 // Character encoding detection and conversion for Tipitaka XML files
-// Handles UTF-16LE with BOM to UTF-8 conversion and CRLF to LF normalization
+// Handles UTF-16LE with BOM to UTF-8 conversion, CRLF to LF normalization,
+// and updates the XML encoding declaration to reflect the actual encoding
 
 use anyhow::{Context, Result};
 use encoding_rs::{Encoding, UTF_16LE, UTF_16BE, UTF_8};
@@ -10,6 +11,9 @@ use std::path::Path;
 use crate::logger;
 
 /// Reads an XML file, detects encoding, and converts to UTF-8 with Unix line endings
+///
+/// This function also updates the XML encoding declaration from UTF-16 to UTF-8
+/// to ensure the saved content correctly reflects the actual encoding.
 pub fn read_xml_file(path: &Path) -> Result<String> {
     // Read file as raw bytes
     let mut file = File::open(path)
@@ -49,7 +53,11 @@ pub fn read_xml_file(path: &Path) -> Result<String> {
     // Convert CRLF to LF (Windows to Unix line endings)
     let unix_text = decoded.replace("\r\n", "\n");
     
-    Ok(unix_text)
+    // Replace UTF-16 encoding declaration with UTF-8 in the XML header
+    // This ensures the saved content correctly reflects the actual encoding
+    let utf8_text = unix_text.replace(r#"encoding="UTF-16""#, r#"encoding="UTF-8""#);
+    
+    Ok(utf8_text)
 }
 
 /// Detects file encoding by examining BOM (Byte Order Mark)

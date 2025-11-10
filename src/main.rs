@@ -160,17 +160,17 @@ fn parse_tipitaka_xml(
                     if stats.empty_cst_code > 0 {
                         let msg = format!("{} Sutta fragments have empty cst_code", stats.empty_cst_code);
                         logger::error(&msg);
-                        eprintln!(msg);
+                        eprintln!("{}", msg);
                     }
                     if stats.empty_sc_code > 0 {
                         let msg = format!("{} Sutta fragments have empty sc_code", stats.empty_sc_code);
-                        logger::warn(&msg);
-                        eprintln!(msg);
+                        logger::error(&msg);
+                        eprintln!("{}", msg);
                     }
                     if stats.empty_both_codes > 0 {
                         let msg = format!("{} Sutta fragments have BOTH cst_code and sc_code empty", stats.empty_both_codes);
-                        logger::warn(&msg);
-                        eprintln!(msg);
+                        logger::error(&msg);
+                        eprintln!("{}", msg);
                     }
                     
                     // Summary message if everything is good
@@ -324,8 +324,7 @@ fn main() {
                 Err(format!("Input path is not a file: {:?}", input_xml_path))
             } else {
                 match read_xml_file(&input_xml_path) {
-                    Ok(input_text) => {
-                        let output_text = input_text.replace(r#"encoding="UTF-16""#, r#"encoding="UTF-8""#);
+                    Ok(output_text) => {
                         match fs::write(&output_path, output_text) {
                             Ok(()) => {
                                 logger::info(&format!("Wrote UTF-8 file to {:?}", output_path));
