@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fragment Review - Tipitaka XML Parser</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+    <link rel="stylesheet" href="/static/styles/main.css">
+</head>
+<body>
+    <section class="section">
+        <div class="container is-fluid">
+            <h1 class="title">Fragment Review and Correction</h1>
+            
+            <div class="columns is-gapless" id="main-container">
+                <!-- Left Panel -->
+                <div class="column" id="left-panel">
+                    <div class="box" style="height: 100%;">
+                        <!-- File List -->
+                        <div class="panel-section" id="file-list-section">
+                            <h2 class="subtitle is-5">XML Files</h2>
+                            <div class="panel-list" id="file-list">
+                                <!-- Files will be populated by JavaScript -->
+                            </div>
+                        </div>
+                        
+                        <!-- Fragment List -->
+                        <div class="panel-section" id="fragment-list-section">
+                            <h2 class="subtitle is-5">Fragments</h2>
+                            <div class="panel-list" id="fragment-list">
+                                <!-- Fragments will be populated by JavaScript -->
+                            </div>
+                        </div>
+                        
+                        <!-- Metadata Form -->
+                        <div class="panel-section" id="metadata-section">
+                            <h2 class="subtitle is-5">Fragment Metadata</h2>
+                            <div class="field">
+                                <label class="label is-small">Fragment Type</label>
+                                <div class="control">
+                                    <input class="input is-small" type="text" id="frag_type" readonly>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="label is-small">Review Status</label>
+                                <div class="control">
+                                    <input class="input is-small" type="text" id="frag_review" readonly>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="label is-small">CST Code</label>
+                                <div class="control">
+                                    <input class="input is-small" type="text" id="cst_code" readonly>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="label is-small">CST Vagga</label>
+                                <div class="control">
+                                    <input class="input is-small" type="text" id="cst_vagga" readonly>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="label is-small">CST Sutta</label>
+                                <div class="control">
+                                    <input class="input is-small" type="text" id="cst_sutta" readonly>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="label is-small">SC Code</label>
+                                <div class="control">
+                                    <input class="input is-small" type="text" id="sc_code" readonly>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Draggable Separator -->
+                <div id="separator"></div>
+                
+                <!-- Right Panel -->
+                <div class="column" id="right-panel">
+                    <div class="box" style="height: 100%;">
+                        <!-- Previous Fragment -->
+                        <div class="fragment-section">
+                            <div class="level">
+                                <div class="level-left">
+                                    <h2 class="subtitle is-6">Previous Fragment</h2>
+                                </div>
+                                <div class="level-right">
+                                    <button class="button is-small is-danger" id="delete-prev-btn">Delete Previous</button>
+                                </div>
+                            </div>
+                            <textarea class="textarea is-family-monospace" id="prev-content" rows="8" readonly></textarea>
+                            <div class="buttons are-small mt-2">
+                                <button class="button" id="prev-line-up" title="Move line up from current to previous">Line Up</button>
+                                <button class="button" id="prev-line-down" title="Move line down from previous to current">Line Down</button>
+                                <button class="button" id="prev-char-left" title="Move character left from current to previous">Char Left</button>
+                                <button class="button" id="prev-char-right" title="Move character right from previous to current">Char Right</button>
+                            </div>
+                        </div>
+                        
+                        <!-- Current Fragment -->
+                        <div class="fragment-section mt-4">
+                            <h2 class="subtitle is-6">Current Fragment (Selected)</h2>
+                            <textarea class="textarea is-family-monospace" id="current-content" rows="12" readonly></textarea>
+                        </div>
+                        
+                        <!-- Next Fragment -->
+                        <div class="fragment-section mt-4">
+                            <div class="level">
+                                <div class="level-left">
+                                    <h2 class="subtitle is-6">Next Fragment</h2>
+                                </div>
+                                <div class="level-right">
+                                    <button class="button is-small is-danger" id="delete-next-btn">Delete Next</button>
+                                </div>
+                            </div>
+                            <textarea class="textarea is-family-monospace" id="next-content" rows="8" readonly></textarea>
+                            <div class="buttons are-small mt-2">
+                                <button class="button" id="next-line-up" title="Move line up from next to current">Line Up</button>
+                                <button class="button" id="next-line-down" title="Move line down from current to next">Line Down</button>
+                                <button class="button" id="next-char-left" title="Move character left from next to current">Char Left</button>
+                                <button class="button" id="next-char-right" title="Move character right from current to next">Char Right</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Confirmation Modal -->
+    <div class="modal" id="confirm-modal">
+        <div class="modal-background"></div>
+        <div class="modal-card">
+            <header class="modal-card-head">
+                <p class="modal-card-title">Confirm Action</p>
+                <button class="delete" aria-label="close" id="modal-close"></button>
+            </header>
+            <section class="modal-card-body">
+                <p id="modal-message"></p>
+            </section>
+            <footer class="modal-card-foot">
+                <button class="button is-danger" id="modal-confirm">Confirm</button>
+                <button class="button" id="modal-cancel">Cancel</button>
+            </footer>
+        </div>
+    </div>
+    
+    <script src="/static/scripts/app.js"></script>
+</body>
+</html>

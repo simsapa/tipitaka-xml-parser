@@ -312,6 +312,18 @@ enum Commands {
         #[arg(value_name = "NEW_TSV_PATH")]
         new_tsv_path: PathBuf,
     },
+
+    /// Start web UI for fragment review and correction
+    #[command(arg_required_else_help = true)]
+    WebUi {
+        /// Path to the fragments SQLite database
+        #[arg(value_name = "FRAGMENTS_DB_PATH")]
+        fragments_db_path: PathBuf,
+
+        /// Port to run the web server on
+        #[arg(long, default_value = "8000")]
+        port: u16,
+    },
 }
 
 fn main() {
@@ -440,6 +452,33 @@ fn main() {
                         let error_msg = format!("Failed to check TSV improvements: {}", e);
                         logger::error(&error_msg);
                         eprintln!("{}", error_msg);
+                        Err(error_msg)
+                    }
+                }
+            }
+        }
+
+        Commands::WebUi { fragments_db_path, port } => {
+            use tipitaka_xml_parser::web;
+
+            if !fragments_db_path.exists() {
+                Err(format!("Fragments database does not exist: {:?}", fragments_db_path))
+            } else if !fragments_db_path.is_file() {
+                Err(format!("Fragments database path is not a file: {:?}", fragments_db_path))
+            } else {
+                logger::info(&format!("Starting web UI server on port {}", port));
+                logger::info(&format!("Database: {:?}", fragments_db_path));
+                println!("Starting web UI on http://localhost:{}", port);
+                
+                // This will block until the server is shut down
+                match web::start_server(&fragments_db_path, port) {
+                    Ok(_) => {
+                        logger::info("Web server shut down");
+                        Ok(())
+                    }
+                    Err(e) => {
+                        let error_msg = format!("Failed to start web server: {}", e);
+                        logger::error(&error_msg);
                         Err(error_msg)
                     }
                 }

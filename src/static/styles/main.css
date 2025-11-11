@@ -1,0 +1,145 @@
+/* Main container with resizable panels */
+#main-container {
+    display: flex;
+    height: calc(100vh - 200px);
+    position: relative;
+}
+
+/* Left panel */
+#left-panel {
+    flex: 0 0 400px;
+    min-width: 250px;
+    max-width: 600px;
+    overflow-y: auto;
+}
+
+/* Draggable separator */
+#separator {
+    flex: 0 0 5px;
+    background-color: #dbdbdb;
+    cursor: col-resize;
+    position: relative;
+    transition: background-color 0.2s;
+}
+
+#separator:hover {
+    background-color: #b5b5b5;
+}
+
+#separator:active {
+    background-color: #3273dc;
+}
+
+/* Right panel */
+#right-panel {
+    flex: 1;
+    min-width: 400px;
+    overflow-y: auto;
+}
+
+/* Panel sections in left panel */
+.panel-section {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #dbdbdb;
+}
+
+.panel-section:last-child {
+    border-bottom: none;
+}
+
+.panel-list {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #dbdbdb;
+    border-radius: 4px;
+}
+
+/* File and fragment list items */
+.panel-item {
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    border-bottom: 1px solid #f5f5f5;
+    transition: background-color 0.2s;
+}
+
+.panel-item:hover {
+    background-color: #f5f5f5;
+}
+
+.panel-item.is-active {
+    background-color: #3273dc;
+    color: white;
+}
+
+.panel-item.is-active .tag {
+    background-color: white !important;
+    color: #363636 !important;
+}
+
+.panel-item:last-child {
+    border-bottom: none;
+}
+
+/* Fragment sections in right panel */
+.fragment-section {
+    margin-bottom: 1rem;
+}
+
+.fragment-section textarea {
+    font-size: 0.875rem;
+    line-height: 1.4;
+}
+
+/* Buttons styling */
+.buttons.are-small {
+    display: flex;
+    gap: 0.25rem;
+    flex-wrap: wrap;
+}
+
+/* Metadata form compact styling */
+#metadata-section .field {
+    margin-bottom: 0.5rem;
+}
+
+#metadata-section .label {
+    margin-bottom: 0.25rem;
+    font-size: 0.75rem;
+}
+
+#metadata-section .input {
+    height: 2rem;
+    font-size: 0.875rem;
+}
+
+/* Modal styling */
+.modal-card {
+    max-width: 500px;
+}
+
+/* Scrollbar styling for webkit browsers */
+.panel-list::-webkit-scrollbar,
+#left-panel::-webkit-scrollbar,
+#right-panel::-webkit-scrollbar {
+    width: 8px;
+}
+
+.panel-list::-webkit-scrollbar-track,
+#left-panel::-webkit-scrollbar-track,
+#right-panel::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+.panel-list::-webkit-scrollbar-thumb,
+#left-panel::-webkit-scrollbar-thumb,
+#right-panel::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+
+.panel-list::-webkit-scrollbar-thumb:hover,
+#left-panel::-webkit-scrollbar-thumb:hover,
+#right-panel::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
