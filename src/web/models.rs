@@ -55,3 +55,40 @@ pub struct AdjacentFragment {
     pub frag_idx: i32,
     pub content_xml: String,
 }
+
+/// Request body for updating fragment metadata
+#[derive(Serialize, Deserialize, Debug)]
+pub struct UpdateMetadataRequest {
+    pub frag_review: Option<String>,
+    pub cst_code: Option<String>,
+    pub sc_code: Option<String>,
+    pub cst_vagga: Option<String>,
+    pub cst_sutta: Option<String>,
+    pub cst_paranum: Option<String>,
+    pub sc_sutta: Option<String>,
+}
+
+/// Boundary adjustment action types
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum BoundaryAction {
+    LineUp,
+    LineDown,
+    CharLeft,
+    CharRight,
+}
+
+/// Request body for boundary adjustment
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BoundaryAdjustmentRequest {
+    pub action: BoundaryAction,
+    pub direction: String, // "prev" or "next"
+}
+
+/// Response for boundary adjustment
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BoundaryAdjustmentResponse {
+    pub success: bool,
+    pub message: Option<String>,
+    pub deleted_fragment_id: Option<i32>,
+}

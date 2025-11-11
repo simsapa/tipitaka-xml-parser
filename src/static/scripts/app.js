@@ -171,27 +171,146 @@ function clearFragmentDetails() {
     document.getElementById('next-content').value = '';
 }
 
+// Update fragment metadata (auto-save on blur)
+async function updateFragmentMetadata() {
+    if (!state.selectedFragmentId) return;
+    
+    const metadata = {
+        frag_review: document.getElementById('frag_review').value || null,
+        cst_code: document.getElementById('cst_code').value || null,
+        sc_code: document.getElementById('sc_code').value || null,
+        cst_vagga: document.getElementById('cst_vagga').value || null,
+        cst_sutta: document.getElementById('cst_sutta').value || null,
+        cst_paranum: null,
+        sc_sutta: null,
+    };
+    
+    try {
+        const response = await fetch(`/api/fragments/${state.selectedFragmentId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(metadata)
+        });
+        
+        if (!response.ok) throw new Error('Failed to update metadata');
+        
+        // Refresh fragment list to show updated review status
+        await fetchAndPopulateFragmentList(state.selectedFile);
+        
+        console.log('Metadata updated successfully');
+    } catch (error) {
+        console.error('Error updating metadata:', error);
+        alert('Failed to save metadata changes');
+    }
+}
+
+// Adjust fragment boundary
+async function adjustBoundary(action, direction) {
+    if (!state.selectedFragmentId) return;
+    
+    try {
+        const response = await fetch(`/api/fragments/${state.selectedFragmentId}/adjust-boundary`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action, direction })
+        });
+        
+        if (!response.ok) throw new Error('Failed to adjust boundary');
+        
+        const result = await response.json();
+        
+        // Refresh the current fragment view
+        await fetchAndDisplayFragmentDetails(state.selectedFragmentId);
+        
+        console.log('Boundary adjusted:', result.message);
+    } catch (error) {
+        console.error('Error adjusting boundary:', error);
+        alert('Failed to adjust boundary');
+    }
+}
+
+// Delete fragment
+async function deleteFragment(direction) {
+    if (!state.selectedFragmentId) return;
+    
+    // Determine which fragment to delete
+    const detail = await getCurrentFragmentDetail();
+    if (!detail) return;
+    
+    let fragmentIdToDelete;
+    if (direction === 'prev' && detail.prev_fragment) {
+        fragmentIdToDelete = detail.prev_fragment.id;
+    } else if (direction === 'next' && detail.next_fragment) {
+        fragmentIdToDelete = detail.next_fragment.id;
+    } else {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/fragments/${fragmentIdToDelete}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) throw new Error('Failed to delete fragment');
+        
+        // Refresh fragment list and reload current fragment
+        await fetchAndPopulateFragmentList(state.selectedFile);
+        await fetchAndDisplayFragmentDetails(state.selectedFragmentId);
+        
+        console.log('Fragment deleted successfully');
+    } catch (error) {
+        console.error('Error deleting fragment:', error);
+        alert('Failed to delete fragment');
+    }
+}
+
+// Get current fragment detail
+async function getCurrentFragmentDetail() {
+    if (!state.selectedFragmentId) return null;
+    
+    try {
+        const response = await fetch(`/api/fragments/${state.selectedFragmentId}`);
+        if (!response.ok) throw new Error('Failed to fetch fragment details');
+        return await response.json();
+    } catch (error) {
+        console.error('Error fetching fragment details:', error);
+        return null;
+    }
+}
+
 // Setup event listeners for buttons
 function setupEventListeners() {
-    // Boundary adjustment buttons (placeholders for Stage 3)
-    document.getElementById('prev-line-up').onclick = () => console.log('Previous: Line Up');
-    document.getElementById('prev-line-down').onclick = () => console.log('Previous: Line Down');
-    document.getElementById('prev-char-left').onclick = () => console.log('Previous: Char Left');
-    document.getElementById('prev-char-right').onclick = () => console.log('Previous: Char Right');
+    // Auto-save metadata on blur
+    document.getElementById('frag_review').onchange = updateFragmentMetadata;
+    document.getElementById('cst_code').onblur = updateFragmentMetadata;
+    document.getElementById('sc_code').onblur = updateFragmentMetadata;
+    document.getElementById('cst_vagga').onblur = updateFragmentMetadata;
+    document.getElementById('cst_sutta').onblur = updateFragmentMetadata;
     
-    document.getElementById('next-line-up').onclick = () => console.log('Next: Line Up');
-    document.getElementById('next-line-down').onclick = () => console.log('Next: Line Down');
-    document.getElementById('next-char-left').onclick = () => console.log('Next: Char Left');
-    document.getElementById('next-char-right').onclick = () => console.log('Next: Char Right');
+    // Boundary adjustment buttons for previous fragment
+    document.getElementById('prev-line-up').onclick = () => adjustBoundary('line_up', 'prev');
+    document.getElementById('prev-line-down').onclick = () => adjustBoundary('line_down', 'prev');
+    document.getElementById('prev-char-left').onclick = () => adjustBoundary('char_left', 'prev');
+    document.getElementById('prev-char-right').onclick = () => adjustBoundary('char_right', 'prev');
     
-    // Delete buttons (placeholders for Stage 3)
-    document.getElementById('delete-prev-btn').onclick = () => showConfirmModal('Are you sure you want to delete the previous fragment?', () => {
-        console.log('Delete previous fragment');
-    });
+    // Boundary adjustment buttons for next fragment
+    document.getElementById('next-line-up').onclick = () => adjustBoundary('line_up', 'next');
+    document.getElementById('next-line-down').onclick = () => adjustBoundary('line_down', 'next');
+    document.getElementById('next-char-left').onclick = () => adjustBoundary('char_left', 'next');
+    document.getElementById('next-char-right').onclick = () => adjustBoundary('char_right', 'next');
     
-    document.getElementById('delete-next-btn').onclick = () => showConfirmModal('Are you sure you want to delete the next fragment?', () => {
-        console.log('Delete next fragment');
-    });
+    // Delete buttons with confirmation
+    document.getElementById('delete-prev-btn').onclick = () => {
+        showConfirmModal('Are you sure you want to delete the previous fragment?', () => {
+            deleteFragment('prev');
+        });
+    };
+    
+    document.getElementById('delete-next-btn').onclick = () => {
+        showConfirmModal('Are you sure you want to delete the next fragment?', () => {
+            deleteFragment('next');
+        });
+    };
     
     // Modal controls
     document.getElementById('modal-close').onclick = closeModal;

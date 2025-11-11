@@ -3,7 +3,7 @@
 /// This module contains Rocket route handlers for serving the fragment
 /// review API endpoints.
 
-use rocket::{Route, State, get, routes};
+use rocket::{Route, State, get, patch, post, delete, routes};
 use rocket::response::content::RawHtml;
 use rocket::serde::json::Json;
 use std::fs;
@@ -11,9 +11,14 @@ use std::path::PathBuf;
 use diesel::prelude::*;
 
 use crate::web::state::DbState;
-use crate::web::models::{FileListItem, FragmentListItem, FragmentDetail, AdjacentFragment};
+use crate::web::models::{
+    FileListItem, FragmentListItem, FragmentDetail, AdjacentFragment,
+    UpdateMetadataRequest, BoundaryAdjustmentRequest, BoundaryAdjustmentResponse, BoundaryAction
+};
 use crate::fragments_schema::xml_fragments;
-use crate::fragments_models::XmlFragmentRecord;
+use crate::fragments_models::{
+    XmlFragmentRecord, UpdateFragmentMetadata, UpdateFragmentBoundary, UpdateFragmentIndex
+};
 
 /// Serve the main index.html page
 #[get("/")]
@@ -154,7 +159,193 @@ fn get_fragment_detail(
     Ok(Json(detail))
 }
 
+/// PATCH /api/fragments/:id - Update fragment metadata
+#[patch("/api/fragments/<fragment_id>", data = "<update_request>")]
+fn update_fragment_metadata(
+    fragment_id: i32,
+    update_request: Json<UpdateMetadataRequest>,
+    db_state: &State<DbState>
+) -> Result<Json<String>, String> {
+    let mut conn = db_state.connect()
+        .map_err(|e| format!("Database connection failed: {}", e))?;
+    
+    let changeset = UpdateFragmentMetadata {
+        frag_review: update_request.frag_review.clone(),
+        cst_code: update_request.cst_code.clone(),
+        sc_code: update_request.sc_code.clone(),
+        cst_vagga: update_request.cst_vagga.clone(),
+        cst_sutta: update_request.cst_sutta.clone(),
+        cst_paranum: update_request.cst_paranum.clone(),
+        sc_sutta: update_request.sc_sutta.clone(),
+    };
+    
+    diesel::update(xml_fragments::table.find(fragment_id))
+        .set(&changeset)
+        .execute(&mut conn)
+        .map_err(|e| format!("Update failed: {}", e))?;
+    
+    Ok(Json("Fragment metadata updated successfully".to_string()))
+}
+
+/// POST /api/fragments/:id/adjust-boundary - Adjust fragment boundaries
+#[post("/api/fragments/<fragment_id>/adjust-boundary", data = "<request>")]
+fn adjust_fragment_boundary(
+    fragment_id: i32,
+    request: Json<BoundaryAdjustmentRequest>,
+    db_state: &State<DbState>
+) -> Result<Json<BoundaryAdjustmentResponse>, String> {
+    let mut conn = db_state.connect()
+        .map_err(|e| format!("Database connection failed: {}", e))?;
+    
+    // Start a transaction
+    conn.transaction::<_, diesel::result::Error, _>(|conn| {
+        // Get the current fragment
+        let current: XmlFragmentRecord = xml_fragments::table
+            .find(fragment_id)
+            .first(conn)?;
+        
+        // Determine which fragment to adjust (previous or next)
+        let (target_fragment, other_fragment): (XmlFragmentRecord, XmlFragmentRecord) = 
+            if request.direction == "prev" {
+                // Adjusting boundary with previous fragment
+                let prev: XmlFragmentRecord = xml_fragments::table
+                    .filter(xml_fragments::cst_file.eq(&current.cst_file))
+                    .filter(xml_fragments::frag_idx.eq(current.frag_idx - 1))
+                    .first(conn)?;
+                (prev, current)
+            } else {
+                // Adjusting boundary with next fragment
+                let next: XmlFragmentRecord = xml_fragments::table
+                    .filter(xml_fragments::cst_file.eq(&current.cst_file))
+                    .filter(xml_fragments::frag_idx.eq(current.frag_idx + 1))
+                    .first(conn)?;
+                (current, next)
+            };
+        
+        // Calculate new boundaries based on action
+        // Note: This is a simplified implementation
+        // In a real implementation, you would need to:
+        // 1. Load the original XML file
+        // 2. Re-extract content based on new boundaries
+        // 3. Update content_xml for both fragments
+        
+        let (new_target_end_line, new_target_end_char, new_other_start_line, new_other_start_char) = 
+            match request.action {
+                BoundaryAction::LineUp => {
+                    // Move one line from other to target
+                    (target_fragment.end_line + 1, 0, other_fragment.start_line + 1, 0)
+                }
+                BoundaryAction::LineDown => {
+                    // Move one line from target to other
+                    (target_fragment.end_line - 1, target_fragment.end_char, other_fragment.start_line - 1, 0)
+                }
+                BoundaryAction::CharLeft => {
+                    // Move one character from other to target
+                    if other_fragment.start_char > 0 {
+                        (target_fragment.end_line, target_fragment.end_char + 1, 
+                         other_fragment.start_line, other_fragment.start_char - 1)
+                    } else {
+                        (target_fragment.end_line, target_fragment.end_char, 
+                         other_fragment.start_line, other_fragment.start_char)
+                    }
+                }
+                BoundaryAction::CharRight => {
+                    // Move one character from target to other
+                    if target_fragment.end_char > 0 {
+                        (target_fragment.end_line, target_fragment.end_char - 1,
+                         other_fragment.start_line, other_fragment.start_char + 1)
+                    } else {
+                        (target_fragment.end_line, target_fragment.end_char,
+                         other_fragment.start_line, other_fragment.start_char)
+                    }
+                }
+            };
+        
+        // Update target fragment
+        let target_update = UpdateFragmentBoundary {
+            start_line: target_fragment.start_line,
+            start_char: target_fragment.start_char,
+            end_line: new_target_end_line,
+            end_char: new_target_end_char,
+            content_xml: target_fragment.content_xml.clone(), // TODO: Re-extract from XML
+        };
+        
+        diesel::update(xml_fragments::table.find(target_fragment.id))
+            .set(&target_update)
+            .execute(conn)?;
+        
+        // Update other fragment
+        let other_update = UpdateFragmentBoundary {
+            start_line: new_other_start_line,
+            start_char: new_other_start_char,
+            end_line: other_fragment.end_line,
+            end_char: other_fragment.end_char,
+            content_xml: other_fragment.content_xml.clone(), // TODO: Re-extract from XML
+        };
+        
+        diesel::update(xml_fragments::table.find(other_fragment.id))
+            .set(&other_update)
+            .execute(conn)?;
+        
+        Ok(())
+    }).map_err(|e| format!("Transaction failed: {}", e))?;
+    
+    Ok(Json(BoundaryAdjustmentResponse {
+        success: true,
+        message: Some("Boundary adjusted successfully".to_string()),
+        deleted_fragment_id: None,
+    }))
+}
+
+/// DELETE /api/fragments/:id - Delete a fragment
+#[delete("/api/fragments/<fragment_id>")]
+fn delete_fragment(
+    fragment_id: i32,
+    db_state: &State<DbState>
+) -> Result<Json<String>, String> {
+    let mut conn = db_state.connect()
+        .map_err(|e| format!("Database connection failed: {}", e))?;
+    
+    conn.transaction::<_, diesel::result::Error, _>(|conn| {
+        // Get the fragment to delete
+        let fragment: XmlFragmentRecord = xml_fragments::table
+            .find(fragment_id)
+            .first(conn)?;
+        
+        // Delete the fragment
+        diesel::delete(xml_fragments::table.find(fragment_id))
+            .execute(conn)?;
+        
+        // Update frag_idx for all subsequent fragments in the same file
+        let subsequent: Vec<XmlFragmentRecord> = xml_fragments::table
+            .filter(xml_fragments::cst_file.eq(&fragment.cst_file))
+            .filter(xml_fragments::frag_idx.gt(fragment.frag_idx))
+            .load(conn)?;
+        
+        for frag in subsequent {
+            let update = UpdateFragmentIndex {
+                frag_idx: frag.frag_idx - 1,
+            };
+            diesel::update(xml_fragments::table.find(frag.id))
+                .set(&update)
+                .execute(conn)?;
+        }
+        
+        Ok(())
+    }).map_err(|e| format!("Delete transaction failed: {}", e))?;
+    
+    Ok(Json("Fragment deleted successfully".to_string()))
+}
+
 /// Get all routes for the web application
 pub fn get_routes() -> Vec<Route> {
-    routes![index, get_files, get_file_fragments, get_fragment_detail]
+    routes![
+        index, 
+        get_files, 
+        get_file_fragments, 
+        get_fragment_detail,
+        update_fragment_metadata,
+        adjust_fragment_boundary,
+        delete_fragment
+    ]
 }

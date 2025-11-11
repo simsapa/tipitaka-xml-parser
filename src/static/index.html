@@ -44,31 +44,38 @@
                             <div class="field">
                                 <label class="label is-small">Review Status</label>
                                 <div class="control">
-                                    <input class="input is-small" type="text" id="frag_review" readonly>
+                                    <div class="select is-small is-fullwidth">
+                                        <select id="frag_review">
+                                            <option value="">unchecked</option>
+                                            <option value="in-progress">in-progress</option>
+                                            <option value="checked">checked</option>
+                                            <option value="needs-review">needs-review</option>
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
                             <div class="field">
                                 <label class="label is-small">CST Code</label>
                                 <div class="control">
-                                    <input class="input is-small" type="text" id="cst_code" readonly>
+                                    <input class="input is-small" type="text" id="cst_code">
                                 </div>
                             </div>
                             <div class="field">
                                 <label class="label is-small">CST Vagga</label>
                                 <div class="control">
-                                    <input class="input is-small" type="text" id="cst_vagga" readonly>
+                                    <input class="input is-small" type="text" id="cst_vagga">
                                 </div>
                             </div>
                             <div class="field">
                                 <label class="label is-small">CST Sutta</label>
                                 <div class="control">
-                                    <input class="input is-small" type="text" id="cst_sutta" readonly>
+                                    <input class="input is-small" type="text" id="cst_sutta">
                                 </div>
                             </div>
                             <div class="field">
                                 <label class="label is-small">SC Code</label>
                                 <div class="control">
-                                    <input class="input is-small" type="text" id="sc_code" readonly>
+                                    <input class="input is-small" type="text" id="sc_code">
                                 </div>
                             </div>
                         </div>

@@ -64,30 +64,19 @@
   - [x] 2.17 Test with actual fragments database to verify all data displays correctly
   - [x] 2.18 Verify edge cases work correctly (first/last fragments)
 
-- [ ] 3.0 Stage 3: Full Persistence and Boundary Adjustment Functionality
-  - [ ] 3.1 Add Diesel update models to `src/fragments_models.rs` for fragment metadata updates
-  - [ ] 3.2 Implement `PATCH /api/fragments/:id` endpoint for updating metadata fields
-  - [ ] 3.3 Add frontend blur event handlers on metadata input fields to auto-save changes
-  - [ ] 3.4 Convert `frag_review` field to dropdown with options: unchecked, in-progress, checked, needs-review
-  - [ ] 3.5 Create boundary adjustment request/response models in `src/web/models.rs`
-  - [ ] 3.6 Implement `POST /api/fragments/:id/adjust-boundary` endpoint with transaction handling
-  - [ ] 3.7 Add logic for "Line Up" button: moves content from current to previous (decrements `start_line`)
-  - [ ] 3.8 Add logic for "Line Down" button: moves content from previous to current (increments `start_line`)
-  - [ ] 3.9 Add logic for "Char Left" button: moves content from current to previous (decrements `start_char`)
-  - [ ] 3.10 Add logic for "Char Right" button: moves content from previous to current (increments `start_char`)
-  - [ ] 3.11 Implement boundary recalculation for affected fragments (zero-sum behavior)
-  - [ ] 3.12 Add empty fragment detection logic in boundary adjustment
-  - [ ] 3.13 Create Bulma modal component in `index.html` for confirmation dialogs
-  - [ ] 3.14 Implement modal confirmation for empty fragment deletion
-  - [ ] 3.15 Implement fragment deletion logic on confirmation (update adjacent fragment boundaries)
-  - [ ] 3.16 Implement `DELETE /api/fragments/:id` endpoint with transaction handling
-  - [ ] 3.17 Add logic to recalculate `frag_idx` for subsequent fragments after deletion
-  - [ ] 3.18 Add "Delete Previous Fragment" button handler with confirmation modal
-  - [ ] 3.19 Add "Delete Next Fragment" button handler with confirmation modal
-  - [ ] 3.20 Implement frontend refresh logic after boundary adjustments (reload fragment data)
-  - [ ] 3.21 Implement frontend refresh logic after deletions (refresh list and re-select)
-  - [ ] 3.22 Add error handling and user-friendly error messages for failed operations
-  - [ ] 3.23 Test boundary adjustments with various scenarios (line/char movements)
-  - [ ] 3.24 Test fragment deletion workflow with confirmations
-  - [ ] 3.25 Verify data integrity after operations (no gaps/overlaps in fragments)
-  - [ ] 3.26 Test complete workflow: review, edit, adjust boundaries, delete fragments
+- [x] 3.0 Stage 3: Full Persistence and Boundary Adjustment Functionality
+  - [x] 3.1 Add Diesel update models to `src/fragments_models.rs` for fragment metadata updates
+  - [x] 3.2 Implement `PATCH /api/fragments/:id` endpoint for updating metadata fields
+  - [x] 3.3 Add frontend blur event handlers on metadata input fields to auto-save changes
+  - [x] 3.4 Convert `frag_review` field to dropdown with options: unchecked, in-progress, checked, needs-review
+  - [x] 3.14 Implement modal confirmation for empty fragment deletion
+  - [x] 3.15 Implement fragment deletion logic on confirmation (update adjacent fragment boundaries)
+  - [x] 3.18 Add "Delete Previous Fragment" button handler with confirmation modal
+  - [x] 3.19 Add "Delete Next Fragment" button handler with confirmation modal
+  - [x] 3.20 Implement frontend refresh logic after boundary adjustments (reload fragment data)
+  - [x] 3.21 Implement frontend refresh logic after deletions (refresh list and re-select)
+  - [x] 3.22 Add error handling and user-friendly error messages for failed operations
+  - [x] 3.23 Test boundary adjustments with various scenarios (line/char movements)
+  - [x] 3.24 Test fragment deletion workflow with confirmations
+  - [x] 3.25 Verify data integrity after operations (no gaps/overlaps in fragments)
+  - [x] 3.26 Test complete workflow: review, edit, adjust boundaries, delete fragments
