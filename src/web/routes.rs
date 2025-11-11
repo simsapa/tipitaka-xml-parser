@@ -13,11 +13,12 @@ use diesel::prelude::*;
 use crate::web::state::DbState;
 use crate::web::models::{
     FileListItem, FragmentListItem, FragmentDetail, AdjacentFragment,
-    UpdateMetadataRequest, BoundaryAdjustmentRequest, BoundaryAdjustmentResponse, BoundaryAction
+    UpdateMetadataRequest, BoundaryAdjustmentRequest, BoundaryAdjustmentResponse, BoundaryAction,
+    CreateFragmentRequest, CreateFragmentResponse
 };
 use crate::fragments_schema::xml_fragments;
 use crate::fragments_models::{
-    XmlFragmentRecord, UpdateFragmentMetadata, UpdateFragmentBoundary, UpdateFragmentIndex
+    XmlFragmentRecord, UpdateFragmentMetadata, UpdateFragmentBoundary, UpdateFragmentIndex, NewXmlFragment
 };
 
 /// Serve the main index.html page
@@ -388,6 +389,163 @@ fn delete_fragment(
     Ok(Json("Fragment deleted and merged successfully".to_string()))
 }
 
+/// POST /api/fragments/:id/create - Create a new Sutta fragment before or after the current one
+#[post("/api/fragments/<fragment_id>/create", data = "<request>")]
+fn create_fragment(
+    fragment_id: i32,
+    request: Json<CreateFragmentRequest>,
+    db_state: &State<DbState>
+) -> Result<Json<CreateFragmentResponse>, String> {
+    let mut conn = db_state.connect()
+        .map_err(|e| format!("Database connection failed: {}", e))?;
+    
+    let new_fragment_id = conn.transaction::<_, diesel::result::Error, _>(|conn| {
+        // Get the current fragment
+        let current: XmlFragmentRecord = xml_fragments::table
+            .find(fragment_id)
+            .first(conn)?;
+        
+        let direction = request.direction.as_str();
+        
+        if direction == "prev" {
+            // Create a new fragment BEFORE the current one
+            // 1. Increment frag_idx for current and all subsequent fragments
+            let to_update: Vec<XmlFragmentRecord> = xml_fragments::table
+                .filter(xml_fragments::cst_file.eq(&current.cst_file))
+                .filter(xml_fragments::frag_idx.ge(current.frag_idx))
+                .load(conn)?;
+            
+            for frag in to_update {
+                let update = UpdateFragmentIndex {
+                    frag_idx: frag.frag_idx + 1,
+                };
+                diesel::update(xml_fragments::table.find(frag.id))
+                    .set(&update)
+                    .execute(conn)?;
+            }
+            
+            // 2. Create new fragment at current's original frag_idx
+            // Split the current fragment's content in half (approximately)
+            let midpoint_line = (current.start_line + current.end_line) / 2;
+            
+            let new_fragment = NewXmlFragment {
+                cst_file: &current.cst_file,
+                frag_idx: current.frag_idx,
+                frag_type: "Sutta",
+                frag_review: None,
+                nikaya: &current.nikaya,
+                cst_code: current.cst_code.as_deref(),
+                sc_code: current.sc_code.as_deref(),
+                content_xml: "<!-- New fragment content -->",
+                content_html: None,
+                cst_vagga: current.cst_vagga.as_deref(),
+                cst_sutta: current.cst_sutta.as_deref(),
+                cst_paranum: None,
+                sc_sutta: current.sc_sutta.as_deref(),
+                start_line: current.start_line,
+                start_char: current.start_char,
+                end_line: midpoint_line,
+                end_char: 0,
+                group_levels: &current.group_levels,
+            };
+            
+            diesel::insert_into(xml_fragments::table)
+                .values(&new_fragment)
+                .execute(conn)?;
+            
+            // Get the ID of the newly created fragment
+            let new_frag: XmlFragmentRecord = xml_fragments::table
+                .filter(xml_fragments::cst_file.eq(&current.cst_file))
+                .filter(xml_fragments::frag_idx.eq(current.frag_idx))
+                .first(conn)?;
+            
+            // Update the (now next) current fragment's start boundary
+            let update_current = UpdateFragmentBoundary {
+                start_line: midpoint_line,
+                start_char: 0,
+                end_line: current.end_line,
+                end_char: current.end_char,
+                content_xml: current.content_xml.clone(),
+            };
+            diesel::update(xml_fragments::table.find(fragment_id))
+                .set(&update_current)
+                .execute(conn)?;
+            
+            Ok(new_frag.id)
+        } else {
+            // Create a new fragment AFTER the current one
+            // 1. Increment frag_idx for all subsequent fragments
+            let to_update: Vec<XmlFragmentRecord> = xml_fragments::table
+                .filter(xml_fragments::cst_file.eq(&current.cst_file))
+                .filter(xml_fragments::frag_idx.gt(current.frag_idx))
+                .load(conn)?;
+            
+            for frag in to_update {
+                let update = UpdateFragmentIndex {
+                    frag_idx: frag.frag_idx + 1,
+                };
+                diesel::update(xml_fragments::table.find(frag.id))
+                    .set(&update)
+                    .execute(conn)?;
+            }
+            
+            // 2. Create new fragment after current
+            let midpoint_line = (current.start_line + current.end_line) / 2;
+            
+            let new_fragment = NewXmlFragment {
+                cst_file: &current.cst_file,
+                frag_idx: current.frag_idx + 1,
+                frag_type: "Sutta",
+                frag_review: None,
+                nikaya: &current.nikaya,
+                cst_code: current.cst_code.as_deref(),
+                sc_code: current.sc_code.as_deref(),
+                content_xml: "<!-- New fragment content -->",
+                content_html: None,
+                cst_vagga: current.cst_vagga.as_deref(),
+                cst_sutta: current.cst_sutta.as_deref(),
+                cst_paranum: None,
+                sc_sutta: current.sc_sutta.as_deref(),
+                start_line: midpoint_line,
+                start_char: 0,
+                end_line: current.end_line,
+                end_char: current.end_char,
+                group_levels: &current.group_levels,
+            };
+            
+            diesel::insert_into(xml_fragments::table)
+                .values(&new_fragment)
+                .execute(conn)?;
+            
+            // Get the ID of the newly created fragment
+            let new_frag: XmlFragmentRecord = xml_fragments::table
+                .filter(xml_fragments::cst_file.eq(&current.cst_file))
+                .filter(xml_fragments::frag_idx.eq(current.frag_idx + 1))
+                .first(conn)?;
+            
+            // Update current fragment's end boundary
+            let update_current = UpdateFragmentBoundary {
+                start_line: current.start_line,
+                start_char: current.start_char,
+                end_line: midpoint_line,
+                end_char: 0,
+                content_xml: current.content_xml.clone(),
+            };
+            diesel::update(xml_fragments::table.find(fragment_id))
+                .set(&update_current)
+                .execute(conn)?;
+            
+            Ok(new_frag.id)
+        }
+    }).map_err(|e| format!("Create fragment transaction failed: {}", e))?;
+    
+    Ok(Json(CreateFragmentResponse {
+        success: true,
+        new_fragment_id,
+        message: Some("New fragment created successfully".to_string()),
+    }))
+}
+
 /// Get all routes for the web application
 pub fn get_routes() -> Vec<Route> {
     routes![
@@ -397,6 +555,7 @@ pub fn get_routes() -> Vec<Route> {
         get_fragment_detail,
         update_fragment_metadata,
         adjust_fragment_boundary,
-        delete_fragment
+        delete_fragment,
+        create_fragment
     ]
 }

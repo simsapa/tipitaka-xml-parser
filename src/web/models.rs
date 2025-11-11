@@ -93,3 +93,17 @@ pub struct BoundaryAdjustmentResponse {
     pub message: Option<String>,
     pub deleted_fragment_id: Option<i32>,
 }
+
+/// Request body for creating a new fragment
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CreateFragmentRequest {
+    pub direction: String, // "prev" or "next"
+}
+
+/// Response for fragment creation
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CreateFragmentResponse {
+    pub success: bool,
+    pub new_fragment_id: i32,
+    pub message: Option<String>,
+}

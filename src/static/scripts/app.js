@@ -160,14 +160,23 @@ async function fetchAndDisplayFragmentDetails(fragmentId) {
         // Delete buttons should only be enabled if the current fragment is Sutta
         // and there's an adjacent Sutta fragment to merge with
         const currentIsSutta = detail.frag_type === 'Sutta';
+        const currentIsHeader = detail.frag_type === 'Header';
         const prevIsSutta = detail.prev_fragment && detail.prev_fragment.frag_type === 'Sutta';
         const nextIsSutta = detail.next_fragment && detail.next_fragment.frag_type === 'Sutta';
+        const prevIsHeader = detail.prev_fragment && detail.prev_fragment.frag_type === 'Header';
+        const nextIsHeader = detail.next_fragment && detail.next_fragment.frag_type === 'Header';
         
         // Enable delete-prev button only if current is Sutta and has previous Sutta to merge with
         document.getElementById('delete-prev-btn').disabled = !(currentIsSutta && prevIsSutta);
         
         // Enable delete-next button only if current is Sutta and has next Sutta to merge with
         document.getElementById('delete-next-btn').disabled = !(currentIsSutta && nextIsSutta);
+        
+        // Create new prev button: disabled if current is the first Header (no prev Header exists)
+        document.getElementById('create-prev-btn').disabled = currentIsHeader && !prevIsHeader;
+        
+        // Create new next button: disabled if current is the last Header (no next Header exists)
+        document.getElementById('create-next-btn').disabled = currentIsHeader && !nextIsHeader;
         
         // Boundary adjustment buttons enabled if there's a prev/next fragment
         document.querySelectorAll('[id^="prev-"]').forEach(btn => btn.disabled = !hasPrev);
@@ -306,6 +315,34 @@ async function getCurrentFragmentDetail() {
     }
 }
 
+// Create new fragment before or after current fragment
+async function createNewFragment(direction) {
+    if (!state.selectedFragmentId) return;
+    
+    try {
+        const response = await fetch(`/api/fragments/${state.selectedFragmentId}/create`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ direction })
+        });
+        
+        if (!response.ok) throw new Error('Failed to create new fragment');
+        
+        const result = await response.json();
+        
+        // Refresh fragment list
+        await fetchAndPopulateFragmentList(state.selectedFile);
+        
+        // Select the newly created fragment
+        await selectFragment(result.new_fragment_id);
+        
+        console.log('New fragment created successfully');
+    } catch (error) {
+        console.error('Error creating new fragment:', error);
+        alert('Failed to create new fragment');
+    }
+}
+
 // Setup event listeners for buttons
 function setupEventListeners() {
     // Auto-save metadata on blur
@@ -329,16 +366,20 @@ function setupEventListeners() {
     
     // Delete buttons with confirmation
     document.getElementById('delete-prev-btn').onclick = () => {
-        showConfirmModal('Delete the current fragment and merge its content with the previous fragment?', () => {
+        showConfirmModal('Delete the previous fragment and merge its content with the current fragment?', () => {
             deleteFragment('prev');
         });
     };
     
     document.getElementById('delete-next-btn').onclick = () => {
-        showConfirmModal('Delete the current fragment and merge its content with the next fragment?', () => {
+        showConfirmModal('Delete the next fragment and merge its content with the current fragment?', () => {
             deleteFragment('next');
         });
     };
+    
+    // Create new fragment buttons
+    document.getElementById('create-prev-btn').onclick = () => createNewFragment('prev');
+    document.getElementById('create-next-btn').onclick = () => createNewFragment('next');
     
     // Modal controls
     document.getElementById('modal-close').onclick = closeModal;
