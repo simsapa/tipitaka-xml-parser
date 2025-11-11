@@ -320,7 +320,9 @@ fn derive_cst_fields(
     // Extract vagga from group_levels
     // Check if THIS FRAGMENT actually has a Vagga level (not just if the nikaya supports vaggas)
     // This is important for SN where some samyuttas have vaggas and some don't
+    // Use .rev() to get the LAST (most recent) Vagga level, not the first
     let cst_vagga = fragment.group_levels.iter()
+        .rev()
         .find(|level| matches!(level.group_type, crate::types::GroupType::Vagga))
         .and_then(|level| {
             if level.title.trim().is_empty() {
@@ -343,7 +345,11 @@ fn derive_cst_fields(
         });
     
     // Extract sutta title from group_levels (filter out empty titles)
+    // Use .rev() to get the LAST (most recent) Sutta level, not the first
+    // This is important because group_levels may contain multiple Sutta levels
+    // when a new sutta starts (the old one hasn't been removed yet)
     let cst_sutta = fragment.group_levels.iter()
+        .rev()
         .find(|level| matches!(level.group_type, crate::types::GroupType::Sutta))
         .and_then(|level| {
             if level.title.trim().is_empty() {
@@ -536,7 +542,9 @@ fn derive_cst_code(fragment: &XmlFragment, nikaya_structure: &NikayaStructure, c
     // This is more reliable than using the vagga ID since the ID may be inherited from the next vagga
     // However, for vagga 0 (introduction/preamble) in commentary files, the title is often empty,
     // so we fallback to extracting from the ID (e.g., "mn1_0" -> "0")
+    // Use .rev() to get the LAST (most recent) Vagga level, not the first
     let vagga_number = fragment.group_levels.iter()
+        .rev()
         .find_map(|level| {
             if matches!(level.group_type, crate::types::GroupType::Vagga) {
                 // First try: Extract number from title like "1. Vagga Name"
@@ -560,7 +568,10 @@ fn derive_cst_code(fragment: &XmlFragment, nikaya_structure: &NikayaStructure, c
     
     // Extract sutta number from title (e.g., "1. Brahmajālasuttaṃ" or "1. Oghataraṇasuttaṃ" -> "1")
     // First try from Sutta GroupLevel
+    // Use .rev() to get the LAST (most recent) Sutta level, not the first
+    // This is important because group_levels may contain multiple Sutta levels
     let sutta_number = fragment.group_levels.iter()
+        .rev()
         .find_map(|level| {
             if matches!(level.group_type, crate::types::GroupType::Sutta) {
                 // Extract number from title like "1. Title" or "10. Title"
