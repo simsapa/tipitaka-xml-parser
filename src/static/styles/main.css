@@ -1,7 +1,15 @@
-/* Main container with resizable panels */
+/* Reset body and html margins/padding */
+body, html {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* Main container with resizable panels - full viewport height */
 #main-container {
     display: flex;
-    height: calc(100vh - 200px);
+    height: 100vh;
     position: relative;
 }
 
@@ -30,11 +38,21 @@
     background-color: #3273dc;
 }
 
-/* Right panel */
+/* Right panel - flexbox layout for proper sizing */
 #right-panel {
     flex: 1;
     min-width: 400px;
-    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#right-panel .box {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 0.75rem;
+    overflow: hidden;
 }
 
 /* Panel sections in left panel */
@@ -81,14 +99,39 @@
     border-bottom: none;
 }
 
-/* Fragment sections in right panel */
+/* Fragment sections in right panel - equal height distribution */
 .fragment-section {
-    margin-bottom: 1rem;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    margin-bottom: 0.5rem;
+}
+
+.fragment-section:last-child {
+    margin-bottom: 0;
+}
+
+.fragment-section .level {
+    flex-shrink: 0;
+    margin-bottom: 0.25rem;
+}
+
+.fragment-section .subtitle {
+    margin-bottom: 0.25rem;
 }
 
 .fragment-section textarea {
+    flex: 1;
     font-size: 0.875rem;
     line-height: 1.4;
+    min-height: 0;
+    resize: none;
+}
+
+.fragment-section .buttons {
+    flex-shrink: 0;
+    margin-top: 0.25rem;
 }
 
 /* Buttons styling */
@@ -96,6 +139,7 @@
     display: flex;
     gap: 0.25rem;
     flex-wrap: wrap;
+    margin-bottom: 0.25rem !important;
 }
 
 /* Metadata form compact styling */
@@ -108,7 +152,13 @@
     font-size: 0.75rem;
 }
 
-#metadata-section .input {
+#metadata-section .input,
+#metadata-section .select {
+    height: 2rem;
+    font-size: 0.875rem;
+}
+
+#metadata-section .select select {
     height: 2rem;
     font-size: 0.875rem;
 }
@@ -121,25 +171,25 @@
 /* Scrollbar styling for webkit browsers */
 .panel-list::-webkit-scrollbar,
 #left-panel::-webkit-scrollbar,
-#right-panel::-webkit-scrollbar {
+textarea::-webkit-scrollbar {
     width: 8px;
 }
 
 .panel-list::-webkit-scrollbar-track,
 #left-panel::-webkit-scrollbar-track,
-#right-panel::-webkit-scrollbar-track {
+textarea::-webkit-scrollbar-track {
     background: #f1f1f1;
 }
 
 .panel-list::-webkit-scrollbar-thumb,
 #left-panel::-webkit-scrollbar-thumb,
-#right-panel::-webkit-scrollbar-thumb {
+textarea::-webkit-scrollbar-thumb {
     background: #888;
     border-radius: 4px;
 }
 
 .panel-list::-webkit-scrollbar-thumb:hover,
 #left-panel::-webkit-scrollbar-thumb:hover,
-#right-panel::-webkit-scrollbar-thumb:hover {
+textarea::-webkit-scrollbar-thumb:hover {
     background: #555;
 }

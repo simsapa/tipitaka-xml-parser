@@ -117,6 +117,7 @@ fn get_fragment_detail(
         .map(|r| AdjacentFragment {
             id: r.id,
             frag_idx: r.frag_idx,
+            frag_type: r.frag_type,
             content_xml: r.content_xml,
         });
     
@@ -130,6 +131,7 @@ fn get_fragment_detail(
         .map(|r| AdjacentFragment {
             id: r.id,
             frag_idx: r.frag_idx,
+            frag_type: r.frag_type,
             content_xml: r.content_xml,
         });
     
@@ -297,7 +299,9 @@ fn adjust_fragment_boundary(
     }))
 }
 
-/// DELETE /api/fragments/:id - Delete a fragment
+/// DELETE /api/fragments/:id - Delete a fragment and merge into adjacent fragment
+/// The fragment with fragment_id will be DELETED
+/// Its content will be merged into the adjacent fragment (prev or next based on what exists)
 #[delete("/api/fragments/<fragment_id>")]
 fn delete_fragment(
     fragment_id: i32,
@@ -308,9 +312,56 @@ fn delete_fragment(
     
     conn.transaction::<_, diesel::result::Error, _>(|conn| {
         // Get the fragment to delete
-        let fragment: XmlFragmentRecord = xml_fragments::table
+        let fragment_to_delete: XmlFragmentRecord = xml_fragments::table
             .find(fragment_id)
             .first(conn)?;
+        
+        // Always try to merge with the PREVIOUS fragment first (if it exists)
+        // This ensures that when we delete a fragment, its content goes to the one before it
+        let prev_fragment: Option<XmlFragmentRecord> = xml_fragments::table
+            .filter(xml_fragments::cst_file.eq(&fragment_to_delete.cst_file))
+            .filter(xml_fragments::frag_idx.eq(fragment_to_delete.frag_idx - 1))
+            .first(conn)
+            .optional()?;
+        
+        if let Some(prev_frag) = prev_fragment {
+            // Extend the previous fragment's end boundary to include the deleted fragment
+            let merge_update = UpdateFragmentBoundary {
+                start_line: prev_frag.start_line,
+                start_char: prev_frag.start_char,
+                end_line: fragment_to_delete.end_line,
+                end_char: fragment_to_delete.end_char,
+                // Combine content: previous first, then deleted
+                content_xml: format!("{}\n{}", prev_frag.content_xml, fragment_to_delete.content_xml),
+            };
+            
+            diesel::update(xml_fragments::table.find(prev_frag.id))
+                .set(&merge_update)
+                .execute(conn)?;
+        } else {
+            // If no previous fragment, merge with the next fragment
+            let next_fragment: Option<XmlFragmentRecord> = xml_fragments::table
+                .filter(xml_fragments::cst_file.eq(&fragment_to_delete.cst_file))
+                .filter(xml_fragments::frag_idx.eq(fragment_to_delete.frag_idx + 1))
+                .first(conn)
+                .optional()?;
+            
+            if let Some(next_frag) = next_fragment {
+                // Extend the next fragment's start boundary to include the deleted fragment
+                let merge_update = UpdateFragmentBoundary {
+                    start_line: fragment_to_delete.start_line,
+                    start_char: fragment_to_delete.start_char,
+                    end_line: next_frag.end_line,
+                    end_char: next_frag.end_char,
+                    // Combine content: deleted first, then next
+                    content_xml: format!("{}\n{}", fragment_to_delete.content_xml, next_frag.content_xml),
+                };
+                
+                diesel::update(xml_fragments::table.find(next_frag.id))
+                    .set(&merge_update)
+                    .execute(conn)?;
+            }
+        }
         
         // Delete the fragment
         diesel::delete(xml_fragments::table.find(fragment_id))
@@ -318,8 +369,8 @@ fn delete_fragment(
         
         // Update frag_idx for all subsequent fragments in the same file
         let subsequent: Vec<XmlFragmentRecord> = xml_fragments::table
-            .filter(xml_fragments::cst_file.eq(&fragment.cst_file))
-            .filter(xml_fragments::frag_idx.gt(fragment.frag_idx))
+            .filter(xml_fragments::cst_file.eq(&fragment_to_delete.cst_file))
+            .filter(xml_fragments::frag_idx.gt(fragment_to_delete.frag_idx))
             .load(conn)?;
         
         for frag in subsequent {
@@ -334,7 +385,7 @@ fn delete_fragment(
         Ok(())
     }).map_err(|e| format!("Delete transaction failed: {}", e))?;
     
-    Ok(Json("Fragment deleted successfully".to_string()))
+    Ok(Json("Fragment deleted and merged successfully".to_string()))
 }
 
 /// Get all routes for the web application

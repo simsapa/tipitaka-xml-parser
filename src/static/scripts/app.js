@@ -137,18 +137,40 @@ async function fetchAndDisplayFragmentDetails(fragmentId) {
         document.getElementById('sc_code').value = detail.sc_code || '';
         
         // Update text areas
-        document.getElementById('prev-content').value = detail.prev_fragment ? detail.prev_fragment.content_xml : '';
-        document.getElementById('current-content').value = detail.content_xml;
-        document.getElementById('next-content').value = detail.next_fragment ? detail.next_fragment.content_xml : '';
+        const prevTextarea = document.getElementById('prev-content');
+        const currentTextarea = document.getElementById('current-content');
+        const nextTextarea = document.getElementById('next-content');
         
-        // Enable/disable controls based on position
+        prevTextarea.value = detail.prev_fragment ? detail.prev_fragment.content_xml : '';
+        currentTextarea.value = detail.content_xml;
+        nextTextarea.value = detail.next_fragment ? detail.next_fragment.content_xml : '';
+        
+        // Scroll previous fragment textarea to bottom
+        if (detail.prev_fragment) {
+            // Use setTimeout to ensure the textarea has been updated
+            setTimeout(() => {
+                prevTextarea.scrollTop = prevTextarea.scrollHeight;
+            }, 0);
+        }
+        
+        // Enable/disable controls based on position and fragment type
         const hasPrev = detail.prev_fragment !== null;
         const hasNext = detail.next_fragment !== null;
         
-        document.getElementById('delete-prev-btn').disabled = !hasPrev;
-        document.querySelectorAll('[id^="prev-"]').forEach(btn => btn.disabled = !hasPrev);
+        // Delete buttons should only be enabled if the current fragment is Sutta
+        // and there's an adjacent Sutta fragment to merge with
+        const currentIsSutta = detail.frag_type === 'Sutta';
+        const prevIsSutta = detail.prev_fragment && detail.prev_fragment.frag_type === 'Sutta';
+        const nextIsSutta = detail.next_fragment && detail.next_fragment.frag_type === 'Sutta';
         
-        document.getElementById('delete-next-btn').disabled = !hasNext;
+        // Enable delete-prev button only if current is Sutta and has previous Sutta to merge with
+        document.getElementById('delete-prev-btn').disabled = !(currentIsSutta && prevIsSutta);
+        
+        // Enable delete-next button only if current is Sutta and has next Sutta to merge with
+        document.getElementById('delete-next-btn').disabled = !(currentIsSutta && nextIsSutta);
+        
+        // Boundary adjustment buttons enabled if there's a prev/next fragment
+        document.querySelectorAll('[id^="prev-"]').forEach(btn => btn.disabled = !hasPrev);
         document.querySelectorAll('[id^="next-"]').forEach(btn => btn.disabled = !hasNext);
         
     } catch (error) {
@@ -229,38 +251,44 @@ async function adjustBoundary(action, direction) {
     }
 }
 
-// Delete fragment
+// Delete adjacent fragment and merge with current fragment
 async function deleteFragment(direction) {
     if (!state.selectedFragmentId) return;
     
-    // Determine which fragment to delete
+    // Get current fragment details
     const detail = await getCurrentFragmentDetail();
     if (!detail) return;
     
+    // Determine which fragment to delete
     let fragmentIdToDelete;
-    if (direction === 'prev' && detail.prev_fragment) {
+    if (direction === 'prev') {
+        // Delete the PREVIOUS fragment, merge into current
+        if (!detail.prev_fragment) return;
         fragmentIdToDelete = detail.prev_fragment.id;
-    } else if (direction === 'next' && detail.next_fragment) {
-        fragmentIdToDelete = detail.next_fragment.id;
     } else {
-        return;
+        // Delete the NEXT fragment, merge into current
+        if (!detail.next_fragment) return;
+        fragmentIdToDelete = detail.next_fragment.id;
     }
     
     try {
+        // Delete the adjacent fragment (it will be merged into current or next remaining fragment)
         const response = await fetch(`/api/fragments/${fragmentIdToDelete}`, {
             method: 'DELETE'
         });
         
         if (!response.ok) throw new Error('Failed to delete fragment');
         
-        // Refresh fragment list and reload current fragment
+        // Refresh fragment list
         await fetchAndPopulateFragmentList(state.selectedFile);
+        
+        // Keep the current fragment selected (it now contains the merged content)
         await fetchAndDisplayFragmentDetails(state.selectedFragmentId);
         
-        console.log('Fragment deleted successfully');
+        console.log('Fragment deleted and merged successfully');
     } catch (error) {
         console.error('Error deleting fragment:', error);
-        alert('Failed to delete fragment');
+        alert('Failed to delete and merge fragment');
     }
 }
 
@@ -301,13 +329,13 @@ function setupEventListeners() {
     
     // Delete buttons with confirmation
     document.getElementById('delete-prev-btn').onclick = () => {
-        showConfirmModal('Are you sure you want to delete the previous fragment?', () => {
+        showConfirmModal('Delete the current fragment and merge its content with the previous fragment?', () => {
             deleteFragment('prev');
         });
     };
     
     document.getElementById('delete-next-btn').onclick = () => {
-        showConfirmModal('Are you sure you want to delete the next fragment?', () => {
+        showConfirmModal('Delete the current fragment and merge its content with the next fragment?', () => {
             deleteFragment('next');
         });
     };

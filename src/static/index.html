@@ -8,11 +8,7 @@
     <link rel="stylesheet" href="/static/styles/main.css">
 </head>
 <body>
-    <section class="section">
-        <div class="container is-fluid">
-            <h1 class="title">Fragment Review and Correction</h1>
-            
-            <div class="columns is-gapless" id="main-container">
+    <div class="columns is-gapless" id="main-container">
                 <!-- Left Panel -->
                 <div class="column" id="left-panel">
                     <div class="box" style="height: 100%;">
@@ -95,7 +91,7 @@
                                     <h2 class="subtitle is-6">Previous Fragment</h2>
                                 </div>
                                 <div class="level-right">
-                                    <button class="button is-small is-danger" id="delete-prev-btn">Delete Previous</button>
+                                    <button class="button is-small is-danger" id="delete-prev-btn">Delete and Merge with Previous</button>
                                 </div>
                             </div>
                             <textarea class="textarea is-family-monospace" id="prev-content" rows="8" readonly></textarea>
@@ -120,7 +116,7 @@
                                     <h2 class="subtitle is-6">Next Fragment</h2>
                                 </div>
                                 <div class="level-right">
-                                    <button class="button is-small is-danger" id="delete-next-btn">Delete Next</button>
+                                    <button class="button is-small is-danger" id="delete-next-btn">Delete and Merge with Next</button>
                                 </div>
                             </div>
                             <textarea class="textarea is-family-monospace" id="next-content" rows="8" readonly></textarea>
@@ -134,8 +130,6 @@
                     </div>
                 </div>
             </div>
-        </div>
-    </section>
     
     <!-- Confirmation Modal -->
     <div class="modal" id="confirm-modal">

@@ -53,6 +53,7 @@ pub struct FragmentDetail {
 pub struct AdjacentFragment {
     pub id: i32,
     pub frag_idx: i32,
+    pub frag_type: String,
     pub content_xml: String,
 }
 
