@@ -416,8 +416,9 @@ fn main() {
                         println!("Differing rows: {}", result.differing_rows);
                         
                         if result.validation_errors.is_empty() {
-                            println!("\nNo regressions detected - all differing rows are improvements");
-                            logger::info("No regressions detected - all differing rows are improvements");
+                            let msg = "No regressions detected in the differing rows";
+                            logger::info(&msg);
+                            println!("{}", msg);
                             Ok(())
                         } else {
                             println!("\nFound {} regressions (values that were correct in old file are now incorrect):\n", result.validation_errors.len());

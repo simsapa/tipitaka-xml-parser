@@ -318,28 +318,29 @@ fn derive_cst_fields(
     }
     
     // Extract vagga from group_levels
-    // Only extract vagga for nikayas that have vaggas in their structure
-    let has_vagga_level = nikaya_structure.levels.iter()
-        .any(|t| matches!(t, crate::types::GroupType::Vagga));
-    
-    let cst_vagga = if has_vagga_level {
-        fragment.group_levels.iter()
-            .find(|level| matches!(level.group_type, crate::types::GroupType::Vagga))
-            .and_then(|level| {
-                if level.title.trim().is_empty() {
-                    None
-                } else {
-                    Some(level.title.clone())
-                }
-            })
-            .or_else(|| {
-                // Fallback: Extract vagga title from <head rend="chapter"> tag in fragment content
-                // This is used for MN where <head rend="chapter"> is the vagga title
+    // Check if THIS FRAGMENT actually has a Vagga level (not just if the nikaya supports vaggas)
+    // This is important for SN where some samyuttas have vaggas and some don't
+    let cst_vagga = fragment.group_levels.iter()
+        .find(|level| matches!(level.group_type, crate::types::GroupType::Vagga))
+        .and_then(|level| {
+            if level.title.trim().is_empty() {
+                None
+            } else {
+                Some(level.title.clone())
+            }
+        })
+        .or_else(|| {
+            // Fallback: Extract vagga title from <head rend="chapter"> tag in fragment content
+            // This is used for MN where <head rend="chapter"> is the vagga title
+            // NOTE: Do NOT use this fallback for SN because in SN, <head rend="chapter"> is a Samyutta marker,
+            // not a Vagga marker. We already have the Samyutta info in group_levels.
+            // Only apply fallback for MN (majjhima)
+            if nikaya_structure.nikaya == "majjhima" {
                 extract_vagga_title_from_content(&fragment.content_xml)
-            })
-    } else {
-        None
-    };
+            } else {
+                None
+            }
+        });
     
     // Extract sutta title from group_levels (filter out empty titles)
     let cst_sutta = fragment.group_levels.iter()
