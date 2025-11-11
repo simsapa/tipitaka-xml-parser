@@ -840,14 +840,16 @@ pub fn parse_into_fragments(
                                  
                                         // Start new fragment at the adjusted end position of the previous fragment
                                         // This ensures no gap in XML reconstruction when adjustments are used
-                                        // For Samyutta boundaries in SN, we still capture the position but wait
-                                        // for the first actual sutta subhead before setting the fragment type
                                         current_fragment_start = Some((end_pos, end_line, end_char));
                                         
                                         // For Samyutta boundaries, don't set fragment type yet - wait for actual sutta
+                                        // This prevents creating a fragment for just the samyutta/vagga headings
                                         // For other boundaries (Vagga, Sutta), set fragment type immediately
                                         if !matches!(group_type, GroupType::Samyutta) {
                                             current_frag_type = Some(FragmentType::Sutta);
+                                        } else {
+                                            // For Samyutta: clear fragment type, will be set when first sutta arrives
+                                            current_frag_type = None;
                                         }
                                         // Note: we'll update group_levels AFTER entering the new level
                                     }
@@ -1119,10 +1121,10 @@ pub fn parse_into_fragments(
                             // Update hierarchy with sutta title
                             hierarchy.enter_level(GroupType::Sutta, text.clone(), None, None);
                             
-                            // If current_frag_type is None (after Samyutta boundary), update fragment start
-                            // to point to this sutta subhead, effectively discarding the intermediate content
+                            // If current_frag_type is None (after Samyutta boundary), set it now
+                            // Keep current_fragment_start at the samyutta div so the first sutta includes headings
                             if current_frag_type.is_none() {
-                                current_fragment_start = Some((subhead_pos, subhead_line, subhead_char));
+                                current_frag_type = Some(FragmentType::Sutta);
                             }
                             
                             // Update group_levels to include the new Sutta level
