@@ -9,9 +9,7 @@ can't handle many cases due to the irregular structure of the xml files.
 There is still room for improving the parser results with with more code to
 handle various cases.
 
-After that, manual checking and correction will be necessary, I am thinking a
-small web GUI could help to quickly move through the rows, typing in missing
-values and adjusting xml fragment boundaries.
+Manual checking and correction will be necessary, the project includes a small web UI to make adjustments (see below).
 
 ## Use-case
 
@@ -32,6 +30,15 @@ the corresponding `sc_code (sn56.11)`, which is the Wisdom Publications
 numbering adopted by [SuttaCentral](https://suttacentral.net/).
 
 ![xml fragments db](docs/xml-fragments-db-screenshot.png)
+
+## Web UI
+
+```
+cargo run -- web-ui
+```
+
+
+![web ui](docs/web-ui-screenshot.png)
 
 ## Example
 
