@@ -50,14 +50,34 @@ The project includes a web-based user interface for reviewing and correcting fra
 
 ### Starting the Web UI
 
+The web UI uses a TOML configuration file (`web-ui-config.toml`) for all settings. On first run, it will create a default config file:
+
 ```bash
-cargo run -- web-ui path/to/fragments.sqlite3
+cargo run -- web-ui
 ```
 
-By default, the server runs on port 8000. You can specify a different port:
+This will create `web-ui-config.toml` in the current directory. Edit this file to configure:
+- Path to your fragments database
+- Server port
+- XML files directory and filenames
+- Other regeneration settings
+
+Then run the command again to start the server:
 
 ```bash
-cargo run -- web-ui path/to/fragments.sqlite3 --port 8080
+cargo run -- web-ui
+```
+
+You can also specify a custom config file path:
+
+```bash
+cargo run -- web-ui --config /path/to/custom-config.toml
+```
+
+Or override the port from the command line:
+
+```bash
+cargo run -- web-ui --port 8080
 ```
 
 Then open your browser to `http://localhost:8000` (or the specified port).

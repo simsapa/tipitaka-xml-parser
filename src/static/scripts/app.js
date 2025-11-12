@@ -159,12 +159,22 @@ async function fetchAndDisplayFragmentDetails(fragmentId) {
         const detail = await response.json();
         
         // Update metadata fields
+        document.getElementById('id').value = detail.id;
+        document.getElementById('cst_file').value = detail.cst_file;
         document.getElementById('frag_type').value = detail.frag_type;
         document.getElementById('frag_review').value = detail.frag_review || '';
+        document.getElementById('nikaya').value = detail.nikaya;
         document.getElementById('cst_code').value = detail.cst_code || '';
         document.getElementById('cst_vagga').value = detail.cst_vagga || '';
         document.getElementById('cst_sutta').value = detail.cst_sutta || '';
+        document.getElementById('cst_paranum').value = detail.cst_paranum || '';
         document.getElementById('sc_code').value = detail.sc_code || '';
+        document.getElementById('sc_sutta').value = detail.sc_sutta || '';
+        document.getElementById('start_line').value = detail.start_line;
+        document.getElementById('start_char').value = detail.start_char;
+        document.getElementById('end_line').value = detail.end_line;
+        document.getElementById('end_char').value = detail.end_char;
+        document.getElementById('group_levels').value = detail.group_levels;
         
         // Update text areas
         const prevTextarea = document.getElementById('prev-content');
@@ -220,12 +230,22 @@ async function fetchAndDisplayFragmentDetails(fragmentId) {
 
 // Clear fragment details
 function clearFragmentDetails() {
+    document.getElementById('id').value = '';
+    document.getElementById('cst_file').value = '';
     document.getElementById('frag_type').value = '';
     document.getElementById('frag_review').value = '';
+    document.getElementById('nikaya').value = '';
     document.getElementById('cst_code').value = '';
     document.getElementById('cst_vagga').value = '';
     document.getElementById('cst_sutta').value = '';
+    document.getElementById('cst_paranum').value = '';
     document.getElementById('sc_code').value = '';
+    document.getElementById('sc_sutta').value = '';
+    document.getElementById('start_line').value = '';
+    document.getElementById('start_char').value = '';
+    document.getElementById('end_line').value = '';
+    document.getElementById('end_char').value = '';
+    document.getElementById('group_levels').value = '';
     
     document.getElementById('prev-content').value = '';
     document.getElementById('current-content').value = '';
@@ -242,8 +262,8 @@ async function updateFragmentMetadata() {
         sc_code: document.getElementById('sc_code').value || null,
         cst_vagga: document.getElementById('cst_vagga').value || null,
         cst_sutta: document.getElementById('cst_sutta').value || null,
-        cst_paranum: null,
-        sc_sutta: null,
+        cst_paranum: document.getElementById('cst_paranum').value || null,
+        sc_sutta: document.getElementById('sc_sutta').value || null,
     };
     
     try {
@@ -381,6 +401,8 @@ function setupEventListeners() {
     document.getElementById('sc_code').onblur = updateFragmentMetadata;
     document.getElementById('cst_vagga').onblur = updateFragmentMetadata;
     document.getElementById('cst_sutta').onblur = updateFragmentMetadata;
+    document.getElementById('cst_paranum').onblur = updateFragmentMetadata;
+    document.getElementById('sc_sutta').onblur = updateFragmentMetadata;
     
     // Boundary adjustment buttons for previous fragment
     document.getElementById('prev-line-up').onclick = () => adjustBoundary('line_up', 'prev');
@@ -436,6 +458,9 @@ function setupEventListeners() {
     // Regenerate modal controls
     document.getElementById('regenerate-modal-close').onclick = closeRegenerateModal;
     document.getElementById('regenerate-close').onclick = closeRegenerateModal;
+    document.getElementById('regenerate-with-reference').onclick = () => startRegeneration(true);
+    document.getElementById('regenerate-new-replace').onclick = () => startRegeneration(false);
+    document.getElementById('copy-output-btn').onclick = copyOutputToClipboard;
 }
 
 // Show confirmation modal
@@ -521,7 +546,13 @@ async function openSettingsModal() {
             const settings = await response.json();
             document.getElementById('settings-db-path').value = settings.db_path || '';
             document.getElementById('settings-port').value = settings.port || 8000;
-            document.getElementById('settings-xml-paths').value = (settings.xml_paths || []).join('\n');
+            document.getElementById('settings-xml-dir').value = settings.xml_dir || '';
+            document.getElementById('settings-xml-filenames').value = (settings.xml_filenames || []).join('\n');
+            document.getElementById('settings-parser-path').value = settings.xml_parser_binary_path || 'target/debug/tipitaka_xml_parser';
+            document.getElementById('settings-new-db-path').value = settings.new_fragments_db_path || '';
+            document.getElementById('settings-ref-db-path').value = settings.reference_fragments_db_path || '';
+            document.getElementById('settings-new-tsv-path').value = settings.new_fragments_tsv_path || '';
+            document.getElementById('settings-ref-tsv-path').value = settings.reference_fragments_tsv_path || '';
         } else {
             console.error('Failed to load settings');
         }
@@ -542,10 +573,16 @@ async function saveSettings() {
     const settings = {
         db_path: document.getElementById('settings-db-path').value,
         port: parseInt(document.getElementById('settings-port').value) || 8000,
-        xml_paths: document.getElementById('settings-xml-paths').value
+        xml_dir: document.getElementById('settings-xml-dir').value,
+        xml_filenames: document.getElementById('settings-xml-filenames').value
             .split('\n')
             .map(line => line.trim())
-            .filter(line => line.length > 0)
+            .filter(line => line.length > 0),
+        xml_parser_binary_path: document.getElementById('settings-parser-path').value || null,
+        new_fragments_db_path: document.getElementById('settings-new-db-path').value || null,
+        reference_fragments_db_path: document.getElementById('settings-ref-db-path').value || null,
+        new_fragments_tsv_path: document.getElementById('settings-new-tsv-path').value || null,
+        reference_fragments_tsv_path: document.getElementById('settings-ref-tsv-path').value || null
     };
     
     try {
@@ -573,12 +610,124 @@ async function saveSettings() {
 
 // Open Regenerate modal
 function openRegenerateModal() {
+    // Reset modal state
+    document.getElementById('regenerate-start-message').style.display = 'block';
+    document.getElementById('regenerate-status').style.display = 'none';
+    document.getElementById('regenerate-output-container').style.display = 'none';
+    document.getElementById('regenerate-output').textContent = '';
+    document.getElementById('regenerate-with-reference').disabled = false;
+    document.getElementById('regenerate-new-replace').disabled = false;
+    
     document.getElementById('regenerate-modal').classList.add('is-active');
 }
 
 // Close Regenerate modal
 function closeRegenerateModal() {
     document.getElementById('regenerate-modal').classList.remove('is-active');
+    
+    // If DB was replaced, reload the page now
+    if (needsReloadAfterClose) {
+        needsReloadAfterClose = false;
+        setTimeout(() => {
+            window.location.reload();
+        }, 100);
+    }
+}
+
+// Global flag to track if reload is needed
+let needsReloadAfterClose = false;
+
+// Start regeneration process
+async function startRegeneration(useReferenceDb) {
+    // Hide start message, show status
+    document.getElementById('regenerate-start-message').style.display = 'none';
+    document.getElementById('regenerate-status').style.display = 'block';
+    document.getElementById('regenerate-output-container').style.display = 'block';
+    document.getElementById('regenerate-with-reference').disabled = true;
+    document.getElementById('regenerate-new-replace').disabled = true;
+    
+    // Reset reload flag
+    needsReloadAfterClose = false;
+    
+    // Update status
+    updateRegenerateStatus('Running...', 'is-info');
+    
+    try {
+        const response = await fetch('/api/regenerate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ use_reference_db: useReferenceDb })
+        });
+        
+        // Always try to parse as JSON since we always return JSON now
+        const result = await response.json();
+        
+        // Display output
+        document.getElementById('regenerate-output').textContent = result.output;
+        
+        // Update status based on success
+        if (result.success) {
+            if (result.db_replaced) {
+                updateRegenerateStatus('Completed successfully! Close modal to reload UI.', 'is-success');
+                needsReloadAfterClose = true;
+            } else {
+                updateRegenerateStatus('Completed successfully!', 'is-success');
+            }
+        } else {
+            // Check if this is a configuration error (output starts with ERROR:)
+            if (result.output.startsWith('ERROR:')) {
+                updateRegenerateStatus('Configuration Error', 'is-danger');
+            } else {
+                updateRegenerateStatus('Completed with errors', 'is-warning');
+            }
+        }
+        
+    } catch (error) {
+        console.error('Regeneration failed:', error);
+        updateRegenerateStatus('Failed: ' + error.message, 'is-danger');
+        
+        // Only append if there's no existing output
+        const outputEl = document.getElementById('regenerate-output');
+        if (!outputEl.textContent) {
+            outputEl.textContent = 'Error: ' + error.message;
+        }
+    }
+}
+
+// Update regeneration status message
+function updateRegenerateStatus(message, colorClass) {
+    const statusDiv = document.getElementById('regenerate-status');
+    const statusText = document.getElementById('regenerate-status-text');
+    
+    // Remove all color classes
+    statusDiv.classList.remove('is-info', 'is-success', 'is-warning', 'is-danger');
+    
+    // Add new color class
+    statusDiv.classList.add(colorClass);
+    
+    // Update text
+    statusText.textContent = message;
+}
+
+// Copy output to clipboard
+function copyOutputToClipboard() {
+    const output = document.getElementById('regenerate-output').textContent;
+    
+    navigator.clipboard.writeText(output).then(() => {
+        // Change button text temporarily to show success
+        const btn = document.getElementById('copy-output-btn');
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<span>✓ Copied!</span>';
+        btn.classList.add('is-success');
+        
+        setTimeout(() => {
+            btn.innerHTML = originalText;
+            btn.classList.remove('is-success');
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+        alert('Failed to copy to clipboard');
+    });
 }
 
 // Restore state after loading file list

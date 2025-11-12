@@ -113,7 +113,13 @@ pub struct CreateFragmentResponse {
 pub struct AppSettings {
     pub db_path: String,
     pub port: u16,
-    pub xml_paths: Vec<String>,
+    pub xml_dir: String,
+    pub xml_filenames: Vec<String>,
+    pub new_fragments_db_path: Option<String>,
+    pub reference_fragments_db_path: Option<String>,
+    pub new_fragments_tsv_path: Option<String>,
+    pub reference_fragments_tsv_path: Option<String>,
+    pub xml_parser_binary_path: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -121,7 +127,13 @@ impl Default for AppSettings {
         Self {
             db_path: String::new(),
             port: 8000,
-            xml_paths: Vec::new(),
+            xml_dir: String::new(),
+            xml_filenames: Vec::new(),
+            new_fragments_db_path: None,
+            reference_fragments_db_path: None,
+            new_fragments_tsv_path: None,
+            reference_fragments_tsv_path: None,
+            xml_parser_binary_path: None,
         }
     }
 }

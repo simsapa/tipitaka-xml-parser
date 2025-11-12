@@ -4,16 +4,36 @@
 #
 # Copy this to web-ui-config.toml and customize as needed
 
-# Path to the SQLite fragments database
+# Path to the current SQLite fragments database
 db_path = "/path/to/your/fragments.sqlite3"
 
 # Port number for the web server (default: 8000)
 port = 8000
 
-# List of XML file paths being processed
-# These are shown in the Settings dialog for reference
-xml_paths = [
-    "/path/to/s0101m.mul.xml",
-    "/path/to/s0101a.att.xml",
-    "/path/to/s0101t.tik.xml",
+# Directory containing XML files to process
+xml_dir = "/path/to/tipitaka-xml/romn"
+
+# List of XML filenames (will be joined with xml_dir)
+xml_filenames = [
+    "s0101m.mul.xml",
+    "s0101a.att.xml",
+    "s0101t.tik.xml",
 ]
+
+# Path to the tipitaka_xml_parser binary (auto-detected if not specified)
+xml_parser_binary_path = "target/debug/tipitaka_xml_parser"
+
+# Advanced paths (auto-generated from db_path if not specified)
+# These paths are used during the regeneration process
+
+# Path for the new fragments database (default: same dir as db_path with -new suffix)
+new_fragments_db_path = "/path/to/your/fragments-new.sqlite3"
+
+# Path for the reference fragments database (default: same dir as db_path with -reference suffix)
+reference_fragments_db_path = "/path/to/your/fragments-reference.sqlite3"
+
+# Path for the new fragments TSV export (default: same as new_fragments_db_path with .tsv extension)
+new_fragments_tsv_path = "/path/to/your/fragments-new.tsv"
+
+# Path for the reference fragments TSV (default: new TSV path with -reference suffix)
+reference_fragments_tsv_path = "/path/to/your/fragments-new-reference.tsv"

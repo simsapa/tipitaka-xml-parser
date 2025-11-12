@@ -102,3 +102,24 @@ pub struct UpdateFragmentBoundary {
 pub struct UpdateFragmentIndex {
     pub frag_idx: i32,
 }
+
+/// Changeset for updating fragment from reference database (copies all relevant fields)
+#[derive(AsChangeset)]
+#[diesel(table_name = xml_fragments)]
+pub struct UpdateFragmentFromReference {
+    pub frag_type: String,
+    pub frag_review: Option<String>,
+    pub cst_code: Option<String>,
+    pub sc_code: Option<String>,
+    pub cst_vagga: Option<String>,
+    pub cst_sutta: Option<String>,
+    pub cst_paranum: Option<String>,
+    pub sc_sutta: Option<String>,
+    pub content_xml: String,
+    pub content_html: Option<String>,
+    pub start_line: i32,
+    pub start_char: i32,
+    pub end_line: i32,
+    pub end_char: i32,
+    pub group_levels: String,
+}

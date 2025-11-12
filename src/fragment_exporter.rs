@@ -12,7 +12,7 @@ use std::path::Path;
 use crate::types::XmlFragment;
 use crate::nikaya_structure::NikayaStructure;
 use crate::fragments_models::{NewNikayaStructure, NewXmlFragment};
-use crate::fragments_schema::{nikaya_structures, xml_fragments};
+use crate::fragments_schema::nikaya_structures;
 use crate::sutta_builder::xml_to_html;
 
 // Embed the fragments migrations
@@ -87,6 +87,22 @@ fn insert_fragments(
     conn: &mut SqliteConnection,
     fragments: &[XmlFragment],
 ) -> Result<usize> {
+    use crate::fragments_schema::xml_fragments;
+    
+    // Delete existing fragments for this file first (if any)
+    // This ensures that re-parsing a file replaces old fragments instead of duplicating them
+    if let Some(first_fragment) = fragments.first() {
+        let deleted = diesel::delete(
+            xml_fragments::table.filter(xml_fragments::cst_file.eq(&first_fragment.cst_file))
+        )
+        .execute(conn)
+        .context("Failed to delete existing fragments for file")?;
+        
+        if deleted > 0 {
+            eprintln!("Deleted {} existing fragments for {}", deleted, first_fragment.cst_file);
+        }
+    }
+    
     let mut count = 0;
     
     for fragment in fragments {

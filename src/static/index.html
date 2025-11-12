@@ -55,47 +55,116 @@
                         <!-- Metadata Form -->
                         <div class="panel-section" id="metadata-section">
                             <h2 class="subtitle is-5">Fragment Metadata</h2>
-                            <div class="field">
-                                <label class="label is-small">Fragment Type</label>
-                                <div class="control">
-                                    <input class="input is-small" type="text" id="frag_type" readonly>
-                                </div>
-                            </div>
-                            <div class="field">
-                                <label class="label is-small">Review Status</label>
-                                <div class="control">
-                                    <div class="select is-small is-fullwidth">
-                                        <select id="frag_review">
-                                            <option value="">unchecked</option>
-                                            <option value="in-progress">in-progress</option>
-                                            <option value="checked">checked</option>
-                                            <option value="needs-review">needs-review</option>
-                                        </select>
+                            <div class="columns is-multiline is-mobile">
+                                <!-- Column 1 -->
+                                <div class="column is-half">
+                                    <div class="field">
+                                        <label class="label is-small">ID</label>
+                                        <div class="control">
+                                            <input class="input is-small" type="text" id="id" readonly>
+                                        </div>
+                                    </div>
+                                    <div class="field">
+                                        <label class="label is-small">Fragment Type</label>
+                                        <div class="control">
+                                            <input class="input is-small" type="text" id="frag_type" readonly>
+                                        </div>
+                                    </div>
+                                    <div class="field">
+                                        <label class="label is-small">Review Status</label>
+                                        <div class="control">
+                                            <div class="select is-small is-fullwidth">
+                                                <select id="frag_review">
+                                                    <option value="">unchecked</option>
+                                                    <option value="in-progress">in-progress</option>
+                                                    <option value="checked">checked</option>
+                                                    <option value="needs-review">needs-review</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="field">
+                                        <label class="label is-small">Nikaya</label>
+                                        <div class="control">
+                                            <input class="input is-small" type="text" id="nikaya" readonly>
+                                        </div>
+                                    </div>
+                                    <div class="field">
+                                        <label class="label is-small">CST Code</label>
+                                        <div class="control">
+                                            <input class="input is-small" type="text" id="cst_code">
+                                        </div>
+                                    </div>
+                                    <div class="field">
+                                        <label class="label is-small">CST Vagga</label>
+                                        <div class="control">
+                                            <input class="input is-small" type="text" id="cst_vagga">
+                                        </div>
+                                    </div>
+                                    <div class="field">
+                                        <label class="label is-small">CST Sutta</label>
+                                        <div class="control">
+                                            <input class="input is-small" type="text" id="cst_sutta">
+                                        </div>
+                                    </div>
+                                    <div class="field">
+                                        <label class="label is-small">CST Paranum</label>
+                                        <div class="control">
+                                            <input class="input is-small" type="text" id="cst_paranum">
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                            <div class="field">
-                                <label class="label is-small">CST Code</label>
-                                <div class="control">
-                                    <input class="input is-small" type="text" id="cst_code">
-                                </div>
-                            </div>
-                            <div class="field">
-                                <label class="label is-small">CST Vagga</label>
-                                <div class="control">
-                                    <input class="input is-small" type="text" id="cst_vagga">
-                                </div>
-                            </div>
-                            <div class="field">
-                                <label class="label is-small">CST Sutta</label>
-                                <div class="control">
-                                    <input class="input is-small" type="text" id="cst_sutta">
-                                </div>
-                            </div>
-                            <div class="field">
-                                <label class="label is-small">SC Code</label>
-                                <div class="control">
-                                    <input class="input is-small" type="text" id="sc_code">
+                                
+                                <!-- Column 2 -->
+                                <div class="column is-half">
+                                    <div class="field">
+                                        <label class="label is-small">CST File</label>
+                                        <div class="control">
+                                            <input class="input is-small" type="text" id="cst_file" readonly>
+                                        </div>
+                                    </div>
+                                    <div class="field">
+                                        <label class="label is-small">SC Code</label>
+                                        <div class="control">
+                                            <input class="input is-small" type="text" id="sc_code">
+                                        </div>
+                                    </div>
+                                    <div class="field">
+                                        <label class="label is-small">SC Sutta</label>
+                                        <div class="control">
+                                            <input class="input is-small" type="text" id="sc_sutta">
+                                        </div>
+                                    </div>
+                                    <div class="field">
+                                        <label class="label is-small">Start Line</label>
+                                        <div class="control">
+                                            <input class="input is-small" type="number" id="start_line" readonly>
+                                        </div>
+                                    </div>
+                                    <div class="field">
+                                        <label class="label is-small">Start Char</label>
+                                        <div class="control">
+                                            <input class="input is-small" type="number" id="start_char" readonly>
+                                        </div>
+                                    </div>
+                                    <div class="field">
+                                        <label class="label is-small">End Line</label>
+                                        <div class="control">
+                                            <input class="input is-small" type="number" id="end_line" readonly>
+                                        </div>
+                                    </div>
+                                    <div class="field">
+                                        <label class="label is-small">End Char</label>
+                                        <div class="control">
+                                            <input class="input is-small" type="number" id="end_char" readonly>
+                                        </div>
+                                    </div>
+                                    <div class="field">
+                                        <label class="label is-small">Group Levels</label>
+                                        <div class="control">
+                                            <input class="input is-small" type="text" id="group_levels" readonly>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -184,18 +253,18 @@
     <!-- Settings Modal -->
     <div class="modal" id="settings-modal">
         <div class="modal-background"></div>
-        <div class="modal-card" style="width: 600px;">
+        <div class="modal-card" style="width: 700px; max-height: 90vh;">
             <header class="modal-card-head">
                 <p class="modal-card-title">Settings</p>
                 <button class="delete" aria-label="close" id="settings-modal-close"></button>
             </header>
-            <section class="modal-card-body">
+            <section class="modal-card-body" style="overflow-y: auto;">
                 <div class="field">
-                    <label class="label">Fragments Database Path</label>
+                    <label class="label">Current Fragments Database Path</label>
                     <div class="control">
-                        <input class="input" type="text" id="settings-db-path" placeholder="/path/to/fragments.db">
+                        <input class="input" type="text" id="settings-db-path" placeholder="/path/to/fragments.sqlite3">
                     </div>
-                    <p class="help">Path to the SQLite fragments database file</p>
+                    <p class="help">Path to the current SQLite fragments database file</p>
                 </div>
                 
                 <div class="field">
@@ -206,12 +275,62 @@
                     <p class="help">Port number for the web UI server (requires restart)</p>
                 </div>
                 
+                <hr>
+                <h5 class="title is-6">Regenerate Settings</h5>
+                
                 <div class="field">
-                    <label class="label">XML Files Paths</label>
+                    <label class="label">XML Files Directory</label>
                     <div class="control">
-                        <textarea class="textarea" id="settings-xml-paths" rows="6" placeholder="/path/to/file1.xml&#10;/path/to/file2.xml&#10;/path/to/file3.xml"></textarea>
+                        <input class="input" type="text" id="settings-xml-dir" placeholder="/path/to/xml/files">
                     </div>
-                    <p class="help">One file path per line. These are the XML files being processed.</p>
+                    <p class="help">Directory containing the XML files to process</p>
+                </div>
+                
+                <div class="field">
+                    <label class="label">XML Filenames</label>
+                    <div class="control">
+                        <textarea class="textarea" id="settings-xml-filenames" rows="5" placeholder="s0101m.mul.xml&#10;s0101a.att.xml&#10;s0101t.tik.xml"></textarea>
+                    </div>
+                    <p class="help">One filename per line (will be joined with XML dir)</p>
+                </div>
+                
+                <div class="field">
+                    <label class="label">XML Parser Binary Path</label>
+                    <div class="control">
+                        <input class="input" type="text" id="settings-parser-path" placeholder="target/debug/tipitaka_xml_parser">
+                    </div>
+                    <p class="help">Path to the tipitaka_xml_parser binary</p>
+                </div>
+                
+                <hr>
+                <h6 class="title is-7">Advanced Paths (auto-generated if empty)</h6>
+                
+                <div class="field">
+                    <label class="label is-small">New Fragments DB Path</label>
+                    <div class="control">
+                        <input class="input is-small" type="text" id="settings-new-db-path" placeholder="auto-generated">
+                    </div>
+                </div>
+                
+                <div class="field">
+                    <label class="label is-small">Reference Fragments DB Path</label>
+                    <div class="control">
+                        <input class="input is-small" type="text" id="settings-ref-db-path" placeholder="auto-generated">
+                    </div>
+                </div>
+                
+                <div class="field">
+                    <label class="label is-small">New Fragments TSV Path</label>
+                    <div class="control">
+                        <input class="input is-small" type="text" id="settings-new-tsv-path" placeholder="auto-generated">
+                    </div>
+                </div>
+                
+                <div class="field">
+                    <label class="label is-small">Reference Fragments TSV Path</label>
+                    <div class="control">
+                        <input class="input is-small" type="text" id="settings-ref-tsv-path" placeholder="auto-generated">
+                    </div>
                 </div>
             </section>
             <footer class="modal-card-foot">
@@ -224,18 +343,43 @@
     <!-- Regenerate Modal -->
     <div class="modal" id="regenerate-modal">
         <div class="modal-background"></div>
-        <div class="modal-card">
+        <div class="modal-card" style="width: 95%; max-width: 1200px; max-height: 90vh;">
             <header class="modal-card-head">
-                <p class="modal-card-title">Regenerate</p>
+                <p class="modal-card-title">Regenerate Fragments Database</p>
                 <button class="delete" aria-label="close" id="regenerate-modal-close"></button>
             </header>
-            <section class="modal-card-body">
-                <div class="notification is-info">
-                    <strong>Work in Progress</strong>
-                    <p>This feature is currently under development and will be available in a future update.</p>
+            <section class="modal-card-body" style="overflow-y: auto;">
+                <div id="regenerate-status" class="notification is-info" style="display: none;">
+                    <p><strong>Status:</strong> <span id="regenerate-status-text">Preparing...</span></p>
+                </div>
+                <div id="regenerate-output-container" style="display: none;">
+                    <div class="level">
+                        <div class="level-left">
+                            <h6 class="title is-6">Command Output:</h6>
+                        </div>
+                        <div class="level-right">
+                            <button class="button is-small" id="copy-output-btn" title="Copy output to clipboard">
+                                <span>📋 Copy</span>
+                            </button>
+                        </div>
+                    </div>
+                    <pre id="regenerate-output" style="background: #f5f5f5; padding: 1rem; border-radius: 4px; max-height: 500px; overflow-y: auto; font-size: 0.875rem; line-height: 1.4; white-space: pre-wrap; word-wrap: break-word;"></pre>
+                </div>
+                <div id="regenerate-start-message" class="content">
+                    <p>This will regenerate the fragments database using the current settings.</p>
+                    <p><strong>The following steps will be executed:</strong></p>
+                    <ol>
+                        <li>Copy current fragments database to reference database</li>
+                        <li>Parse XML files and export to new database (with reviewed fragment copying from reference)</li>
+                        <li>Export fragments to TSV format</li>
+                        <li>Check for regressions compared to reference TSV</li>
+                    </ol>
+                    <p class="has-text-warning"><strong>Note:</strong> This process may take several minutes depending on the number of files.</p>
                 </div>
             </section>
             <footer class="modal-card-foot">
+                <button class="button is-primary" id="regenerate-with-reference">Regenerate Using Current DB as Reference</button>
+                <button class="button is-warning" id="regenerate-new-replace">Generate New and Replace Current DB</button>
                 <button class="button" id="regenerate-close">Close</button>
             </footer>
         </div>

@@ -8,6 +8,9 @@ pub mod models;
 pub mod state;
 pub mod settings;
 
+// Re-export commonly used functions
+pub use settings::{load_settings, load_settings_from_path, load_or_create_default_settings};
+
 use rocket::{Rocket, Build, Config};
 use rocket::figment::Figment;
 use rocket::fs::FileServer;
@@ -34,9 +37,28 @@ fn build_server(db_path: &Path, port: u16) -> Rocket<Build> {
 
 /// Start the web server (blocking call)
 pub fn start_server(db_path: &Path, port: u16) -> Result<()> {
-    // Update settings with command-line arguments
-    if let Err(e) = settings::update_settings_from_args(db_path, port) {
-        eprintln!("Warning: Failed to update settings: {}", e);
+    // Load current settings
+    let mut settings = settings::load_settings().unwrap_or_default();
+    
+    // Update db_path and port in settings if they differ
+    let db_path_str = db_path.to_string_lossy().to_string();
+    let mut updated = false;
+    
+    if settings.db_path != db_path_str {
+        settings.db_path = db_path_str;
+        updated = true;
+    }
+    
+    if settings.port != port {
+        settings.port = port;
+        updated = true;
+    }
+    
+    // Save updated settings
+    if updated {
+        if let Err(e) = settings::save_settings(&settings) {
+            eprintln!("Warning: Failed to save updated settings: {}", e);
+        }
     }
     
     let rocket = build_server(db_path, port);

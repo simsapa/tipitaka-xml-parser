@@ -3,6 +3,7 @@
 log.txt
 tipitaka_xml_parser_log.txt
 
+data/
 fragments.sqlite3
 fragments.tsv
 web-ui-config.toml
