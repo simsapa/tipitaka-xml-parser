@@ -206,18 +206,31 @@ async function fetchAndDisplayFragmentDetails(fragmentId) {
         const prevIsHeader = detail.prev_fragment && detail.prev_fragment.frag_type === 'Header';
         const nextIsHeader = detail.next_fragment && detail.next_fragment.frag_type === 'Header';
         
-        // Enable delete-prev button only if current is Sutta and has previous Sutta to merge with
-        document.getElementById('delete-prev-btn').disabled = !(currentIsSutta && prevIsSutta);
-        
-        // Enable delete-next button only if current is Sutta and has next Sutta to merge with
-        document.getElementById('delete-next-btn').disabled = !(currentIsSutta && nextIsSutta);
-        
-        // Create new prev button: disabled if current is the first Header (no prev Header exists)
-        document.getElementById('create-prev-btn').disabled = currentIsHeader && !prevIsHeader;
-        
-        // Create new next button: disabled if current is the last Header (no next Header exists)
-        document.getElementById('create-next-btn').disabled = currentIsHeader && !nextIsHeader;
-        
+        let el;
+        el = document.getElementById('delete-prev-btn');
+        if (el) {
+            // Enable delete-prev button only if current is Sutta and has previous Sutta to merge with
+            el.disabled = !(currentIsSutta && prevIsSutta);
+        }
+
+        el = document.getElementById('delete-next-btn');
+        if (el) {
+            // Enable delete-next button only if current is Sutta and has next Sutta to merge with
+            el.disabled = !(currentIsSutta && nextIsSutta);
+        }
+
+        el = document.getElementById('create-prev-btn');
+        if (el) {
+            // Create new prev button: disabled if current is the first Header (no prev Header exists)
+            el.disabled = currentIsHeader && !prevIsHeader;
+        }
+
+        el = document.getElementById('create-next-btn');
+        if (el) {
+            // Create new next button: disabled if current is the last Header (no next Header exists)
+            el.disabled = currentIsHeader && !nextIsHeader;
+        }
+
         // Boundary adjustment buttons enabled if there's a prev/next fragment
         document.querySelectorAll('[id^="prev-"]').forEach(btn => btn.disabled = !hasPrev);
         document.querySelectorAll('[id^="next-"]').forEach(btn => btn.disabled = !hasNext);
@@ -415,24 +428,37 @@ function setupEventListeners() {
     document.getElementById('next-line-down').onclick = () => adjustBoundary('line_down', 'next');
     document.getElementById('next-char-left').onclick = () => adjustBoundary('char_left', 'next');
     document.getElementById('next-char-right').onclick = () => adjustBoundary('char_right', 'next');
-    
+
+    let el;
     // Delete buttons with confirmation
-    document.getElementById('delete-prev-btn').onclick = () => {
-        showConfirmModal('Delete the previous fragment and merge its content with the current fragment?', () => {
-            deleteFragment('prev');
-        });
-    };
-    
-    document.getElementById('delete-next-btn').onclick = () => {
-        showConfirmModal('Delete the next fragment and merge its content with the current fragment?', () => {
-            deleteFragment('next');
-        });
-    };
+    el = document.getElementById('delete-prev-btn');
+    if (el) {
+        el.onclick = () => {
+            showConfirmModal('Delete the previous fragment and merge its content with the current fragment?', () => {
+                deleteFragment('prev');
+            });
+        };
+    }
+
+    el = document.getElementById('delete-next-btn');
+    if (el) {
+        el.onclick = () => {
+            showConfirmModal('Delete the next fragment and merge its content with the current fragment?', () => {
+                deleteFragment('next');
+            });
+        };
+    }
     
     // Create new fragment buttons
-    document.getElementById('create-prev-btn').onclick = () => createNewFragment('prev');
-    document.getElementById('create-next-btn').onclick = () => createNewFragment('next');
-    
+    el = document.getElementById('create-prev-btn');
+    if (el) {
+        el.onclick = () => createNewFragment('prev');
+    }
+    el = document.getElementById('create-next-btn');
+    if (el) {
+        el.onclick = () => createNewFragment('next');
+    }
+
     // Modal controls
     document.getElementById('modal-close').onclick = closeModal;
     document.getElementById('modal-cancel').onclick = closeModal;
