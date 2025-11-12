@@ -14,8 +14,9 @@ use crate::web::state::DbState;
 use crate::web::models::{
     FileListItem, FragmentListItem, FragmentDetail, AdjacentFragment,
     UpdateMetadataRequest, BoundaryAdjustmentRequest, BoundaryAdjustmentResponse, BoundaryAction,
-    CreateFragmentRequest, CreateFragmentResponse
+    CreateFragmentRequest, CreateFragmentResponse, AppSettings
 };
+use crate::web::settings;
 use crate::fragments_schema::xml_fragments;
 use crate::fragments_models::{
     XmlFragmentRecord, UpdateFragmentMetadata, UpdateFragmentBoundary, UpdateFragmentIndex, NewXmlFragment
@@ -546,6 +547,24 @@ fn create_fragment(
     }))
 }
 
+/// GET /api/settings - Get current application settings
+#[get("/api/settings")]
+fn get_settings() -> Result<Json<AppSettings>, String> {
+    let settings = settings::load_settings()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+    
+    Ok(Json(settings))
+}
+
+/// POST /api/settings - Save application settings
+#[post("/api/settings", data = "<settings_data>")]
+fn save_settings_endpoint(settings_data: Json<AppSettings>) -> Result<Json<String>, String> {
+    settings::save_settings(&settings_data)
+        .map_err(|e| format!("Failed to save settings: {}", e))?;
+    
+    Ok(Json("Settings saved successfully".to_string()))
+}
+
 /// Get all routes for the web application
 pub fn get_routes() -> Vec<Route> {
     routes![
@@ -556,6 +575,8 @@ pub fn get_routes() -> Vec<Route> {
         update_fragment_metadata,
         adjust_fragment_boundary,
         delete_fragment,
-        create_fragment
+        create_fragment,
+        get_settings,
+        save_settings_endpoint
     ]
 }

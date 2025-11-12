@@ -6,6 +6,7 @@
 pub mod routes;
 pub mod models;
 pub mod state;
+pub mod settings;
 
 use rocket::{Rocket, Build, Config};
 use rocket::figment::Figment;
@@ -33,6 +34,11 @@ fn build_server(db_path: &Path, port: u16) -> Rocket<Build> {
 
 /// Start the web server (blocking call)
 pub fn start_server(db_path: &Path, port: u16) -> Result<()> {
+    // Update settings with command-line arguments
+    if let Err(e) = settings::update_settings_from_args(db_path, port) {
+        eprintln!("Warning: Failed to update settings: {}", e);
+    }
+    
     let rocket = build_server(db_path, port);
     
     // Launch the server - this is async, so we need tokio runtime

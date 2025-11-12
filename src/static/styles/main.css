@@ -168,6 +168,20 @@ body, html {
     max-width: 500px;
 }
 
+/* Menu dropdown */
+#menu-dropdown {
+    position: relative;
+}
+
+#menu-dropdown .dropdown-menu {
+    min-width: 12rem;
+}
+
+/* Settings modal wider */
+#settings-modal .modal-card {
+    max-width: 600px;
+}
+
 /* Scrollbar styling for webkit browsers */
 .panel-list::-webkit-scrollbar,
 #left-panel::-webkit-scrollbar,

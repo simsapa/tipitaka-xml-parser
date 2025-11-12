@@ -9,10 +9,35 @@ let state = {
 
 // Initialize the application
 function init() {
+    loadStateFromLocalStorage();
     fetchAndPopulateFileList();
     setupEventListeners();
     setupResizablePanels();
+    setupMenuDropdown();
     console.log('Fragment Review Application initialized');
+}
+
+// Load state from localStorage
+function loadStateFromLocalStorage() {
+    const savedState = localStorage.getItem('fragmentReviewState');
+    if (savedState) {
+        try {
+            const parsed = JSON.parse(savedState);
+            state.selectedFile = parsed.selectedFile;
+            state.selectedFragmentId = parsed.selectedFragmentId;
+        } catch (e) {
+            console.error('Error loading state from localStorage:', e);
+        }
+    }
+}
+
+// Save state to localStorage
+function saveStateToLocalStorage() {
+    const stateToSave = {
+        selectedFile: state.selectedFile,
+        selectedFragmentId: state.selectedFragmentId
+    };
+    localStorage.setItem('fragmentReviewState', JSON.stringify(stateToSave));
 }
 
 // Fetch and populate file list from API
@@ -39,6 +64,9 @@ async function fetchAndPopulateFileList() {
         if (files.length === 0) {
             fileList.innerHTML = '<div class="panel-item">No files found</div>';
         }
+        
+        // Restore state after loading files
+        await restoreStateAfterInit();
     } catch (error) {
         console.error('Error fetching files:', error);
         fileList.innerHTML = '<div class="panel-item has-text-danger">Error loading files</div>';
@@ -48,6 +76,7 @@ async function fetchAndPopulateFileList() {
 // Select a file and populate fragments
 async function selectFile(filename) {
     state.selectedFile = filename;
+    saveStateToLocalStorage();
     
     // Update UI: highlight selected file
     document.querySelectorAll('#file-list .panel-item').forEach(item => {
@@ -111,6 +140,7 @@ function getStatusColor(status) {
 // Select a fragment and show details
 async function selectFragment(fragmentId) {
     state.selectedFragmentId = fragmentId;
+    saveStateToLocalStorage();
     
     // Update UI: highlight selected fragment
     document.querySelectorAll('#fragment-list .panel-item').forEach(item => {
@@ -384,6 +414,28 @@ function setupEventListeners() {
     // Modal controls
     document.getElementById('modal-close').onclick = closeModal;
     document.getElementById('modal-cancel').onclick = closeModal;
+    
+    // Menu buttons
+    document.getElementById('menu-settings').onclick = (e) => {
+        e.preventDefault();
+        closeMenuDropdown();
+        openSettingsModal();
+    };
+    
+    document.getElementById('menu-regenerate').onclick = (e) => {
+        e.preventDefault();
+        closeMenuDropdown();
+        openRegenerateModal();
+    };
+    
+    // Settings modal controls
+    document.getElementById('settings-modal-close').onclick = closeSettingsModal;
+    document.getElementById('settings-cancel').onclick = closeSettingsModal;
+    document.getElementById('settings-save').onclick = saveSettings;
+    
+    // Regenerate modal controls
+    document.getElementById('regenerate-modal-close').onclick = closeRegenerateModal;
+    document.getElementById('regenerate-close').onclick = closeRegenerateModal;
 }
 
 // Show confirmation modal
@@ -436,6 +488,116 @@ function setupResizablePanels() {
             document.body.style.userSelect = '';
         }
     });
+}
+
+// Setup menu dropdown toggle
+function setupMenuDropdown() {
+    const dropdown = document.getElementById('menu-dropdown');
+    const trigger = dropdown.querySelector('.dropdown-trigger button');
+    
+    trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dropdown.classList.toggle('is-active');
+    });
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!dropdown.contains(e.target)) {
+            dropdown.classList.remove('is-active');
+        }
+    });
+}
+
+// Close menu dropdown
+function closeMenuDropdown() {
+    document.getElementById('menu-dropdown').classList.remove('is-active');
+}
+
+// Open Settings modal
+async function openSettingsModal() {
+    try {
+        const response = await fetch('/api/settings');
+        if (response.ok) {
+            const settings = await response.json();
+            document.getElementById('settings-db-path').value = settings.db_path || '';
+            document.getElementById('settings-port').value = settings.port || 8000;
+            document.getElementById('settings-xml-paths').value = (settings.xml_paths || []).join('\n');
+        } else {
+            console.error('Failed to load settings');
+        }
+    } catch (error) {
+        console.error('Error loading settings:', error);
+    }
+    
+    document.getElementById('settings-modal').classList.add('is-active');
+}
+
+// Close Settings modal
+function closeSettingsModal() {
+    document.getElementById('settings-modal').classList.remove('is-active');
+}
+
+// Save settings
+async function saveSettings() {
+    const settings = {
+        db_path: document.getElementById('settings-db-path').value,
+        port: parseInt(document.getElementById('settings-port').value) || 8000,
+        xml_paths: document.getElementById('settings-xml-paths').value
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line.length > 0)
+    };
+    
+    try {
+        const response = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+        
+        if (response.ok) {
+            console.log('Settings saved successfully');
+            closeSettingsModal();
+            
+            // Show success notification
+            alert('Settings saved successfully. Some changes may require a server restart.');
+        } else {
+            console.error('Failed to save settings');
+            alert('Failed to save settings');
+        }
+    } catch (error) {
+        console.error('Error saving settings:', error);
+        alert('Error saving settings');
+    }
+}
+
+// Open Regenerate modal
+function openRegenerateModal() {
+    document.getElementById('regenerate-modal').classList.add('is-active');
+}
+
+// Close Regenerate modal
+function closeRegenerateModal() {
+    document.getElementById('regenerate-modal').classList.remove('is-active');
+}
+
+// Restore state after loading file list
+async function restoreStateAfterInit() {
+    if (state.selectedFile) {
+        // Try to select the previously selected file
+        const fileItem = document.querySelector(`#file-list .panel-item[data-filename="${state.selectedFile}"]`);
+        if (fileItem) {
+            await selectFile(state.selectedFile);
+            
+            // Try to select the previously selected fragment
+            if (state.selectedFragmentId) {
+                const fragmentItem = document.querySelector(`#fragment-list .panel-item[data-fragment-id="${state.selectedFragmentId}"]`);
+                if (fragmentItem) {
+                    await selectFragment(state.selectedFragmentId);
+                }
+            }
+        }
+    }
 }
 
 // Initialize when DOM is ready

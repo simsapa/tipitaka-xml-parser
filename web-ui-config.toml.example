@@ -1,0 +1,19 @@
+# Example configuration file for the web UI
+# This file is automatically created and updated when you run the web-ui command
+# or save settings through the web interface.
+#
+# Copy this to web-ui-config.toml and customize as needed
+
+# Path to the SQLite fragments database
+db_path = "/path/to/your/fragments.sqlite3"
+
+# Port number for the web server (default: 8000)
+port = 8000
+
+# List of XML file paths being processed
+# These are shown in the Settings dialog for reference
+xml_paths = [
+    "/path/to/s0101m.mul.xml",
+    "/path/to/s0101a.att.xml",
+    "/path/to/s0101t.tik.xml",
+]

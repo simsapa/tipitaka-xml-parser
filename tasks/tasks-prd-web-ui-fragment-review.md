@@ -2,18 +2,20 @@
 
 ## Relevant Files
 
-- `Cargo.toml` - Added Rocket web framework dependencies (rocket, rocket_dyn_templates, tokio)
+- `Cargo.toml` - Added Rocket web framework dependencies (rocket, rocket_dyn_templates, tokio, toml)
 - `src/main.rs` - Added `WebUi` CLI command handler with port flag
 - `src/lib.rs` - Exported web module
 - `src/web/mod.rs` - Web module with server initialization and static file serving
-- `src/web/routes.rs` - Rocket route handler serving index.html
-- `src/web/models.rs` - Web-specific DTOs (placeholder for Stage 2)
+- `src/web/routes.rs` - Rocket route handlers for API endpoints (files, fragments, settings)
+- `src/web/models.rs` - Web-specific DTOs including AppSettings for config
 - `src/web/state.rs` - Rocket state management for database path
-- `src/static/index.html` - Main HTML page with Bulma CSS layout and two-panel structure
-- `src/static/styles/main.css` - Custom CSS for panel resizing, scrollbars, and UI tweaks
-- `src/static/scripts/app.js` - Frontend JavaScript with mock data and UI interactions
-- `src/fragments_models.rs` - Existing models, will be used in Stage 2
-- `src/fragments_schema.rs` - Existing schema, will be used in Stage 2
+- `src/web/settings.rs` - TOML config file management for application settings
+- `src/static/index.html` - Main HTML page with Bulma CSS layout, two-panel structure, and modals
+- `src/static/styles/main.css` - Custom CSS for panel resizing, scrollbars, modals, and UI tweaks
+- `src/static/scripts/app.js` - Frontend JavaScript with API calls, state persistence, and UI interactions
+- `src/fragments_models.rs` - Diesel models for database operations
+- `src/fragments_schema.rs` - Database schema definitions
+- `.gitignore` - Added web-ui-config.toml to ignore list
 
 ### Notes
 
@@ -80,3 +82,17 @@
   - [x] 3.24 Test fragment deletion workflow with confirmations
   - [x] 3.25 Verify data integrity after operations (no gaps/overlaps in fragments)
   - [x] 3.26 Test complete workflow: review, edit, adjust boundaries, delete fragments
+
+- [x] 4.0 Settings and UI State Persistence
+  - [x] 4.1 Add menu button to right panel with Settings and Regenerate options
+  - [x] 4.2 Create Settings modal with inputs for db_path, port, and xml_paths
+  - [x] 4.3 Create Regenerate modal with "Work in Progress" message
+  - [x] 4.4 Add toml dependency to Cargo.toml for config file support
+  - [x] 4.5 Create `src/web/settings.rs` module for TOML config management
+  - [x] 4.6 Implement `load_settings()` and `save_settings()` functions
+  - [x] 4.7 Add AppSettings model to `src/web/models.rs`
+  - [x] 4.8 Implement `GET /api/settings` endpoint
+  - [x] 4.9 Implement `POST /api/settings` endpoint
+  - [x] 4.10 Add localStorage persistence for selected file and fragment
+  - [x] 4.11 Implement state restoration on page reload
+  - [x] 4.12 Add web-ui-config.toml to .gitignore

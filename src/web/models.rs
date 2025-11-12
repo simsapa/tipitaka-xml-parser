@@ -107,3 +107,21 @@ pub struct CreateFragmentResponse {
     pub new_fragment_id: i32,
     pub message: Option<String>,
 }
+
+/// Application settings stored in TOML config file
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AppSettings {
+    pub db_path: String,
+    pub port: u16,
+    pub xml_paths: Vec<String>,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            db_path: String::new(),
+            port: 8000,
+            xml_paths: Vec::new(),
+        }
+    }
+}

@@ -5,6 +5,7 @@ tipitaka_xml_parser_log.txt
 
 fragments.sqlite3
 fragments.tsv
+web-ui-config.toml
 
 scripts/*.txt.full
 scripts/*_log.txt

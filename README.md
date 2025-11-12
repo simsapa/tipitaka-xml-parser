@@ -44,3 +44,44 @@ There are test xml files in UTF-8 encoding in the `tests/data/` folder of this r
 cargo run -- parse-tipitaka-xml --xml-file path/to/tipitaka-xml/romn/s0201m.mul.xml --fragments-db fragments.sqlite3
 ```
 
+## Web UI for Fragment Review
+
+The project includes a web-based user interface for reviewing and correcting fragment boundaries and metadata.
+
+### Starting the Web UI
+
+```bash
+cargo run -- web-ui path/to/fragments.sqlite3
+```
+
+By default, the server runs on port 8000. You can specify a different port:
+
+```bash
+cargo run -- web-ui path/to/fragments.sqlite3 --port 8080
+```
+
+Then open your browser to `http://localhost:8000` (or the specified port).
+
+### Settings and Configuration
+
+The web UI includes a Settings menu (accessible from the top-right menu button) where you can configure:
+
+- **Fragments Database Path**: Path to your SQLite database file
+- **Server Port**: Port number for the web server (requires restart to take effect)
+- **XML Files Paths**: List of XML files being processed (for reference)
+
+Settings are persisted in a `web-ui-config.toml` file in the current directory. An example config file is provided as `web-ui-config.toml.example`.
+
+### UI State Persistence
+
+The web UI automatically saves your current position (selected file and fragment) in browser localStorage, so when you reload the page, it will restore your previous state.
+
+### Features
+
+- Browse XML files and their parsed fragments
+- View fragment content with previous/next context
+- Edit fragment metadata (CST codes, review status, etc.)
+- Adjust fragment boundaries by moving lines or characters
+- Delete and merge fragments
+- Mark fragments with review status (unchecked, in-progress, checked, needs-review)
+
