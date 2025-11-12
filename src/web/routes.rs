@@ -227,41 +227,37 @@ fn adjust_fragment_boundary(
             };
         
         // Calculate new boundaries based on action
-        // Note: This is a simplified implementation
-        // In a real implementation, you would need to:
-        // 1. Load the original XML file
-        // 2. Re-extract content based on new boundaries
-        // 3. Update content_xml for both fragments
+        // NOTE: This updates line/char positions but NOT the content_xml
+        // The content_xml would need to be re-extracted from the original XML file
+        // For now, this serves as a reference for what the boundaries should be
         
         let (new_target_end_line, new_target_end_char, new_other_start_line, new_other_start_char) = 
             match request.action {
                 BoundaryAction::LineUp => {
-                    // Move one line from other to target
-                    (target_fragment.end_line + 1, 0, other_fragment.start_line + 1, 0)
-                }
-                BoundaryAction::LineDown => {
-                    // Move one line from target to other
+                    // Line Up: DECREASE line number (move boundary up in file)
+                    // This shrinks the target fragment and grows the other fragment
                     (target_fragment.end_line - 1, target_fragment.end_char, other_fragment.start_line - 1, 0)
                 }
-                BoundaryAction::CharLeft => {
-                    // Move one character from other to target
-                    if other_fragment.start_char > 0 {
-                        (target_fragment.end_line, target_fragment.end_char + 1, 
-                         other_fragment.start_line, other_fragment.start_char - 1)
-                    } else {
-                        (target_fragment.end_line, target_fragment.end_char, 
-                         other_fragment.start_line, other_fragment.start_char)
-                    }
+                BoundaryAction::LineDown => {
+                    // Line Down: INCREASE line number (move boundary down in file)
+                    // This grows the target fragment and shrinks the other fragment
+                    (target_fragment.end_line + 1, 0, other_fragment.start_line + 1, 0)
                 }
-                BoundaryAction::CharRight => {
-                    // Move one character from target to other
+                BoundaryAction::CharLeft => {
+                    // Move character left (decrease char position)
                     if target_fragment.end_char > 0 {
                         (target_fragment.end_line, target_fragment.end_char - 1,
-                         other_fragment.start_line, other_fragment.start_char + 1)
+                         other_fragment.start_line, other_fragment.start_char - 1)
                     } else {
                         (target_fragment.end_line, target_fragment.end_char,
                          other_fragment.start_line, other_fragment.start_char)
                     }
+                }
+                BoundaryAction::CharRight => {
+                    // Move character right (increase char position)
+                    // FIXME: should check if start_char is not at the end of the line
+                    (target_fragment.end_line, target_fragment.end_char + 1,
+                     other_fragment.start_line, other_fragment.start_char + 1)
                 }
             };
         

@@ -188,16 +188,20 @@
                                 </div>
                             </div>
                             <textarea class="textarea is-family-monospace" id="prev-content" rows="8" readonly></textarea>
-                            <div class="buttons are-small mt-2">
-                                <button class="button" id="prev-line-up" title="Move line up from current to previous">Line Up</button>
-                                <button class="button" id="prev-line-down" title="Move line down from previous to current">Line Down</button>
-                                <button class="button" id="prev-char-left" title="Move character left from current to previous">Char Left</button>
-                                <button class="button" id="prev-char-right" title="Move character right from previous to current">Char Right</button>
+                        </div>
+                        
+                        <!-- Boundary Controls: Previous ↔ Current -->
+                        <div class="mt-2 mb-2">
+                            <div class="buttons are-small is-centered">
+                                <button class="button" id="prev-line-up" title="Decrease start line (move line from current up to previous)">↑ Line Up</button>
+                                <button class="button" id="prev-line-down" title="Increase start line (move line from previous down to current)">↓ Line Down</button>
+                                <button class="button" id="prev-char-left" title="Move character left (from current to previous)">← Char</button>
+                                <button class="button" id="prev-char-right" title="Move character right (from previous to current)">→ Char</button>
                             </div>
                         </div>
                         
                         <!-- Current Fragment -->
-                        <div class="fragment-section mt-4">
+                        <div class="fragment-section">
                             <div class="level">
                                 <div class="level-left">
                                     <h2 class="subtitle is-6">Current Fragment (Selected)</h2>
@@ -210,8 +214,18 @@
                             <textarea class="textarea is-family-monospace" id="current-content" rows="12" readonly></textarea>
                         </div>
                         
+                        <!-- Boundary Controls: Current ↔ Next -->
+                        <div class="mt-2 mb-2">
+                            <div class="buttons are-small is-centered">
+                                <button class="button" id="next-line-up" title="Decrease end line (move line from next up to current)">↑ Line Up</button>
+                                <button class="button" id="next-line-down" title="Increase end line (move line from current down to next)">↓ Line Down</button>
+                                <button class="button" id="next-char-left" title="Move character left (from next to current)">← Char</button>
+                                <button class="button" id="next-char-right" title="Move character right (from current to next)">→ Char</button>
+                            </div>
+                        </div>
+                        
                         <!-- Next Fragment -->
-                        <div class="fragment-section mt-4">
+                        <div class="fragment-section">
                             <div class="level">
                                 <div class="level-left">
                                     <h2 class="subtitle is-6">Next Fragment</h2>
@@ -221,12 +235,6 @@
                                 </div>
                             </div>
                             <textarea class="textarea is-family-monospace" id="next-content" rows="8" readonly></textarea>
-                            <div class="buttons are-small mt-2">
-                                <button class="button" id="next-line-up" title="Move line up from next to current">Line Up</button>
-                                <button class="button" id="next-line-down" title="Move line down from current to next">Line Down</button>
-                                <button class="button" id="next-char-left" title="Move character left from next to current">Char Left</button>
-                                <button class="button" id="next-char-right" title="Move character right from current to next">Char Right</button>
-                            </div>
                         </div>
                     </div>
                 </div>
