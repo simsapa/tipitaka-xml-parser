@@ -27,6 +27,9 @@ pub mod xml_parser_trait;
 pub mod parsers;
 pub mod xml_parser;
 
+// Web UI module
+pub mod web;
+
 #[cfg(test)]
 mod test_tsv_validation;
 
