@@ -31,15 +31,6 @@ numbering adopted by [SuttaCentral](https://suttacentral.net/).
 
 ![xml fragments db](docs/xml-fragments-db-screenshot.png)
 
-## Web UI
-
-```
-cargo run -- web-ui
-```
-
-
-![web ui](docs/web-ui-screenshot.png)
-
 ## Example
 
 It can be called directly on the `romn/*.xml` files of [tipitaka-xml](https://github.com/VipassanaTech/tipitaka-xml).
@@ -74,6 +65,8 @@ Then run the command again to start the server:
 ```bash
 cargo run -- web-ui
 ```
+
+![web ui](docs/web-ui-screenshot.png)
 
 You can also specify a custom config file path:
 
