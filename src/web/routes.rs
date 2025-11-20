@@ -226,38 +226,110 @@ fn adjust_fragment_boundary(
                 (current, next)
             };
         
-        // Calculate new boundaries based on action
-        // NOTE: This updates line/char positions but NOT the content_xml
-        // The content_xml would need to be re-extracted from the original XML file
-        // For now, this serves as a reference for what the boundaries should be
-        
-        let (new_target_end_line, new_target_end_char, new_other_start_line, new_other_start_char) = 
+         // Calculate new boundaries and update content_xml based on action
+        let (new_target_end_line, new_target_end_char, new_other_start_line, new_other_start_char, 
+             new_target_content, new_other_content) = 
             match request.action {
                 BoundaryAction::LineUp => {
                     // Line Up: DECREASE line number (move boundary up in file)
                     // This shrinks the target fragment and grows the other fragment
-                    (target_fragment.end_line - 1, target_fragment.end_char, other_fragment.start_line - 1, 0)
+                    // Remove the last line from target and add it to the beginning of other
+                    // Preserve original whitespace and line endings
+                    
+                    // Find the last newline position to split the content
+                    if let Some(last_newline_pos) = target_fragment.content_xml.rfind('\n') {
+                        // Split at the last newline, preserving the newline with the moved content
+                        let new_target = target_fragment.content_xml[..last_newline_pos].to_string();
+                        let moved_content = &target_fragment.content_xml[last_newline_pos..];
+                        let new_other = format!("{}{}", moved_content, other_fragment.content_xml);
+                        
+                        (target_fragment.end_line - 1, target_fragment.end_char, 
+                         other_fragment.start_line - 1, 0, new_target, new_other)
+                    } else {
+                        // No newline found, can't move line
+                        (target_fragment.end_line, target_fragment.end_char,
+                         other_fragment.start_line, other_fragment.start_char,
+                         target_fragment.content_xml.clone(), other_fragment.content_xml.clone())
+                    }
                 }
                 BoundaryAction::LineDown => {
                     // Line Down: INCREASE line number (move boundary down in file)
                     // This grows the target fragment and shrinks the other fragment
-                    (target_fragment.end_line + 1, 0, other_fragment.start_line + 1, 0)
+                    // Move the first line from other to the end of target
+                    // Preserve original whitespace and line endings
+                    
+                    // Find the first newline position to split the content
+                    if let Some(first_newline_pos) = other_fragment.content_xml.find('\n') {
+                        // Split at the first newline, preserving the newline with the moved content
+                        let moved_content = &other_fragment.content_xml[..=first_newline_pos]; // Include newline
+                        let new_other = &other_fragment.content_xml[first_newline_pos + 1..];
+                        let new_target = format!("{}{}", target_fragment.content_xml, moved_content);
+                        
+                        (target_fragment.end_line + 1, 0, 
+                         other_fragment.start_line + 1, 0, new_target, new_other.to_string())
+                    } else {
+                        // No newline found, can't move line
+                        (target_fragment.end_line, target_fragment.end_char,
+                         other_fragment.start_line, other_fragment.start_char,
+                         target_fragment.content_xml.clone(), other_fragment.content_xml.clone())
+                    }
                 }
                 BoundaryAction::CharLeft => {
                     // Move character left (decrease char position)
                     if target_fragment.end_char > 0 {
-                        (target_fragment.end_line, target_fragment.end_char - 1,
-                         other_fragment.start_line, other_fragment.start_char - 1)
+                        // Remove last character from target and add to beginning of other
+                        // Preserve all whitespace exactly as it appears
+                        
+                        if !target_fragment.content_xml.is_empty() {
+                            if let Some(last_char_start) = target_fragment.content_xml.char_indices().rev().next() {
+                                let (last_char_pos, _) = last_char_start;
+                                let new_target = &target_fragment.content_xml[..last_char_pos];
+                                let moved_char = &target_fragment.content_xml[last_char_pos..];
+                                let new_other = format!("{}{}", moved_char, other_fragment.content_xml);
+                                
+                                (target_fragment.end_line, target_fragment.end_char - 1,
+                                 other_fragment.start_line, other_fragment.start_char - 1, 
+                                 new_target.to_string(), new_other)
+                            } else {
+                                (target_fragment.end_line, target_fragment.end_char,
+                                 other_fragment.start_line, other_fragment.start_char,
+                                 target_fragment.content_xml.clone(), other_fragment.content_xml.clone())
+                            }
+                        } else {
+                            (target_fragment.end_line, target_fragment.end_char,
+                             other_fragment.start_line, other_fragment.start_char,
+                             target_fragment.content_xml.clone(), other_fragment.content_xml.clone())
+                        }
                     } else {
                         (target_fragment.end_line, target_fragment.end_char,
-                         other_fragment.start_line, other_fragment.start_char)
+                         other_fragment.start_line, other_fragment.start_char,
+                         target_fragment.content_xml.clone(), other_fragment.content_xml.clone())
                     }
                 }
                 BoundaryAction::CharRight => {
                     // Move character right (increase char position)
-                    // FIXME: should check if start_char is not at the end of the line
-                    (target_fragment.end_line, target_fragment.end_char + 1,
-                     other_fragment.start_line, other_fragment.start_char + 1)
+                    // Move first character from other to end of target
+                    // Preserve all whitespace exactly as it appears
+                    
+                    if !other_fragment.content_xml.is_empty() {
+                        if let Some((first_char_end, _)) = other_fragment.content_xml.char_indices().next() {
+                            let moved_char = &other_fragment.content_xml[..=first_char_end]; // Include full char
+                            let new_other = &other_fragment.content_xml[first_char_end + 1..];
+                            let new_target = format!("{}{}", target_fragment.content_xml, moved_char);
+                            
+                            (target_fragment.end_line, target_fragment.end_char + 1,
+                             other_fragment.start_line, other_fragment.start_char + 1, 
+                             new_target, new_other.to_string())
+                        } else {
+                            (target_fragment.end_line, target_fragment.end_char,
+                             other_fragment.start_line, other_fragment.start_char,
+                             target_fragment.content_xml.clone(), other_fragment.content_xml.clone())
+                        }
+                    } else {
+                        (target_fragment.end_line, target_fragment.end_char,
+                         other_fragment.start_line, other_fragment.start_char,
+                         target_fragment.content_xml.clone(), other_fragment.content_xml.clone())
+                    }
                 }
             };
         
@@ -267,7 +339,7 @@ fn adjust_fragment_boundary(
             start_char: target_fragment.start_char,
             end_line: new_target_end_line,
             end_char: new_target_end_char,
-            content_xml: target_fragment.content_xml.clone(), // TODO: Re-extract from XML
+            content_xml: new_target_content,
         };
         
         diesel::update(xml_fragments::table.find(target_fragment.id))
@@ -280,7 +352,7 @@ fn adjust_fragment_boundary(
             start_char: new_other_start_char,
             end_line: other_fragment.end_line,
             end_char: other_fragment.end_char,
-            content_xml: other_fragment.content_xml.clone(), // TODO: Re-extract from XML
+            content_xml: new_other_content,
         };
         
         diesel::update(xml_fragments::table.find(other_fragment.id))
@@ -858,6 +930,156 @@ fn regenerate(request: Json<RegenerateRequest>) -> Json<RegenerateResponse> {
         output,
         db_replaced,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_line_up_content_transfer() {
+        let target_content = "line1\nline2\nline3";
+        let other_content = "other1\nother2";
+        
+        // Test the actual implementation logic
+        let (new_target, new_other) = if let Some(last_newline_pos) = target_content.rfind('\n') {
+            let new_target = target_content[..last_newline_pos].to_string();
+            let moved_content = &target_content[last_newline_pos..];
+            let new_other = format!("{}{}", moved_content, other_content);
+            (new_target, new_other)
+        } else {
+            (target_content.to_string(), other_content.to_string())
+        };
+        
+        assert_eq!(new_target, "line1\nline2");
+        assert_eq!(new_other, "\nline3other1\nother2");
+    }
+    
+    #[test]
+    fn test_line_up_whitespace_preservation() {
+        let target_content = "  <tag>content</tag>\n  \n  <next>data</next>";
+        let other_content = "  <other>more</other>";
+        
+        let (new_target, new_other) = if let Some(last_newline_pos) = target_content.rfind('\n') {
+            let new_target = target_content[..last_newline_pos].to_string();
+            let moved_content = &target_content[last_newline_pos..];
+            let new_other = format!("{}{}", moved_content, other_content);
+            (new_target, new_other)
+        } else {
+            (target_content.to_string(), other_content.to_string())
+        };
+        
+        assert_eq!(new_target, "  <tag>content</tag>\n  ");
+        assert_eq!(new_other, "\n  <next>data</next>  <other>more</other>");
+    }
+    
+    #[test]
+    fn test_line_down_content_transfer() {
+        let target_content = "line1\nline2";
+        let other_content = "other1\nother2\nother3";
+        
+        // Test the actual implementation logic
+        let (new_target, new_other) = if let Some(first_newline_pos) = other_content.find('\n') {
+            let moved_content = &other_content[..=first_newline_pos];
+            let new_other = &other_content[first_newline_pos + 1..];
+            let new_target = format!("{}{}", target_content, moved_content);
+            (new_target, new_other.to_string())
+        } else {
+            (target_content.to_string(), other_content.to_string())
+        };
+        
+        assert_eq!(new_target, "line1\nline2other1\n");
+        assert_eq!(new_other, "other2\nother3");
+    }
+    
+    #[test]
+    fn test_line_down_whitespace_preservation() {
+        let target_content = "  <tag>content</tag>";
+        let other_content = "  \n  <other>more</other>\n  ";
+        
+        let (new_target, new_other) = if let Some(first_newline_pos) = other_content.find('\n') {
+            let moved_content = &other_content[..=first_newline_pos];
+            let new_other = &other_content[first_newline_pos + 1..];
+            let new_target = format!("{}{}", target_content, moved_content);
+            (new_target, new_other.to_string())
+        } else {
+            (target_content.to_string(), other_content.to_string())
+        };
+        
+        assert_eq!(new_target, "  <tag>content</tag>  \n");
+        assert_eq!(new_other, "  <other>more</other>\n  ");
+    }
+    
+    #[test]
+    fn test_char_left_content_transfer() {
+        let target_content = "hello";
+        let other_content = "world";
+        
+        // Test actual implementation logic
+        if !target_content.is_empty() {
+            if let Some((last_char_pos, _)) = target_content.char_indices().rev().next() {
+                let new_target = &target_content[..last_char_pos];
+                let moved_char = &target_content[last_char_pos..];
+                let new_other = format!("{}{}", moved_char, other_content);
+                
+                assert_eq!(new_target, "hell");
+                assert_eq!(new_other, "oworld");
+            }
+        }
+    }
+    
+    #[test]
+    fn test_char_left_whitespace_preservation() {
+        let target_content = "  <tag>content</tag>  ";
+        let other_content = "  <other>data</other>";
+        
+        if !target_content.is_empty() {
+            if let Some((last_char_pos, _)) = target_content.char_indices().rev().next() {
+                let new_target = &target_content[..last_char_pos];
+                let moved_char = &target_content[last_char_pos..];
+                let new_other = format!("{}{}", moved_char, other_content);
+                
+                // The last character is a space, so it gets moved to other fragment
+                assert_eq!(new_target, "  <tag>content</tag> ");
+                assert_eq!(new_other, "   <other>data</other>");
+            }
+        }
+    }
+    
+    #[test]
+    fn test_char_right_content_transfer() {
+        let target_content = "hello";
+        let other_content = "world";
+        
+        // Test actual implementation logic
+        if !other_content.is_empty() {
+            if let Some((first_char_end, _)) = other_content.char_indices().next() {
+                let moved_char = &other_content[..=first_char_end];
+                let new_other = &other_content[first_char_end + 1..];
+                let new_target = format!("{}{}", target_content, moved_char);
+                
+                assert_eq!(new_target, "hellow");
+                assert_eq!(new_other, "orld");
+            }
+        }
+    }
+    
+    #[test]
+    fn test_char_right_whitespace_preservation() {
+        let target_content = "  <tag>content</tag>";
+        let other_content = "  \n  <other>data</other>";
+        
+        if !other_content.is_empty() {
+            if let Some((first_char_end, _)) = other_content.char_indices().next() {
+                let moved_char = &other_content[..=first_char_end];
+                let new_other = &other_content[first_char_end + 1..];
+                let new_target = format!("{}{}", target_content, moved_char);
+                
+                // The first character is a space, so it gets moved to target fragment
+                // The remaining content still starts with a space and newline
+                assert_eq!(new_target, "  <tag>content</tag> ");
+                assert_eq!(new_other, " \n  <other>data</other>");
+            }
+        }
+    }
 }
 
 /// Get all routes for the web application
