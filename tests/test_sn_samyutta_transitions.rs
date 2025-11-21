@@ -104,17 +104,17 @@ fn test_sn_samyutta_transition_sn1_4_to_sn1_5() {
         "Last sutta of Mārasaṃyuttaṃ should be sn1.4.3.5");
     
     // Find the first sutta of Bhikkhunīsaṃyuttaṃ
-    // Note: Bhikkhunīsaṃyuttaṃ doesn't have vaggas, so it uses vagga 0: sn1.5.0.1
+    // Note: Bhikkhunīsaṃyuttaṃ doesn't have vaggas, so it uses vagga 1: sn1.5.1.1
     let first_sutta_sn1_5 = sutta_fragments.iter()
         .find(|f| {
             f.group_levels.iter().any(|l| l.id.as_ref() == Some(&"sn1_5".to_string()))
-                && f.cst_code.as_ref().map(|c| c == "sn1.5.0.1").unwrap_or(false)
+                && f.cst_code.as_ref().map(|c| c == "sn1.5.1.1").unwrap_or(false)
         })
         .expect("Should find first sutta of Bhikkhunīsaṃyuttaṃ");
     
-    // THE BUG FIX: Should be sn1.5.0.1 (vagga 0 for samyuttas without vaggas), not sn1.5.5.5
-    assert_eq!(first_sutta_sn1_5.cst_code.as_deref(), Some("sn1.5.0.1"),
-        "First sutta of Bhikkhunīsaṃyuttaṃ should be sn1.5.0.1, not sn1.5.5.5");
+    // THE BUG FIX: Should be sn1.5.1.1 (vagga 1 for samyuttas without vaggas), not sn1.5.5.5
+    assert_eq!(first_sutta_sn1_5.cst_code.as_deref(), Some("sn1.5.1.1"),
+        "First sutta of Bhikkhunīsaṃyuttaṃ should be sn1.5.1.1, not sn1.5.5.5");
     
     // Verify fragment order
     assert!(first_sutta_sn1_5.frag_idx > last_sutta_sn1_4.frag_idx,

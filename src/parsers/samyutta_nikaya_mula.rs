@@ -627,8 +627,8 @@ fn derive_cst_code(fragment: &XmlFragment, nikaya_structure: &NikayaStructure, c
                     Some(format!("{}.{}.{}.0", book, samyutta, vagga))
                 }
                 (Some(book), Some(samyutta), None, Some(sutta)) => {
-                    // SN without vaggas (like Bhikkhunīsaṃyuttaṃ): use 0 as vagga number
-                    Some(format!("{}.{}.0.{}", book, samyutta, sutta))
+                    // SN without vaggas (like Bhikkhunīsaṃyuttaṃ): use 1 as vagga number
+                    Some(format!("{}.{}.1.{}", book, samyutta, sutta))
                 }
                 _ => None,
             }

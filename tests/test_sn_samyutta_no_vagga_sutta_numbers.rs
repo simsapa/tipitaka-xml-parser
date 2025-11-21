@@ -64,7 +64,7 @@ fn test_sn_vaṅgīsa_samyutta_sutta_numbering() {
     }
     
     // Find the first 3 suttas of Vaṅgīsasaṃyuttaṃ (sn1.8)
-    // They should be: sn1.8.0.1, sn1.8.0.2, sn1.8.0.3
+    // They should be: sn1.8.1.1, sn1.8.1.2, sn1.8.1.3
     
     // Sutta 1: Nikkhantasuttaṃ
     let sutta1 = sutta_fragments.iter()
@@ -77,8 +77,8 @@ fn test_sn_vaṅgīsa_samyutta_sutta_numbering() {
     println!("  cst_vagga: {:?}", sutta1.cst_vagga);
     println!("  cst_sutta: {:?}", sutta1.cst_sutta);
     
-    assert_eq!(sutta1.cst_code.as_deref(), Some("sn1.8.0.1"),
-        "Sutta 1 should have cst_code='sn1.8.0.1'");
+    assert_eq!(sutta1.cst_code.as_deref(), Some("sn1.8.1.1"),
+        "Sutta 1 should have cst_code='sn1.8.1.1'");
     assert_eq!(sutta1.cst_vagga, None,
         "Sutta 1 should have cst_vagga=None (no vagga in this samyutta)");
     
@@ -93,8 +93,8 @@ fn test_sn_vaṅgīsa_samyutta_sutta_numbering() {
     println!("  cst_vagga: {:?}", sutta2.cst_vagga);
     println!("  cst_sutta: {:?}", sutta2.cst_sutta);
     
-    assert_eq!(sutta2.cst_code.as_deref(), Some("sn1.8.0.2"),
-        "Sutta 2 should have cst_code='sn1.8.0.2', found: {:?}", sutta2.cst_code);
+    assert_eq!(sutta2.cst_code.as_deref(), Some("sn1.8.1.2"),
+        "Sutta 2 should have cst_code='sn1.8.1.2', found: {:?}", sutta2.cst_code);
     assert_eq!(sutta2.cst_vagga, None,
         "Sutta 2 should have cst_vagga=None (no vagga in this samyutta)");
     assert_eq!(sutta2.cst_sutta.as_deref(), Some("2. Aratisuttaṃ"),

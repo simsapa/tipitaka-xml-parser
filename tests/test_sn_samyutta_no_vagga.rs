@@ -50,16 +50,16 @@ fn test_sn_vaṅgīsa_samyutta_no_vagga() {
             "Fragment 208 (sn1.7.2.12) should have a vagga");
     }
     
-    // Find fragment with cst_code sn1.8.0.1 (first sutta of Vaṅgīsasaṃyuttaṃ)
+    // Find fragment with cst_code sn1.8.1.1 (first sutta of Vaṅgīsasaṃyuttaṃ)
     let frag_209_opt = sutta_fragments.iter()
-        .find(|f| f.cst_code.as_deref() == Some("sn1.8.0.1"));
+        .find(|f| f.cst_code.as_deref() == Some("sn1.8.1.1"));
     
     assert!(frag_209_opt.is_some(), 
-        "Should find fragment with cst_code sn1.8.0.1");
+        "Should find fragment with cst_code sn1.8.1.1");
     
     let frag_209 = frag_209_opt.unwrap();
     
-    println!("\nFragment 209 (sn1.8.0.1):");
+    println!("\nFragment 209 (sn1.8.1.1):");
     println!("  frag_idx: {}", frag_209.frag_idx);
     println!("  cst_code: {:?}", frag_209.cst_code);
     println!("  cst_vagga: {:?}", frag_209.cst_vagga);
@@ -72,8 +72,8 @@ fn test_sn_vaṅgīsa_samyutta_no_vagga() {
     // The critical assertion: Vaṅgīsasaṃyuttaṃ has NO vaggas
     // So cst_vagga should be None, NOT "8. Vaṅgīsasaṃyuttaṃ"
     assert!(frag_209.cst_vagga.is_none(), 
-        "Fragment 209 (sn1.8.0.1) should have cst_vagga=None because Vaṅgīsasaṃyuttaṃ has no vaggas. \
-         Found: {:?}", frag_209.cst_vagga);
+        "Fragment 209 (sn1.8.1.1) should have cst_vagga=None because Vaṅgīsasaṃyuttaṃ has no vaggas. \
+          Found: {:?}", frag_209.cst_vagga);
     
     // The sutta title should be "1. Nikkhantasuttaṃ"
     assert_eq!(frag_209.cst_sutta.as_deref(), Some("1. Nikkhantasuttaṃ"),
