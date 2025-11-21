@@ -83,6 +83,12 @@ async function selectFile(filename) {
         item.classList.toggle('is-active', item.dataset.filename === filename);
     });
     
+    // Scroll selected file into view
+    const selectedItem = document.querySelector(`#file-list .panel-item[data-filename="${filename}"]`);
+    if (selectedItem) {
+        selectedItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    
     await fetchAndPopulateFragmentList(filename);
     clearFragmentDetails();
 }
@@ -243,6 +249,12 @@ async function selectFragment(fragmentId) {
     document.querySelectorAll('#fragment-list .panel-item').forEach(item => {
         item.classList.toggle('is-active', parseInt(item.dataset.fragmentId) === fragmentId);
     });
+    
+    // Scroll selected fragment into view
+    const selectedItem = document.querySelector(`#fragment-list .panel-item[data-fragment-id="${fragmentId}"]`);
+    if (selectedItem) {
+        selectedItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
     
     await fetchAndDisplayFragmentDetails(fragmentId);
 }
@@ -865,10 +877,13 @@ async function restoreStateAfterInit() {
             
             // Try to select the previously selected fragment
             if (state.selectedFragmentId) {
-                const fragmentItem = document.querySelector(`#fragment-list .panel-item[data-fragment-id="${state.selectedFragmentId}"]`);
-                if (fragmentItem) {
-                    await selectFragment(state.selectedFragmentId);
-                }
+                // Use setTimeout to ensure fragment list is fully loaded
+                setTimeout(async () => {
+                    const fragmentItem = document.querySelector(`#fragment-list .panel-item[data-fragment-id="${state.selectedFragmentId}"]`);
+                    if (fragmentItem) {
+                        await selectFragment(state.selectedFragmentId);
+                    }
+                }, 100);
             }
         }
     }
