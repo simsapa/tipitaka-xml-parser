@@ -37,3 +37,7 @@ new_fragments_tsv_path = "/path/to/your/fragments-new.tsv"
 
 # Path for the reference fragments TSV (default: new TSV path with -reference suffix)
 reference_fragments_tsv_path = "/path/to/your/fragments-new-reference.tsv"
+
+# Color theme for the web UI (options: "light", "dark", "system")
+# Optional - defaults to "system" if not specified
+# color_theme = "system"

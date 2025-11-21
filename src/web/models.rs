@@ -123,6 +123,21 @@ pub struct CreateFragmentResponse {
     pub message: Option<String>,
 }
 
+/// Color theme options
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum ColorTheme {
+    Light,
+    Dark,
+    System,
+}
+
+impl Default for ColorTheme {
+    fn default() -> Self {
+        ColorTheme::System
+    }
+}
+
 /// Application settings stored in TOML config file
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AppSettings {
@@ -135,6 +150,7 @@ pub struct AppSettings {
     pub new_fragments_tsv_path: Option<String>,
     pub reference_fragments_tsv_path: Option<String>,
     pub xml_parser_binary_path: Option<String>,
+    pub color_theme: Option<ColorTheme>,
 }
 
 impl Default for AppSettings {
@@ -149,6 +165,7 @@ impl Default for AppSettings {
             new_fragments_tsv_path: None,
             reference_fragments_tsv_path: None,
             xml_parser_binary_path: None,
+            color_theme: None,
         }
     }
 }

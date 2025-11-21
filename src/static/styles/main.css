@@ -189,6 +189,21 @@ body, html {
 .fragment-section .level {
     flex-shrink: 0;
     margin-bottom: 0.25rem;
+    padding: 0.5rem;
+    border-radius: 4px;
+}
+
+/* Current fragment level - blue selection */
+.fragment-section:nth-child(2) .level {
+    background-color: #3273dc;
+    color: white;
+}
+
+/* Dark mode adjustments for fragment levels */
+[data-theme="dark"] .fragment-section:first-child .level,
+[data-theme="dark"] .fragment-section:last-child .level {
+    background-color: #555;
+    color: var(--bulma-text-color);
 }
 
 .fragment-section .subtitle {
@@ -280,4 +295,227 @@ textarea::-webkit-scrollbar-thumb {
 #left-panel::-webkit-scrollbar-thumb:hover,
 textarea::-webkit-scrollbar-thumb:hover {
     background: #555;
+}
+
+/* Dark mode styles */
+[data-theme="dark"] {
+    /* Bulma dark mode variables */
+    --bulma-body-background-color: #1a1a1a;
+    --bulma-body-color: #f5f5f5;
+    --bulma-background-color: #242424;
+    --bulma-text-color: #f5f5f5;
+    --bulma-border-color: #5a5a5a;
+    --bulma-border-hover: #4a4a4a;
+    --bulma-link-color: #3273dc;
+    --bulma-link-hover: #363636;
+    --bulma-link-focus: #363636;
+    --bulma-link-active: #363636;
+    --bulma-input-color: #f5f5f5;
+    --bulma-input-background-color: #242424;
+    --bulma-input-border-color: #5a5a5a;
+    --bulma-input-hover-border-color: #4a4a4a;
+    --bulma-input-focus-border-color: #3273dc;
+    --bulma-input-focus-box-shadow-color: rgba(50, 115, 220, 0.25);
+    --bulma-textarea-color: #f5f5f5;
+    --bulma-textarea-background-color: #242424;
+    --bulma-textarea-border-color: #363636;
+    --bulma-textarea-hover-border-color: #4a4a4a;
+    --bulma-textarea-focus-border-color: #3273dc;
+    --bulma-textarea-focus-box-shadow-color: rgba(50, 115, 220, 0.25);
+    --bulma-select-color: #f5f5f5;
+    --bulma-select-background-color: #242424;
+    --bulma-select-border-color: #363636;
+    --bulma-select-hover-border-color: #4a4a4a;
+    --bulma-select-focus-border-color: #3273dc;
+    --bulma-select-focus-box-shadow-color: rgba(50, 115, 220, 0.25);
+    --bulma-box-background-color: #242424;
+    --bulma-box-color: #f5f5f5;
+    --bulma-box-shadow: 0 0.5em 1em -0.125em rgba(10, 10, 10, 0.5), 0 0px 0 1px rgba(10, 10, 10, 0.02);
+    --bulma-card-background-color: #242424;
+    --bulma-card-color: #f5f5f5;
+    --bulma-modal-card-background-color: #242424;
+    --bulma-modal-card-color: #f5f5f5;
+    --bulma-dropdown-background-color: #242424;
+    --bulma-dropdown-color: #f5f5f5;
+    --bulma-dropdown-item-hover-background-color: #363636;
+    --bulma-dropdown-item-active-background-color: #3273dc;
+    --bulma-dropdown-item-active-color: #fff;
+}
+
+/* Dark mode specific overrides */
+[data-theme="dark"] body,
+[data-theme="dark"] html {
+    background-color: var(--bulma-body-background-color);
+    color: var(--bulma-body-color);
+}
+
+[data-theme="dark"] .box {
+    background-color: var(--bulma-box-background-color);
+    color: var(--bulma-box-color);
+    border-color: var(--bulma-border-color);
+}
+
+[data-theme="dark"] .panel-section {
+    border-bottom-color: var(--bulma-border-color);
+}
+
+[data-theme="dark"] .panel-list {
+    background-color: var(--bulma-background-color);
+    border-color: var(--bulma-border-color);
+}
+
+[data-theme="dark"] .panel-item {
+    border-bottom-color: var(--bulma-border-color);
+    color: var(--bulma-text-color);
+}
+
+[data-theme="dark"] .panel-item:hover {
+    background-color: var(--bulma-background-color-l-darker);
+}
+
+[data-theme="dark"] .panel-item.is-active {
+    background-color: #3273dc;
+    color: white;
+}
+
+[data-theme="dark"] .input,
+[data-theme="dark"] .textarea,
+[data-theme="dark"] .select select {
+    background-color: var(--bulma-input-background-color);
+    border-color: var(--bulma-input-border-color);
+    color: var(--bulma-input-color);
+}
+
+[data-theme="dark"] .input:focus,
+[data-theme="dark"] .textarea:focus,
+[data-theme="dark"] .select select:focus {
+    border-color: var(--bulma-input-focus-border-color);
+    box-shadow: 0 0 0 0.125em var(--bulma-input-focus-box-shadow-color);
+}
+
+[data-theme="dark"] .input:hover,
+[data-theme="dark"] .textarea:hover,
+[data-theme="dark"] .select select:hover {
+    border-color: var(--bulma-input-hover-border-color);
+}
+
+[data-theme="dark"] .modal-card {
+    background-color: var(--bulma-modal-card-background-color);
+    color: var(--bulma-modal-card-color);
+}
+
+[data-theme="dark"] .dropdown-menu {
+    background-color: var(--bulma-dropdown-background-color);
+    color: var(--bulma-dropdown-color);
+}
+
+[data-theme="dark"] .dropdown-item {
+    color: var(--bulma-dropdown-color);
+}
+
+[data-theme="dark"] .dropdown-item:hover {
+    background-color: var(--bulma-dropdown-item-hover-background-color);
+}
+
+[data-theme="dark"] .dropdown-item.is-active {
+    background-color: var(--bulma-dropdown-item-active-background-color);
+    color: var(--bulma-dropdown-item-active-color);
+}
+
+[data-theme="dark"] .dropdown-menu .dropdown-content {
+    background-color: var(--bulma-dropdown-background-color);
+    border-color: var(--bulma-border-color);
+}
+
+[data-theme="dark"] .dropdown-menu .dropdown-item {
+    color: var(--bulma-dropdown-color);
+}
+
+[data-theme="dark"] .dropdown-menu .dropdown-item:hover {
+    background-color: var(--bulma-dropdown-item-hover-background-color);
+    color: var(--bulma-dropdown-color);
+}
+
+[data-theme="dark"] #separator {
+    background-color: var(--bulma-border-color);
+}
+
+[data-theme="dark"] #separator:hover {
+    background-color: var(--bulma-border-hover);
+}
+
+[data-theme="dark"] .panel-list::-webkit-scrollbar-track,
+[data-theme="dark"] #left-panel::-webkit-scrollbar-track,
+[data-theme="dark"] textarea::-webkit-scrollbar-track {
+    background: #2a2a2a;
+}
+
+[data-theme="dark"] .panel-list::-webkit-scrollbar-thumb,
+[data-theme="dark"] #left-panel::-webkit-scrollbar-thumb,
+[data-theme="dark"] textarea::-webkit-scrollbar-thumb {
+    background: #555;
+}
+
+[data-theme="dark"] .panel-list::-webkit-scrollbar-thumb:hover,
+[data-theme="dark"] #left-panel::-webkit-scrollbar-thumb:hover,
+[data-theme="dark"] textarea::-webkit-scrollbar-thumb:hover {
+    background: #777;
+}
+
+/* Dark mode fixes for h2, label, tag, and button elements */
+[data-theme="dark"] h2 {
+    color: var(--bulma-text-color);
+}
+
+[data-theme="dark"] .label {
+    color: var(--bulma-text-color);
+}
+
+[data-theme="dark"] .tag {
+    background-color: var(--bulma-background-color);
+    color: var(--bulma-text-color);
+    border-color: var(--bulma-border-color);
+}
+
+[data-theme="dark"] .button {
+    background-color: var(--bulma-background-color);
+    color: var(--bulma-text-color);
+    border-color: var(--bulma-border-color);
+}
+
+[data-theme="dark"] .button:hover {
+    background-color: var(--bulma-border-hover);
+    color: var(--bulma-text-color);
+}
+
+[data-theme="dark"] .button.is-primary {
+    background-color: #3273dc;
+    color: white;
+}
+
+[data-theme="dark"] .button.is-primary:hover {
+    background-color: #2366d1;
+    color: white;
+}
+
+[data-theme="dark"] .button.is-light {
+    background-color: #363636;
+    color: var(--bulma-text-color);
+}
+
+[data-theme="dark"] .button.is-light:hover {
+    background-color: #4a4a4a;
+    color: var(--bulma-text-color);
+}
+
+/* Dark mode for nikaya group separators in file list */
+[data-theme="dark"] .panel-item.has-background-grey-lighter {
+    background-color: #2a2a2a !important;
+    color: var(--bulma-text-color) !important;
+}
+
+[data-theme="dark"] .panel-item.has-background-grey-lighter.has-text-weight-bold {
+    background-color: #2a2a2a !important;
+    color: var(--bulma-text-color) !important;
+    font-weight: bold !important;
 }

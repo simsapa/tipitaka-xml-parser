@@ -14,6 +14,7 @@ function init() {
     setupEventListeners();
     setupResizablePanels();
     setupMenuDropdown();
+    setupThemeSync();
     console.log('Fragment Review Application initialized');
 }
 
@@ -698,6 +699,11 @@ function setupEventListeners() {
     document.getElementById('settings-cancel').onclick = closeSettingsModal;
     document.getElementById('settings-save').onclick = saveSettings;
     
+    // Theme change handler
+    document.getElementById('settings-color-theme').onchange = (e) => {
+        setTheme(e.target.value);
+    };
+    
     // Regenerate modal controls
     document.getElementById('regenerate-modal-close').onclick = closeRegenerateModal;
     document.getElementById('regenerate-close').onclick = closeRegenerateModal;
@@ -781,6 +787,24 @@ function closeMenuDropdown() {
     document.getElementById('menu-dropdown').classList.remove('is-active');
 }
 
+// Setup theme synchronization with server settings
+async function setupThemeSync() {
+    try {
+        const response = await fetch('/api/settings');
+        if (response.ok) {
+            const settings = await response.json();
+            const serverTheme = settings.color_theme || 'system';
+            
+            // Only apply server theme if user hasn't set a local preference
+            if (!localStorage.getItem('colorTheme')) {
+                setTheme(serverTheme);
+            }
+        }
+    } catch (error) {
+        console.error('Error loading settings for theme sync:', error);
+    }
+}
+
 // Open Settings modal
 async function openSettingsModal() {
     try {
@@ -789,6 +813,7 @@ async function openSettingsModal() {
             const settings = await response.json();
             document.getElementById('settings-db-path').value = settings.db_path || '';
             document.getElementById('settings-port').value = settings.port || 8000;
+            document.getElementById('settings-color-theme').value = settings.color_theme || 'system';
             document.getElementById('settings-xml-dir').value = settings.xml_dir || '';
             document.getElementById('settings-xml-filenames').value = (settings.xml_filenames || []).join('\n');
             document.getElementById('settings-parser-path').value = settings.xml_parser_binary_path || 'target/debug/tipitaka_xml_parser';
@@ -816,6 +841,7 @@ async function saveSettings() {
     const settings = {
         db_path: document.getElementById('settings-db-path').value,
         port: parseInt(document.getElementById('settings-port').value) || 8000,
+        color_theme: document.getElementById('settings-color-theme').value,
         xml_dir: document.getElementById('settings-xml-dir').value,
         xml_filenames: document.getElementById('settings-xml-filenames').value
             .split('\n')

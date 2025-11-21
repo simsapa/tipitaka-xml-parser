@@ -6,6 +6,50 @@
     <title>Fragment Review - Tipitaka XML Parser</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
     <link rel="stylesheet" href="/static/styles/main.css">
+    <script>
+        // Theme management
+        function initTheme() {
+            const savedTheme = localStorage.getItem('colorTheme') || 'system';
+            applyTheme(savedTheme);
+        }
+        
+        function applyTheme(theme) {
+            const html = document.documentElement;
+            
+            if (theme === 'dark') {
+                html.setAttribute('data-theme', 'dark');
+            } else if (theme === 'light') {
+                html.removeAttribute('data-theme');
+            } else if (theme === 'system') {
+                // Check system preference
+                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                if (prefersDark) {
+                    html.setAttribute('data-theme', 'dark');
+                } else {
+                    html.removeAttribute('data-theme');
+                }
+                
+                // Listen for system theme changes
+                window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+                    if (theme === 'system') {
+                        if (e.matches) {
+                            html.setAttribute('data-theme', 'dark');
+                        } else {
+                            html.removeAttribute('data-theme');
+                        }
+                    }
+                });
+            }
+        }
+        
+        function setTheme(theme) {
+            localStorage.setItem('colorTheme', theme);
+            applyTheme(theme);
+        }
+        
+        // Initialize theme early to prevent flash
+        initTheme();
+    </script>
 </head>
 <body>
     <div class="columns is-gapless" id="main-container">
@@ -367,6 +411,20 @@
                         <input class="input" type="number" id="settings-port" placeholder="8000" min="1024" max="65535">
                     </div>
                     <p class="help">Port number for the web UI server (requires restart)</p>
+                </div>
+                
+                <div class="field">
+                    <label class="label">Color Theme</label>
+                    <div class="control">
+                        <div class="select is-fullwidth">
+                            <select id="settings-color-theme">
+                                <option value="light">Light</option>
+                                <option value="dark">Dark</option>
+                                <option value="system">System (follow OS preference)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <p class="help">Choose color theme for the web UI</p>
                 </div>
                 
                 <hr>
