@@ -5,11 +5,20 @@
 
 use serde::{Serialize, Deserialize};
 
-/// File list item with fragment count
+/// File list item with fragment count and nikaya information
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FileListItem {
     pub filename: String,
     pub fragment_count: i32,
+    pub nikaya: String,
+}
+
+/// Grouped files by nikaya for display
+#[derive(Serialize, Deserialize, Debug)]
+pub struct NikayaGroup {
+    pub nikaya: String,
+    pub display_name: String,
+    pub files: Vec<FileListItem>,
 }
 
 /// Fragment list item with basic info

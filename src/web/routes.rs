@@ -13,8 +13,7 @@ use diesel::prelude::*;
 use crate::web::state::DbState;
 use crate::web::models::{
     FileListItem, FragmentListItem, FragmentDetail, AdjacentFragment,
-    UpdateMetadataRequest, BoundaryAdjustmentRequest, BoundaryAdjustmentResponse, BoundaryAction,
-    CreateFragmentRequest, CreateFragmentResponse, AppSettings
+    UpdateMetadataRequest, BoundaryAdjustmentRequest, BoundaryAdjustmentResponse, BoundaryAction, CreateFragmentRequest, CreateFragmentResponse, AppSettings, NikayaGroup
 };
 use crate::web::settings;
 use crate::fragments_schema::xml_fragments;
@@ -34,36 +33,70 @@ fn index() -> RawHtml<String> {
     }
 }
 
-/// GET /api/files - Return list of distinct cst_file values with fragment counts
+/// GET /api/files - Return list of distinct cst_file values grouped by nikaya with fragment counts
 #[get("/api/files")]
-fn get_files(db_state: &State<DbState>) -> Result<Json<Vec<FileListItem>>, String> {
+fn get_files(db_state: &State<DbState>) -> Result<Json<Vec<NikayaGroup>>, String> {
     let mut conn = db_state.connect()
         .map_err(|e| format!("Database connection failed: {}", e))?;
     
-    // Get distinct filenames
-    let filenames: Vec<String> = xml_fragments::table
-        .select(xml_fragments::cst_file)
+    // Get distinct filenames with their nikaya (first occurrence for each file)
+    let files_with_nikaya: Vec<(String, String)> = xml_fragments::table
+        .select((xml_fragments::cst_file, xml_fragments::nikaya))
         .distinct()
-        .order_by(xml_fragments::cst_file)
+        .order_by((xml_fragments::nikaya, xml_fragments::cst_file))
         .load(&mut conn)
         .map_err(|e| format!("Query failed: {}", e))?;
     
-    // For each filename, count fragments
-    let mut files: Vec<FileListItem> = Vec::new();
-    for filename in filenames {
+    // Group files by nikaya and get fragment counts
+    let mut nikaya_groups: std::collections::HashMap<String, Vec<FileListItem>> = std::collections::HashMap::new();
+    
+    for (filename, nikaya) in files_with_nikaya {
+        // Count fragments for this file
         let count: i64 = xml_fragments::table
             .filter(xml_fragments::cst_file.eq(&filename))
             .count()
             .get_result(&mut conn)
-            .map_err(|e| format!("Count query failed: {}", e))?;
+            .map_err(|e| format!("Count query failed for file {}: {}", filename, e))?;
         
-        files.push(FileListItem {
-            filename,
+        let file_item = FileListItem {
+            filename: filename.clone(),
             fragment_count: count as i32,
-        });
+            nikaya: nikaya.clone(),
+        };
+        
+        nikaya_groups.entry(nikaya).or_insert_with(Vec::new).push(file_item);
     }
     
-    Ok(Json(files))
+    // Convert to NikayaGroup structures with display names
+    let mut groups: Vec<NikayaGroup> = nikaya_groups
+        .into_iter()
+        .map(|(nikaya, files)| {
+            let display_name = match nikaya.as_str() {
+                "digha" => "Dīgha Nikāya".to_string(),
+                "majjhima" => "Majjhima Nikāya".to_string(),
+                "samyutta" => "Saṃyutta Nikāya".to_string(),
+                "anguttara" => "Aṅguttara Nikāya".to_string(),
+                "khuddaka" => "Khuddaka Nikāya".to_string(),
+                _ => format!("{} (Unknown)", nikaya),
+            };
+            
+            NikayaGroup {
+                nikaya,
+                display_name,
+                files,
+            }
+        })
+        .collect();
+    
+    // Sort groups by traditional nikaya order
+    groups.sort_by(|a, b| {
+        let order = ["digha", "majjhima", "samyutta", "anguttara", "khuddaka"];
+        let a_pos = order.iter().position(|&x| x == a.nikaya).unwrap_or(999);
+        let b_pos = order.iter().position(|&x| x == b.nikaya).unwrap_or(999);
+        a_pos.cmp(&b_pos)
+    });
+    
+    Ok(Json(groups))
 }
 
 /// GET /api/files/:filename/fragments - Return fragments for a specific file

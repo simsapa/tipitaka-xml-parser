@@ -49,20 +49,32 @@ async function fetchAndPopulateFileList() {
         const response = await fetch('/api/files');
         if (!response.ok) throw new Error('Failed to fetch files');
         
-        const files = await response.json();
+        const nikayaGroups = await response.json();
         fileList.innerHTML = '';
         
-        files.forEach(file => {
-            const item = document.createElement('div');
-            item.className = 'panel-item';
-            item.textContent = `${file.filename} (${file.fragment_count})`;
-            item.dataset.filename = file.filename;
-            item.onclick = () => selectFile(file.filename);
-            fileList.appendChild(item);
-        });
-        
-        if (files.length === 0) {
+        if (nikayaGroups.length === 0) {
             fileList.innerHTML = '<div class="panel-item">No files found</div>';
+        } else {
+            nikayaGroups.forEach(group => {
+                // Create nikaya header
+                const header = document.createElement('div');
+                header.className = 'panel-item has-background-grey-lighter has-text-weight-bold';
+                header.style.borderBottom = '2px solid #dbdbdb';
+                header.style.cursor = 'default';
+                header.textContent = group.display_name;
+                fileList.appendChild(header);
+                
+                // Add files under this nikaya
+                group.files.forEach(file => {
+                    const item = document.createElement('div');
+                    item.className = 'panel-item';
+                    item.style.paddingLeft = '1.5rem'; // Indent files under nikaya
+                    item.textContent = `${file.filename} (${file.fragment_count})`;
+                    item.dataset.filename = file.filename;
+                    item.onclick = () => selectFile(file.filename);
+                    fileList.appendChild(item);
+                });
+            });
         }
         
         // Restore state after loading files
