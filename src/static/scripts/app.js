@@ -139,6 +139,101 @@ function getStatusColor(status) {
     return colorMap[status] || 'light';
 }
 
+// Update a single fragment item in the list without reloading the entire list
+async function updateFragmentItemInList(fragmentId) {
+    try {
+        const response = await fetch(`/api/fragments/${fragmentId}`);
+        if (!response.ok) throw new Error('Failed to fetch fragment details');
+        
+        const fragment = await response.json();
+        
+        // Find the fragment item in the DOM
+        const fragmentItem = document.querySelector(`#fragment-list .panel-item[data-fragment-id="${fragmentId}"]`);
+        if (!fragmentItem) return;
+        
+        // Update the fragment in the state array
+        const stateIndex = state.fragments.findIndex(f => f.id === fragmentId);
+        if (stateIndex !== -1) {
+            state.fragments[stateIndex] = fragment;
+        }
+        
+        // Update the DOM content
+        const statusColor = getStatusColor(fragment.frag_review);
+        fragmentItem.innerHTML = `
+            <span class="tag">${fragment.frag_idx}</span>
+            <span class="tag is-${statusColor}">${fragment.frag_type}</span>
+            <span class="tag">${fragment.cst_code}</span>
+            <span class="tag">${fragment.sc_code}</span>
+        `;
+        
+    } catch (error) {
+        console.error('Error updating fragment item:', error);
+    }
+}
+
+// Remove a fragment item from the list without reloading the entire list
+function removeFragmentItemFromList(fragmentId) {
+    // Find and remove the fragment item from the DOM
+    const fragmentItem = document.querySelector(`#fragment-list .panel-item[data-fragment-id="${fragmentId}"]`);
+    if (fragmentItem) {
+        fragmentItem.remove();
+    }
+    
+    // Remove from state array
+    const stateIndex = state.fragments.findIndex(f => f.id === fragmentId);
+    if (stateIndex !== -1) {
+        state.fragments.splice(stateIndex, 1);
+    }
+}
+
+// Add a new fragment item to the list without reloading the entire list
+async function addFragmentItemToList(fragmentId, direction) {
+    try {
+        const response = await fetch(`/api/fragments/${fragmentId}`);
+        if (!response.ok) throw new Error('Failed to fetch fragment details');
+        
+        const fragment = await response.json();
+        
+        // Find the current fragment item
+        const currentItem = document.querySelector(`#fragment-list .panel-item[data-fragment-id="${state.selectedFragmentId}"]`);
+        if (!currentItem) return;
+        
+        // Create new fragment item
+        const newItem = document.createElement('div');
+        newItem.className = 'panel-item';
+        newItem.dataset.fragmentId = fragment.id;
+        newItem.onclick = () => selectFragment(fragment.id);
+        
+        const statusColor = getStatusColor(fragment.frag_review);
+        newItem.innerHTML = `
+            <span class="tag">${fragment.frag_idx}</span>
+            <span class="tag is-${statusColor}">${fragment.frag_type}</span>
+            <span class="tag">${fragment.cst_code}</span>
+            <span class="tag">${fragment.sc_code}</span>
+        `;
+        
+        // Insert in the correct position
+        if (direction === 'prev') {
+            currentItem.parentNode.insertBefore(newItem, currentItem);
+        } else {
+            currentItem.parentNode.insertBefore(newItem, currentItem.nextSibling);
+        }
+        
+        // Add to state array
+        const currentIndex = state.fragments.findIndex(f => f.id === state.selectedFragmentId);
+        if (currentIndex !== -1) {
+            if (direction === 'prev') {
+                state.fragments.splice(currentIndex, 0, fragment);
+            } else {
+                state.fragments.splice(currentIndex + 1, 0, fragment);
+            }
+        }
+        
+    } catch (error) {
+        console.error('Error adding fragment item:', error);
+    }
+}
+
 // Select a fragment and show details
 async function selectFragment(fragmentId) {
     state.selectedFragmentId = fragmentId;
@@ -290,8 +385,8 @@ async function updateFragmentMetadata() {
         
         if (!response.ok) throw new Error('Failed to update metadata');
         
-        // Refresh fragment list to show updated review status
-        await fetchAndPopulateFragmentList(state.selectedFile);
+        // Update only the specific fragment item in the DOM
+        await updateFragmentItemInList(state.selectedFragmentId);
         
         console.log('Metadata updated successfully');
     } catch (error) {
@@ -303,21 +398,23 @@ async function updateFragmentMetadata() {
 // Adjust fragment boundary
 async function adjustBoundary(action, direction) {
     if (!state.selectedFragmentId) return;
-    
+
     try {
         const response = await fetch(`/api/fragments/${state.selectedFragmentId}/adjust-boundary`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action, direction })
         });
-        
+
         if (!response.ok) throw new Error('Failed to adjust boundary');
-        
+
         const result = await response.json();
-        
+
+        // No need to update the affected fragments in the list because boundary data is not shown there.
+
         // Refresh the current fragment view
         await fetchAndDisplayFragmentDetails(state.selectedFragmentId);
-        
+
         console.log('Boundary adjusted:', result.message);
     } catch (error) {
         console.error('Error adjusting boundary:', error);
@@ -353,8 +450,8 @@ async function deleteFragment(direction) {
         
         if (!response.ok) throw new Error('Failed to delete fragment');
         
-        // Refresh fragment list
-        await fetchAndPopulateFragmentList(state.selectedFile);
+        // Remove the deleted fragment from the DOM and state
+        removeFragmentItemFromList(fragmentIdToDelete);
         
         // Keep the current fragment selected (it now contains the merged content)
         await fetchAndDisplayFragmentDetails(state.selectedFragmentId);
@@ -395,8 +492,8 @@ async function createNewFragment(direction) {
         
         const result = await response.json();
         
-        // Refresh fragment list
-        await fetchAndPopulateFragmentList(state.selectedFile);
+        // Add the new fragment to the DOM and state
+        await addFragmentItemToList(result.new_fragment_id, direction);
         
         // Select the newly created fragment
         await selectFragment(result.new_fragment_id);
@@ -410,14 +507,14 @@ async function createNewFragment(direction) {
 
 // Setup event listeners for buttons
 function setupEventListeners() {
-    // Auto-save metadata on blur
-    document.getElementById('frag_review').onchange = updateFragmentMetadata;
-    document.getElementById('cst_code').onblur = updateFragmentMetadata;
-    document.getElementById('sc_code').onblur = updateFragmentMetadata;
-    document.getElementById('cst_vagga').onblur = updateFragmentMetadata;
-    document.getElementById('cst_sutta').onblur = updateFragmentMetadata;
-    document.getElementById('cst_paranum').onblur = updateFragmentMetadata;
-    document.getElementById('sc_sutta').onblur = updateFragmentMetadata;
+    // Auto-save metadata on input change
+    document.getElementById('frag_review').oninput = updateFragmentMetadata;
+    document.getElementById('cst_code').oninput = updateFragmentMetadata;
+    document.getElementById('sc_code').oninput = updateFragmentMetadata;
+    document.getElementById('cst_vagga').oninput = updateFragmentMetadata;
+    document.getElementById('cst_sutta').oninput = updateFragmentMetadata;
+    document.getElementById('cst_paranum').oninput = updateFragmentMetadata;
+    document.getElementById('sc_sutta').oninput = updateFragmentMetadata;
     
     // Boundary adjustment buttons for previous fragment
     document.getElementById('prev-line-up').onclick = () => adjustBoundary('line_up', 'prev');
