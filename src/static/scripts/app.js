@@ -294,6 +294,32 @@ async function fetchAndDisplayFragmentDetails(fragmentId) {
         currentTextarea.value = detail.content_xml;
         nextTextarea.value = detail.next_fragment ? detail.next_fragment.content_xml : '';
         
+        // Update previous fragment metadata fields
+        if (detail.prev_fragment) {
+            document.getElementById('prev_cst_code').value = detail.prev_fragment.cst_code || '';
+            document.getElementById('prev_sc_code').value = detail.prev_fragment.sc_code || '';
+            document.getElementById('prev_cst_vagga').value = detail.prev_fragment.cst_vagga || '';
+            document.getElementById('prev_cst_sutta').value = detail.prev_fragment.cst_sutta || '';
+        } else {
+            document.getElementById('prev_cst_code').value = '';
+            document.getElementById('prev_sc_code').value = '';
+            document.getElementById('prev_cst_vagga').value = '';
+            document.getElementById('prev_cst_sutta').value = '';
+        }
+        
+        // Update next fragment metadata fields
+        if (detail.next_fragment) {
+            document.getElementById('next_cst_code').value = detail.next_fragment.cst_code || '';
+            document.getElementById('next_sc_code').value = detail.next_fragment.sc_code || '';
+            document.getElementById('next_cst_vagga').value = detail.next_fragment.cst_vagga || '';
+            document.getElementById('next_cst_sutta').value = detail.next_fragment.cst_sutta || '';
+        } else {
+            document.getElementById('next_cst_code').value = '';
+            document.getElementById('next_sc_code').value = '';
+            document.getElementById('next_cst_vagga').value = '';
+            document.getElementById('next_cst_sutta').value = '';
+        }
+        
         // Scroll previous fragment textarea to bottom
         if (detail.prev_fragment) {
             // Use setTimeout to ensure the textarea has been updated
@@ -358,16 +384,28 @@ function clearFragmentDetails() {
     document.getElementById('frag_review').value = '';
     document.getElementById('nikaya').value = '';
     document.getElementById('cst_code').value = '';
+    document.getElementById('sc_code').value = '';
     document.getElementById('cst_vagga').value = '';
     document.getElementById('cst_sutta').value = '';
     document.getElementById('cst_paranum').value = '';
-    document.getElementById('sc_code').value = '';
     document.getElementById('sc_sutta').value = '';
     document.getElementById('start_line').value = '';
     document.getElementById('start_char').value = '';
     document.getElementById('end_line').value = '';
     document.getElementById('end_char').value = '';
     document.getElementById('group_levels').value = '';
+    
+    // Clear previous fragment fields
+    document.getElementById('prev_cst_code').value = '';
+    document.getElementById('prev_sc_code').value = '';
+    document.getElementById('prev_cst_vagga').value = '';
+    document.getElementById('prev_cst_sutta').value = '';
+    
+    // Clear next fragment fields
+    document.getElementById('next_cst_code').value = '';
+    document.getElementById('next_sc_code').value = '';
+    document.getElementById('next_cst_vagga').value = '';
+    document.getElementById('next_cst_sutta').value = '';
     
     document.getElementById('prev-content').value = '';
     document.getElementById('current-content').value = '';
@@ -407,6 +445,52 @@ async function updateFragmentMetadata() {
     }
 }
 
+// Update adjacent fragment metadata (previous or next)
+async function updateAdjacentFragmentMetadata(direction) {
+    if (!state.selectedFragmentId) return;
+    
+    // Get current fragment details to find adjacent fragment ID
+    const detail = await getCurrentFragmentDetail();
+    if (!detail) return;
+    
+    let adjacentFragment;
+    if (direction === 'prev') {
+        adjacentFragment = detail.prev_fragment;
+    } else {
+        adjacentFragment = detail.next_fragment;
+    }
+    
+    if (!adjacentFragment) {
+        console.log(`No ${direction} fragment found to update`);
+        return;
+    }
+    
+    const metadata = {
+        cst_code: document.getElementById(`${direction}_cst_code`).value || null,
+        sc_code: document.getElementById(`${direction}_sc_code`).value || null,
+        cst_vagga: document.getElementById(`${direction}_cst_vagga`).value || null,
+        cst_sutta: document.getElementById(`${direction}_cst_sutta`).value || null,
+    };
+    
+    try {
+        const response = await fetch(`/api/fragments/${adjacentFragment.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(metadata)
+        });
+        
+        if (!response.ok) throw new Error('Failed to update adjacent fragment metadata');
+        
+        // Update the adjacent fragment item in the DOM
+        await updateFragmentItemInList(adjacentFragment.id);
+        
+        console.log('Adjacent fragment metadata updated successfully');
+    } catch (error) {
+        console.error('Error updating adjacent fragment metadata:', error);
+        alert('Failed to save adjacent fragment metadata changes');
+    }
+}
+
 // Adjust fragment boundary
 async function adjustBoundary(action, direction) {
     if (!state.selectedFragmentId) return;
@@ -422,9 +506,7 @@ async function adjustBoundary(action, direction) {
 
         const result = await response.json();
 
-        // No need to update the affected fragments in the list because boundary data is not shown there.
-
-        // Refresh the current fragment view
+        // Refresh the current fragment view to update boundary data and adjacent fragment metadata
         await fetchAndDisplayFragmentDetails(state.selectedFragmentId);
 
         console.log('Boundary adjusted:', result.message);
@@ -465,7 +547,7 @@ async function deleteFragment(direction) {
         // Remove the deleted fragment from the DOM and state
         removeFragmentItemFromList(fragmentIdToDelete);
         
-        // Keep the current fragment selected (it now contains the merged content)
+        // Refresh the current fragment view to update adjacent fragment metadata
         await fetchAndDisplayFragmentDetails(state.selectedFragmentId);
         
         console.log('Fragment deleted and merged successfully');
@@ -527,6 +609,18 @@ function setupEventListeners() {
     document.getElementById('cst_sutta').oninput = updateFragmentMetadata;
     document.getElementById('cst_paranum').oninput = updateFragmentMetadata;
     document.getElementById('sc_sutta').oninput = updateFragmentMetadata;
+    
+    // Previous fragment metadata input handlers
+    document.getElementById('prev_cst_code').oninput = () => updateAdjacentFragmentMetadata('prev');
+    document.getElementById('prev_sc_code').oninput = () => updateAdjacentFragmentMetadata('prev');
+    document.getElementById('prev_cst_vagga').oninput = () => updateAdjacentFragmentMetadata('prev');
+    document.getElementById('prev_cst_sutta').oninput = () => updateAdjacentFragmentMetadata('prev');
+    
+    // Next fragment metadata input handlers
+    document.getElementById('next_cst_code').oninput = () => updateAdjacentFragmentMetadata('next');
+    document.getElementById('next_sc_code').oninput = () => updateAdjacentFragmentMetadata('next');
+    document.getElementById('next_cst_vagga').oninput = () => updateAdjacentFragmentMetadata('next');
+    document.getElementById('next_cst_sutta').oninput = () => updateAdjacentFragmentMetadata('next');
     
     // Boundary adjustment buttons for previous fragment
     document.getElementById('prev-line-up').onclick = () => adjustBoundary('line_up', 'prev');

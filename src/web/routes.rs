@@ -123,6 +123,10 @@ fn get_fragment_detail(
             frag_idx: r.frag_idx,
             frag_type: r.frag_type,
             content_xml: r.content_xml,
+            cst_code: r.cst_code,
+            sc_code: r.sc_code,
+            cst_vagga: r.cst_vagga,
+            cst_sutta: r.cst_sutta,
         });
     
     // Get next fragment (same file, frag_idx + 1)
@@ -137,6 +141,10 @@ fn get_fragment_detail(
             frag_idx: r.frag_idx,
             frag_type: r.frag_type,
             content_xml: r.content_xml,
+            cst_code: r.cst_code,
+            sc_code: r.sc_code,
+            cst_vagga: r.cst_vagga,
+            cst_sutta: r.cst_sutta,
         });
     
     let detail = FragmentDetail {

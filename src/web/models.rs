@@ -57,6 +57,10 @@ pub struct AdjacentFragment {
     pub frag_idx: i32,
     pub frag_type: String,
     pub content_xml: String,
+    pub cst_code: Option<String>,
+    pub sc_code: Option<String>,
+    pub cst_vagga: Option<String>,
+    pub cst_sutta: Option<String>,
 }
 
 /// Request body for updating fragment metadata
