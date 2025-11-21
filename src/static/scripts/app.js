@@ -159,13 +159,17 @@ function getStatusColor(status) {
 }
 
 // Update a single fragment item in the list without reloading the entire list
-async function updateFragmentItemInList(fragmentId) {
+// This function now expects the fragment data to be passed in, avoiding race conditions
+function updateFragmentItemInList(fragmentId, fragmentData = null) {
     try {
-        const response = await fetch(`/api/fragments/${fragmentId}`);
-        if (!response.ok) throw new Error('Failed to fetch fragment details');
+        // If no data provided, fetch it (fallback for backward compatibility)
+        if (!fragmentData) {
+            fetchFragmentAndUpdateList(fragmentId);
+            return;
+        }
         
-        const fragment = await response.json();
-        
+        const fragment = fragmentData;
+
         // Find the fragment item in the DOM
         const fragmentItem = document.querySelector(`#fragment-list .panel-item[data-fragment-id="${fragmentId}"]`);
         if (!fragmentItem) return;
@@ -184,9 +188,22 @@ async function updateFragmentItemInList(fragmentId) {
             <span class="tag">${fragment.cst_code}</span>
             <span class="tag">${fragment.sc_code}</span>
         `;
-        
+
     } catch (error) {
         console.error('Error updating fragment item:', error);
+    }
+}
+
+// Fallback function to fetch fragment data and update list (for backward compatibility)
+async function fetchFragmentAndUpdateList(fragmentId) {
+    try {
+        const response = await fetch(`/api/fragments/${fragmentId}`);
+        if (!response.ok) throw new Error('Failed to fetch fragment details');
+        
+        const fragment = await response.json();
+        updateFragmentItemInList(fragmentId, fragment);
+    } catch (error) {
+        console.error('Error fetching fragment for update:', error);
     }
 }
 
@@ -299,11 +316,25 @@ async function fetchAndDisplayFragmentDetails(fragmentId) {
         
         // Update text areas
         const prevTextarea = document.getElementById('prev-content');
-        const currentTextarea = document.getElementById('current-content');
+        const currentTopTextarea = document.getElementById('current-content-top');
+        const currentBottomTextarea = document.getElementById('current-content-bottom');
         const nextTextarea = document.getElementById('next-content');
         
         prevTextarea.value = detail.prev_fragment ? detail.prev_fragment.content_xml : '';
-        currentTextarea.value = detail.content_xml;
+        
+        // Both textareas show the complete content_xml
+        const currentContent = detail.content_xml || '';
+        currentTopTextarea.value = currentContent;
+        currentBottomTextarea.value = currentContent;
+        
+        // Scroll top textarea to top and bottom textarea to bottom
+        setTimeout(() => {
+            currentTopTextarea.scrollTop = 0;
+            // Scroll to bottom, but handle case where content is shorter than textarea height
+            const maxScrollTop = Math.max(0, currentBottomTextarea.scrollHeight - currentBottomTextarea.clientHeight);
+            currentBottomTextarea.scrollTop = maxScrollTop;
+        }, 0);
+        
         nextTextarea.value = detail.next_fragment ? detail.next_fragment.content_xml : '';
         
         // Update previous fragment metadata fields
@@ -419,7 +450,8 @@ function clearFragmentDetails() {
     document.getElementById('next_cst_sutta').value = '';
     
     document.getElementById('prev-content').value = '';
-    document.getElementById('current-content').value = '';
+    document.getElementById('current-content-top').value = '';
+    document.getElementById('current-content-bottom').value = '';
     document.getElementById('next-content').value = '';
 }
 
@@ -428,13 +460,13 @@ async function updateFragmentMetadata() {
     if (!state.selectedFragmentId) return;
     
     const metadata = {
-        frag_review: document.getElementById('frag_review').value || null,
-        cst_code: document.getElementById('cst_code').value || null,
-        sc_code: document.getElementById('sc_code').value || null,
-        cst_vagga: document.getElementById('cst_vagga').value || null,
-        cst_sutta: document.getElementById('cst_sutta').value || null,
-        cst_paranum: document.getElementById('cst_paranum').value || null,
-        sc_sutta: document.getElementById('sc_sutta').value || null,
+        frag_review: document.getElementById('frag_review').value || '',
+        cst_code: document.getElementById('cst_code').value || '',
+        sc_code: document.getElementById('sc_code').value || '',
+        cst_vagga: document.getElementById('cst_vagga').value || '',
+        cst_sutta: document.getElementById('cst_sutta').value || '',
+        cst_paranum: document.getElementById('cst_paranum').value || '',
+        sc_sutta: document.getElementById('sc_sutta').value || '',
     };
     
     try {
@@ -446,10 +478,9 @@ async function updateFragmentMetadata() {
         
         if (!response.ok) throw new Error('Failed to update metadata');
         
-        // Update only the specific fragment item in the DOM
-        await updateFragmentItemInList(state.selectedFragmentId);
-        
-        console.log('Metadata updated successfully');
+        // Use the returned fragment data to update the UI (no race condition)
+        const updatedFragment = await response.json();
+        updateFragmentItemInList(state.selectedFragmentId, updatedFragment);
     } catch (error) {
         console.error('Error updating metadata:', error);
         alert('Failed to save metadata changes');
@@ -477,10 +508,10 @@ async function updateAdjacentFragmentMetadata(direction) {
     }
     
     const metadata = {
-        cst_code: document.getElementById(`${direction}_cst_code`).value || null,
-        sc_code: document.getElementById(`${direction}_sc_code`).value || null,
-        cst_vagga: document.getElementById(`${direction}_cst_vagga`).value || null,
-        cst_sutta: document.getElementById(`${direction}_cst_sutta`).value || null,
+        cst_code: document.getElementById(`${direction}_cst_code`).value || '',
+        sc_code: document.getElementById(`${direction}_sc_code`).value || '',
+        cst_vagga: document.getElementById(`${direction}_cst_vagga`).value || '',
+        cst_sutta: document.getElementById(`${direction}_cst_sutta`).value || '',
     };
     
     try {
@@ -492,10 +523,9 @@ async function updateAdjacentFragmentMetadata(direction) {
         
         if (!response.ok) throw new Error('Failed to update adjacent fragment metadata');
         
-        // Update the adjacent fragment item in the DOM
-        await updateFragmentItemInList(adjacentFragment.id);
-        
-        console.log('Adjacent fragment metadata updated successfully');
+        // Use the returned fragment data to update the UI (no race condition)
+        const updatedFragment = await response.json();
+        updateFragmentItemInList(adjacentFragment.id, updatedFragment);
     } catch (error) {
         console.error('Error updating adjacent fragment metadata:', error);
         alert('Failed to save adjacent fragment metadata changes');
@@ -612,26 +642,71 @@ async function createNewFragment(direction) {
 
 // Setup event listeners for buttons
 function setupEventListeners() {
-    // Auto-save metadata on input change
-    document.getElementById('frag_review').oninput = updateFragmentMetadata;
-    document.getElementById('cst_code').oninput = updateFragmentMetadata;
-    document.getElementById('sc_code').oninput = updateFragmentMetadata;
-    document.getElementById('cst_vagga').oninput = updateFragmentMetadata;
-    document.getElementById('cst_sutta').oninput = updateFragmentMetadata;
-    document.getElementById('cst_paranum').oninput = updateFragmentMetadata;
-    document.getElementById('sc_sutta').oninput = updateFragmentMetadata;
+    // Auto-save metadata on input change with debouncing
+    let updateTimeout;
+    function debouncedUpdateFragmentMetadata() {
+        clearTimeout(updateTimeout);
+        updateTimeout = setTimeout(() => {
+            updateFragmentMetadata();
+        }, 300);
+    }
     
-    // Previous fragment metadata input handlers
-    document.getElementById('prev_cst_code').oninput = () => updateAdjacentFragmentMetadata('prev');
-    document.getElementById('prev_sc_code').oninput = () => updateAdjacentFragmentMetadata('prev');
-    document.getElementById('prev_cst_vagga').oninput = () => updateAdjacentFragmentMetadata('prev');
-    document.getElementById('prev_cst_sutta').oninput = () => updateAdjacentFragmentMetadata('prev');
+    // Use both input and change events to catch all scenarios
+    function setupInputHandlers(elementId) {
+        const element = document.getElementById(elementId);
+        element.addEventListener('input', function() {
+            debouncedUpdateFragmentMetadata();
+        });
+        element.addEventListener('change', updateFragmentMetadata); // update on blur/change
+    }
     
-    // Next fragment metadata input handlers
-    document.getElementById('next_cst_code').oninput = () => updateAdjacentFragmentMetadata('next');
-    document.getElementById('next_sc_code').oninput = () => updateAdjacentFragmentMetadata('next');
-    document.getElementById('next_cst_vagga').oninput = () => updateAdjacentFragmentMetadata('next');
-    document.getElementById('next_cst_sutta').oninput = () => updateAdjacentFragmentMetadata('next');
+    setupInputHandlers('frag_review');
+    setupInputHandlers('cst_code');
+    setupInputHandlers('sc_code');
+    setupInputHandlers('cst_vagga');
+    setupInputHandlers('cst_sutta');
+    setupInputHandlers('cst_paranum');
+    setupInputHandlers('sc_sutta');
+    
+    // Previous fragment metadata input handlers with debouncing
+    let prevUpdateTimeout;
+    function debouncedUpdatePrevFragmentMetadata() {
+        clearTimeout(prevUpdateTimeout);
+        prevUpdateTimeout = setTimeout(() => updateAdjacentFragmentMetadata('prev'), 300);
+    }
+    
+    function setupPrevHandlers(elementId) {
+        const element = document.getElementById(`prev_${elementId}`);
+        element.addEventListener('input', function() {
+            debouncedUpdatePrevFragmentMetadata();
+        });
+        element.addEventListener('change', () => updateAdjacentFragmentMetadata('prev'));
+    }
+    
+    setupPrevHandlers('cst_code');
+    setupPrevHandlers('sc_code');
+    setupPrevHandlers('cst_vagga');
+    setupPrevHandlers('cst_sutta');
+    
+    // Next fragment metadata input handlers with debouncing
+    let nextUpdateTimeout;
+    function debouncedUpdateNextFragmentMetadata() {
+        clearTimeout(nextUpdateTimeout);
+        nextUpdateTimeout = setTimeout(() => updateAdjacentFragmentMetadata('next'), 300);
+    }
+    
+    function setupNextHandlers(elementId) {
+        const element = document.getElementById(`next_${elementId}`);
+        element.addEventListener('input', function() {
+            debouncedUpdateNextFragmentMetadata();
+        });
+        element.addEventListener('change', () => updateAdjacentFragmentMetadata('next'));
+    }
+    
+    setupNextHandlers('cst_code');
+    setupNextHandlers('sc_code');
+    setupNextHandlers('cst_vagga');
+    setupNextHandlers('cst_sutta');
     
     // Boundary adjustment buttons for previous fragment
     document.getElementById('prev-line-up').onclick = () => adjustBoundary('line_up', 'prev');

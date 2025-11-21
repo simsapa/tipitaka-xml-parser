@@ -212,10 +212,10 @@ fn update_fragment_metadata(
     fragment_id: i32,
     update_request: Json<UpdateMetadataRequest>,
     db_state: &State<DbState>
-) -> Result<Json<String>, String> {
+) -> Result<Json<FragmentListItem>, String> {
     let mut conn = db_state.connect()
         .map_err(|e| format!("Database connection failed: {}", e))?;
-    
+
     let changeset = UpdateFragmentMetadata {
         frag_review: update_request.frag_review.clone(),
         cst_code: update_request.cst_code.clone(),
@@ -231,7 +231,22 @@ fn update_fragment_metadata(
         .execute(&mut conn)
         .map_err(|e| format!("Update failed: {}", e))?;
     
-    Ok(Json("Fragment metadata updated successfully".to_string()))
+    // Fetch and return the updated fragment
+    let updated: XmlFragmentRecord = xml_fragments::table
+        .find(fragment_id)
+        .first(&mut conn)
+        .map_err(|e| format!("Failed to fetch updated fragment: {}", e))?;
+    
+    let fragment_item = FragmentListItem {
+        id: updated.id,
+        frag_idx: updated.frag_idx,
+        frag_type: updated.frag_type,
+        frag_review: updated.frag_review,
+        cst_code: updated.cst_code,
+        sc_code: updated.sc_code,
+    };
+    
+    Ok(Json(fragment_item))
 }
 
 /// POST /api/fragments/:id/adjust-boundary - Adjust fragment boundaries

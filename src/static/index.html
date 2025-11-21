@@ -299,7 +299,14 @@
                                 </div>
                                 -->
                             </div>
-                            <textarea class="textarea is-family-monospace" id="current-content" rows="12" readonly></textarea>
+                            <div class="columns is-gapless" style="flex: 1; min-height: 0;">
+                                <div class="column" style="padding-right: 0.5rem;">
+                                    <textarea class="textarea is-family-monospace" id="current-content-top" rows="12" readonly placeholder="Content (scrolled to top)"></textarea>
+                                </div>
+                                <div class="column" style="padding-left: 0.5rem;">
+                                    <textarea class="textarea is-family-monospace" id="current-content-bottom" rows="12" readonly placeholder="Content (scrolled to bottom)"></textarea>
+                                </div>
+                            </div>
                         </div>
                         
                         <!-- Next Fragment -->

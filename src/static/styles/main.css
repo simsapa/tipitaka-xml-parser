@@ -282,26 +282,66 @@ body, html {
 .panel-list::-webkit-scrollbar,
 #left-panel::-webkit-scrollbar,
 textarea::-webkit-scrollbar {
-    width: 8px;
+    width: 16px;
+    height: 16px;
 }
 
 .panel-list::-webkit-scrollbar-track,
 #left-panel::-webkit-scrollbar-track,
 textarea::-webkit-scrollbar-track {
     background: #f1f1f1;
+    border: 1px solid #e0e0e0;
 }
 
 .panel-list::-webkit-scrollbar-thumb,
 #left-panel::-webkit-scrollbar-thumb,
 textarea::-webkit-scrollbar-thumb {
-    background: #888;
-    border-radius: 4px;
+    background: #3273dc;
+    border-radius: 8px;
+    border: 2px solid #f1f1f1;
 }
 
 .panel-list::-webkit-scrollbar-thumb:hover,
 #left-panel::-webkit-scrollbar-thumb:hover,
 textarea::-webkit-scrollbar-thumb:hover {
-    background: #555;
+    background: #2366d1;
+}
+
+/* Ensure scrollbar thumb is always visible (not just on hover) */
+textarea::-webkit-scrollbar-thumb {
+    background: #3273dc;
+}
+
+/* Force scrollbar visibility for all textareas */
+textarea {
+    scrollbar-gutter: stable;
+}
+
+/* Ensure scrollbars are always visible for textarea */
+textarea {
+    overflow-y: scroll !important;
+    overflow-x: scroll !important;
+}
+
+/* Firefox scrollbar styling */
+.panel-list,
+#left-panel,
+textarea {
+    scrollbar-width: thick;
+    scrollbar-color: #3273dc #f1f1f1;
+}
+
+[data-theme="dark"] .panel-list,
+[data-theme="dark"] #left-panel,
+[data-theme="dark"] textarea {
+    scrollbar-color: #3273dc #2a2a2a;
+}
+
+/* Force Firefox to always show scrollbars for textareas */
+@supports (scrollbar-width: thick) {
+    textarea {
+        scrollbar-width: thick !important;
+    }
 }
 
 /* Dark mode styles */
@@ -455,18 +495,25 @@ textarea::-webkit-scrollbar-thumb:hover {
 [data-theme="dark"] #left-panel::-webkit-scrollbar-track,
 [data-theme="dark"] textarea::-webkit-scrollbar-track {
     background: #2a2a2a;
+    border: 1px solid #3a3a3a;
 }
 
 [data-theme="dark"] .panel-list::-webkit-scrollbar-thumb,
 [data-theme="dark"] #left-panel::-webkit-scrollbar-thumb,
 [data-theme="dark"] textarea::-webkit-scrollbar-thumb {
-    background: #555;
+    background: #3273dc;
+    border: 2px solid #2a2a2a;
 }
 
 [data-theme="dark"] .panel-list::-webkit-scrollbar-thumb:hover,
 [data-theme="dark"] #left-panel::-webkit-scrollbar-thumb:hover,
 [data-theme="dark"] textarea::-webkit-scrollbar-thumb:hover {
-    background: #777;
+    background: #2366d1;
+}
+
+/* Ensure scrollbar thumb is always visible in dark mode */
+[data-theme="dark"] textarea::-webkit-scrollbar-thumb {
+    background: #3273dc;
 }
 
 /* Dark mode fixes for h2, label, tag, and button elements */
