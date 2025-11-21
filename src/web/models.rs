@@ -19,6 +19,8 @@ pub struct FragmentListItem {
     pub frag_idx: i32,
     pub frag_type: String,
     pub frag_review: Option<String>,
+    pub cst_code: Option<String>,
+    pub sc_code: Option<String>,
 }
 
 /// Complete fragment details including adjacent fragments

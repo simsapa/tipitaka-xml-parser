@@ -88,6 +88,8 @@ fn get_file_fragments(
             frag_idx: r.frag_idx,
             frag_type: r.frag_type,
             frag_review: r.frag_review,
+            cst_code: r.cst_code,
+            sc_code: r.sc_code,
         })
         .collect();
     

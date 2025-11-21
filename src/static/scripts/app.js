@@ -107,8 +107,10 @@ async function fetchAndPopulateFragmentList(filename) {
             
             const statusColor = getStatusColor(fragment.frag_review);
             item.innerHTML = `
-                <span class="tag is-${statusColor} is-small">${fragment.frag_type}</span>
-                <span>Fragment ${fragment.frag_idx}</span>
+                <span class="tag">${fragment.frag_idx}</span>
+                <span class="tag is-${statusColor}">${fragment.frag_type}</span>
+                <span class="tag">${fragment.cst_code}</span>
+                <span class="tag">${fragment.sc_code}</span>
             `;
             item.dataset.fragmentId = fragment.id;
             item.onclick = () => selectFragment(fragment.id);
