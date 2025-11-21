@@ -164,6 +164,24 @@ body, html {
     margin-bottom: 0.5rem;
 }
 
+/* Horizontal layout for current fragment metadata fields */
+.fragment-section .columns.is-gapless.is-mobile {
+    width: auto;
+    flex-grow: 1;
+}
+
+.fragment-section .columns.is-gapless.is-mobile .column {
+    padding-right: 0.5rem !important;
+}
+
+.fragment-section .columns.is-gapless.is-mobile .column:last-child {
+    padding-right: 0;
+}
+
+.fragment-section .columns.is-gapless.is-mobile .field {
+    margin-bottom: 0;
+}
+
 .fragment-section:last-child {
     margin-bottom: 0;
 }

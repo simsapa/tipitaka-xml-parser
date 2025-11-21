@@ -90,24 +90,6 @@
                                         </div>
                                     </div>
                                     <div class="field">
-                                        <label class="label is-small">CST Code</label>
-                                        <div class="control">
-                                            <input class="input is-small" type="text" id="cst_code">
-                                        </div>
-                                    </div>
-                                    <div class="field">
-                                        <label class="label is-small">CST Vagga</label>
-                                        <div class="control">
-                                            <input class="input is-small" type="text" id="cst_vagga">
-                                        </div>
-                                    </div>
-                                    <div class="field">
-                                        <label class="label is-small">CST Sutta</label>
-                                        <div class="control">
-                                            <input class="input is-small" type="text" id="cst_sutta">
-                                        </div>
-                                    </div>
-                                    <div class="field">
                                         <label class="label is-small">CST Paranum</label>
                                         <div class="control">
                                             <input class="input is-small" type="text" id="cst_paranum">
@@ -121,12 +103,6 @@
                                         <label class="label is-small">CST File</label>
                                         <div class="control">
                                             <input class="input is-small" type="text" id="cst_file" readonly>
-                                        </div>
-                                    </div>
-                                    <div class="field">
-                                        <label class="label is-small">SC Code</label>
-                                        <div class="control">
-                                            <input class="input is-small" type="text" id="sc_code">
                                         </div>
                                     </div>
                                     <div class="field">
@@ -181,9 +157,9 @@
                         <div class="fragment-section">
                             <div class="level">
                                 <div class="level-left">
-                                    <h2 class="subtitle is-6">Previous Fragment</h2>
+                                    <h2 class="subtitle is-6">Previous</h2>
                                 </div>
-                                <!-- NOTE: word-in-progress feature
+                                <!-- NOTE: work-in-progress feature
                                 <div class="level-right">
                                     <button class="button is-small is-danger" id="delete-prev-btn">Delete and Merge with Previous</button>
                                 </div>
@@ -192,23 +168,58 @@
                             <textarea class="textarea is-family-monospace" id="prev-content" rows="8" readonly></textarea>
                         </div>
                         
-                        <!-- Boundary Controls: Previous ↔ Current -->
-                        <div class="mt-2 mb-2">
-                            <div class="buttons are-small is-centered">
-                                <button class="button" id="prev-line-up" title="Decrease start line (move line from current up to previous)">↑ Line Up</button>
-                                <button class="button" id="prev-line-down" title="Increase start line (move line from previous down to current)">↓ Line Down</button>
-                                <button class="button" id="prev-char-left" title="Move character left (from current to previous)">← Char</button>
-                                <button class="button" id="prev-char-right" title="Move character right (from previous to current)">→ Char</button>
-                            </div>
-                        </div>
-                        
                         <!-- Current Fragment -->
                         <div class="fragment-section">
                             <div class="level">
                                 <div class="level-left">
-                                    <h2 class="subtitle is-6">Current Fragment (Selected)</h2>
+                                    <h2 class="subtitle is-6">Current</h2>
+                                    <div class="columns is-gapless is-mobile" style="margin-left: 1em;">
+                                        <div class="column">
+                                            <div class="field">
+                                                <label class="label is-small">CST Code</label>
+                                                <div class="control">
+                                                    <input class="input is-small" type="text" id="cst_code">
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="column">
+                                            <div class="field">
+                                                <label class="label is-small">SC Code</label>
+                                                <div class="control">
+                                                    <input class="input is-small" type="text" id="sc_code">
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="column">
+                                            <div class="field">
+                                                <label class="label is-small">CST Vagga</label>
+                                                <div class="control">
+                                                    <input class="input is-small" type="text" id="cst_vagga">
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="column">
+                                            <div class="field">
+                                                <label class="label is-small">CST Sutta</label>
+                                                <div class="control">
+                                                    <input class="input is-small" type="text" id="cst_sutta">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
-                                <!-- NOTE: word-in-progress feature
+
+                                <div class="level-right">
+                                    <!-- Boundary Controls: Previous ↔ Current -->
+                                    <div class="buttons are-small" style="margin-left: 1em;">
+                                        <button class="button" id="prev-line-up" title="Decrease start line (move line from current up to previous)">L↑</button>
+                                        <button class="button" id="prev-line-down" title="Increase start line (move line from previous down to current)">L↓</button>
+                                        <button class="button" id="prev-char-left" title="Move character left (from current to previous)">C←</button>
+                                        <button class="button" id="prev-char-right" title="Move character right (from previous to current)">C→</button>
+                                    </div>
+                                </div>
+
+                                <!-- NOTE: work-in-progress feature
                                 <div class="level-right">
                                     <button class="button is-small is-success" id="create-prev-btn">Create New Previous</button>
                                     <button class="button is-small is-success ml-2" id="create-next-btn">Create New Next</button>
@@ -218,23 +229,24 @@
                             <textarea class="textarea is-family-monospace" id="current-content" rows="12" readonly></textarea>
                         </div>
                         
-                        <!-- Boundary Controls: Current ↔ Next -->
-                        <div class="mt-2 mb-2">
-                            <div class="buttons are-small is-centered">
-                                <button class="button" id="next-line-up" title="Decrease end line (move line from next up to current)">↑ Line Up</button>
-                                <button class="button" id="next-line-down" title="Increase end line (move line from current down to next)">↓ Line Down</button>
-                                <button class="button" id="next-char-left" title="Move character left (from next to current)">← Char</button>
-                                <button class="button" id="next-char-right" title="Move character right (from current to next)">→ Char</button>
-                            </div>
-                        </div>
-                        
                         <!-- Next Fragment -->
                         <div class="fragment-section">
                             <div class="level">
                                 <div class="level-left">
-                                    <h2 class="subtitle is-6">Next Fragment</h2>
+                                    <h2 class="subtitle is-6">Next</h2>
                                 </div>
-                                <!-- NOTE: word-in-progress feature
+
+                                <div class="level-right">
+                                    <!-- Boundary Controls: Current ↔ Next -->
+                                    <div class="buttons are-small" style="margin-left: 1em;">
+                                        <button class="button" id="next-line-up" title="Decrease end line (move line from next up to current)">L↑</button>
+                                        <button class="button" id="next-line-down" title="Increase end line (move line from current down to next)">L↓</button>
+                                        <button class="button" id="next-char-left" title="Move character left (from next to current)">C←</button>
+                                        <button class="button" id="next-char-right" title="Move character right (from current to next)">C→</button>
+                                    </div>
+                                </div>
+
+                                <!-- NOTE: work-in-progress feature
                                 <div class="level-right">
                                     <button class="button is-small is-danger" id="delete-next-btn">Delete and Merge with Next</button>
                                 </div>
