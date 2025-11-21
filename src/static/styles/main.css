@@ -90,13 +90,69 @@ body, html {
     color: white;
 }
 
-.panel-item.is-active .tag {
+.panel-item.is-active .tag:not(:nth-child(2)) {
     background-color: white !important;
+    color: #363636 !important;
+}
+
+/* Preserve frag_type (2nd child) status colors even when selected */
+.panel-item.is-active .tag:nth-child(2).is-success {
+    background-color: #48c774 !important;
+    color: white !important;
+}
+
+.panel-item.is-active .tag:nth-child(2).is-warning {
+    background-color: #ffdd57 !important;
+    color: rgba(0, 0, 0, 0.7) !important;
+}
+
+.panel-item.is-active .tag:nth-child(2).is-danger {
+    background-color: #f14668 !important;
+    color: white !important;
+}
+
+.panel-item.is-active .tag:nth-child(2).is-light {
+    background-color: #f5f5f5 !important;
     color: #363636 !important;
 }
 
 .panel-item:last-child {
     border-bottom: none;
+}
+
+/* Fragment list column layout */
+#fragment-list .panel-item {
+    display: flex;
+    align-items: left;
+    gap: 0.5rem;
+}
+
+#fragment-list .panel-item .tag {
+    font-size: 1rem; /* Normal text size */
+    margin: 0;
+    flex-shrink: 0;
+}
+
+#fragment-list .panel-item .tag:nth-child(1) {
+    min-width: 3rem; /* For frag_idx like "242" */
+    justify-content: left;
+}
+
+#fragment-list .panel-item .tag:nth-child(2) {
+    min-width: 5rem; /* For frag_type like "Header" */
+    justify-content: left;
+}
+
+#fragment-list .panel-item .tag:nth-child(3) {
+    min-width: 8rem; /* For cst_code like "sn2.10.10.12" */
+    justify-content: left;
+    font-family: mono;
+}
+
+#fragment-list .panel-item .tag:nth-child(4) {
+    min-width: 7rem; /* For sc_code like "sn24.35" */
+    justify-content: left;
+    font-family: mono;
 }
 
 /* Fragment sections in right panel - equal height distribution */

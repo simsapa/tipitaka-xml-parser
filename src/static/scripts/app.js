@@ -529,7 +529,7 @@ function setupResizablePanels() {
         const newLeftWidth = e.clientX - containerRect.left;
         
         // Enforce min/max constraints
-        if (newLeftWidth >= 250 && newLeftWidth <= 600) {
+        if (newLeftWidth >= 250 && newLeftWidth <= 800) {
             leftPanel.style.flex = `0 0 ${newLeftWidth}px`;
         }
     });
