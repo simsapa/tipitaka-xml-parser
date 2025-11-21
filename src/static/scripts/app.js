@@ -283,7 +283,6 @@ async function fetchAndDisplayFragmentDetails(fragmentId) {
         // Update metadata fields
         document.getElementById('id').value = detail.id;
         document.getElementById('cst_file').value = detail.cst_file;
-        document.getElementById('frag_type').value = detail.frag_type;
         document.getElementById('frag_review').value = detail.frag_review || '';
         document.getElementById('nikaya').value = detail.nikaya;
         document.getElementById('cst_code').value = detail.cst_code || '';
@@ -393,7 +392,6 @@ async function fetchAndDisplayFragmentDetails(fragmentId) {
 function clearFragmentDetails() {
     document.getElementById('id').value = '';
     document.getElementById('cst_file').value = '';
-    document.getElementById('frag_type').value = '';
     document.getElementById('frag_review').value = '';
     document.getElementById('nikaya').value = '';
     document.getElementById('cst_code').value = '';

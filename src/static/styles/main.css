@@ -67,10 +67,17 @@ body, html {
 }
 
 .panel-list {
-    max-height: 200px;
     overflow-y: auto;
     border: 1px solid #dbdbdb;
     border-radius: 4px;
+}
+
+#file-list.panel-list {
+    max-height: 200px;
+}
+
+#fragment-list.panel-list {
+    max-height: 400px;
 }
 
 /* File and fragment list items */
