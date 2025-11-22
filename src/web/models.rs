@@ -123,6 +123,21 @@ pub struct CreateFragmentResponse {
     pub message: Option<String>,
 }
 
+/// Request body for moving fragment content
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MoveFragmentRequest {
+    pub frag_idx: i32,
+    pub xml_file: String,
+    pub direction: String, // "prev" or "next"
+}
+
+/// Response for fragment move operation
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MoveFragmentResponse {
+    pub current_fragment: FragmentListItem,
+    pub target_fragment: FragmentListItem,
+}
+
 /// Color theme options
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "lowercase")]

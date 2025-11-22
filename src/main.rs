@@ -262,6 +262,8 @@ fn copy_reviewed_fragments_from_reference(
     }
     
     // Get reviewed fragments from reference database (those with non-empty frag_review)
+    // This includes fragments with frag_review="checked" and frag_review="moved"
+    // Moved fragments are preserved to maintain the review history and structure
     let reviewed_fragments: Vec<XmlFragmentRecord> = xml_fragments::table
         .filter(xml_fragments::cst_file.eq(cst_file))
         .filter(xml_fragments::frag_review.is_not_null())

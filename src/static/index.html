@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fragment Review - Tipitaka XML Parser</title>
     <link rel="icon" href="/static/favicon.ico">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+    <link rel="stylesheet" href="/static/vendor/bulma.min.css">
     <link rel="stylesheet" href="/static/styles/main.css">
     <script>
         // Theme management
@@ -118,6 +118,7 @@
                                                     <option value="in-progress">in-progress</option>
                                                     <option value="checked">checked</option>
                                                     <option value="needs-review">needs-review</option>
+                                                    <option value="moved">moved</option>
                                                 </select>
                                             </div>
                                         </div>
@@ -290,6 +291,10 @@
                                         <button class="button" id="prev-char-left" title="Move character left (from current to previous)">C←</button>
                                         <button class="button" id="prev-char-right" title="Move character right (from previous to current)">C→</button>
                                     </div>
+
+                                    <div class="buttons are-small" style="margin-left: 1em;">
+                                        <button class="button is-danger" id="move-to-prev" title="Empty and move content to previous">M↑</button>
+                                    </div>
                                 </div>
 
                                 <!-- NOTE: work-in-progress feature
@@ -358,13 +363,11 @@
                                         <button class="button" id="next-char-left" title="Move character left (from next to current)">C←</button>
                                         <button class="button" id="next-char-right" title="Move character right (from current to next)">C→</button>
                                     </div>
-                                </div>
 
-                                <!-- NOTE: work-in-progress feature
-                                <div class="level-right">
-                                    <button class="button is-small is-danger" id="delete-next-btn">Delete and Merge with Next</button>
+                                    <div class="buttons are-small" style="margin-left: 1em;">
+                                        <button class="button is-danger" id="move-to-next" title="Empty and move content to next">M↓</button>
+                                    </div>
                                 </div>
-                                -->
                             </div>
                             <textarea class="textarea is-family-monospace" id="next-content" rows="8" readonly></textarea>
                         </div>

@@ -132,6 +132,7 @@ async function fetchAndPopulateFragmentList(filename) {
                 <span class="tag">${fragment.sc_code}</span>
             `;
             item.dataset.fragmentId = fragment.id;
+            item.dataset.fragReview = fragment.frag_review || '';
             item.onclick = () => selectFragment(fragment.id);
             fragmentList.appendChild(item);
         });
@@ -188,6 +189,7 @@ function updateFragmentItemInList(fragmentId, fragmentData = null) {
             <span class="tag">${fragment.cst_code}</span>
             <span class="tag">${fragment.sc_code}</span>
         `;
+        fragmentItem.dataset.fragReview = fragment.frag_review || '';
 
     } catch (error) {
         console.error('Error updating fragment item:', error);
@@ -375,7 +377,7 @@ async function fetchAndDisplayFragmentDetails(fragmentId) {
         const hasPrev = detail.prev_fragment !== null;
         const hasNext = detail.next_fragment !== null;
         
-        // Delete buttons should only be enabled if the current fragment is Sutta
+        // Move buttons should only be enabled if the current fragment is Sutta
         // and there's an adjacent Sutta fragment to merge with
         const currentIsSutta = detail.frag_type === 'Sutta';
         const currentIsHeader = detail.frag_type === 'Header';
@@ -385,15 +387,15 @@ async function fetchAndDisplayFragmentDetails(fragmentId) {
         const nextIsHeader = detail.next_fragment && detail.next_fragment.frag_type === 'Header';
         
         let el;
-        el = document.getElementById('delete-prev-btn');
+        el = document.getElementById('move-to-prev');
         if (el) {
-            // Enable delete-prev button only if current is Sutta and has previous Sutta to merge with
+            // Enable move-to-prev button only if current is Sutta and has previous Sutta to move content to
             el.disabled = !(currentIsSutta && prevIsSutta);
         }
 
-        el = document.getElementById('delete-next-btn');
+        el = document.getElementById('move-to-next');
         if (el) {
-            // Enable delete-next button only if current is Sutta and has next Sutta to merge with
+            // Enable move-to-next button only if current is Sutta and has next Sutta to move content to
             el.disabled = !(currentIsSutta && nextIsSutta);
         }
 
@@ -557,47 +559,6 @@ async function adjustBoundary(action, direction) {
     }
 }
 
-// Delete adjacent fragment and merge with current fragment
-async function deleteFragment(direction) {
-    if (!state.selectedFragmentId) return;
-    
-    // Get current fragment details
-    const detail = await getCurrentFragmentDetail();
-    if (!detail) return;
-    
-    // Determine which fragment to delete
-    let fragmentIdToDelete;
-    if (direction === 'prev') {
-        // Delete the PREVIOUS fragment, merge into current
-        if (!detail.prev_fragment) return;
-        fragmentIdToDelete = detail.prev_fragment.id;
-    } else {
-        // Delete the NEXT fragment, merge into current
-        if (!detail.next_fragment) return;
-        fragmentIdToDelete = detail.next_fragment.id;
-    }
-    
-    try {
-        // Delete the adjacent fragment (it will be merged into current or next remaining fragment)
-        const response = await fetch(`/api/fragments/${fragmentIdToDelete}`, {
-            method: 'DELETE'
-        });
-        
-        if (!response.ok) throw new Error('Failed to delete fragment');
-        
-        // Remove the deleted fragment from the DOM and state
-        removeFragmentItemFromList(fragmentIdToDelete);
-        
-        // Refresh the current fragment view to update adjacent fragment metadata
-        await fetchAndDisplayFragmentDetails(state.selectedFragmentId);
-        
-        console.log('Fragment deleted and merged successfully');
-    } catch (error) {
-        console.error('Error deleting fragment:', error);
-        alert('Failed to delete and merge fragment');
-    }
-}
-
 // Get current fragment detail
 async function getCurrentFragmentDetail() {
     if (!state.selectedFragmentId) return null;
@@ -637,6 +598,58 @@ async function createNewFragment(direction) {
     } catch (error) {
         console.error('Error creating new fragment:', error);
         alert('Failed to create new fragment');
+    }
+}
+
+// Move fragment content to adjacent fragment (prev or next)
+async function moveFragmentTo(direction) {
+    if (!state.selectedFragmentId) {
+        alert('No fragment selected');
+        return;
+    }
+    
+    try {
+        // Get current fragment detail to retrieve cst_file
+        const currentFragment = await getCurrentFragmentDetail();
+        if (!currentFragment) {
+            alert('Failed to get current fragment details');
+            return;
+        }
+        
+        // Construct request body
+        const requestBody = {
+            frag_idx: currentFragment.frag_idx,
+            xml_file: currentFragment.cst_file,
+            direction: direction
+        };
+        
+        // Make POST request to move endpoint
+        const response = await fetch('/api/fragments/move', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || 'Failed to move fragment');
+        }
+        
+        const result = await response.json();
+        
+        // Update DOM for current fragment (now moved/empty)
+        updateFragmentItemInList(result.current_fragment.id, result.current_fragment);
+        
+        // Update DOM for target fragment (now has merged content)
+        updateFragmentItemInList(result.target_fragment.id, result.target_fragment);
+        
+        // Refresh the current fragment detail view to show updated boundaries and content
+        await fetchAndDisplayFragmentDetails(state.selectedFragmentId);
+        
+        console.log(`Fragment content moved to ${direction} successfully`);
+    } catch (error) {
+        console.error('Error moving fragment:', error);
+        alert(`Failed to move fragment: ${error.message}`);
     }
 }
 
@@ -721,21 +734,21 @@ function setupEventListeners() {
     document.getElementById('next-char-right').onclick = () => adjustBoundary('char_right', 'next');
 
     let el;
-    // Delete buttons with confirmation
-    el = document.getElementById('delete-prev-btn');
+    // Move buttons with confirmation
+    el = document.getElementById('move-to-prev');
     if (el) {
         el.onclick = () => {
-            showConfirmModal('Delete the previous fragment and merge its content with the current fragment?', () => {
-                deleteFragment('prev');
+            showConfirmModal("Move the current fragment's content to the PREVIOUS fragment?", () => {
+                moveFragmentTo('prev');
             });
         };
     }
 
-    el = document.getElementById('delete-next-btn');
+    el = document.getElementById('move-to-next');
     if (el) {
         el.onclick = () => {
-            showConfirmModal('Delete the next fragment and merge its content with the current fragment?', () => {
-                deleteFragment('next');
+            showConfirmModal("Move the current fragment's content to the NEXT fragment?", () => {
+                moveFragmentTo('next');
             });
         };
     }

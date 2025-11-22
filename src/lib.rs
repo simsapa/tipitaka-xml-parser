@@ -19,6 +19,7 @@ pub mod integration;
 pub mod encoding;
 pub mod fragments_schema;
 pub mod fragments_models;
+pub mod fragment_operations;
 
 // Modular XML parser modules
 pub mod xml_file_type;
