@@ -132,6 +132,7 @@ async function fetchAndPopulateFragmentList(filename) {
                 <span class="tag">${fragment.sc_code}</span>
             `;
             item.dataset.fragmentId = fragment.id;
+            item.dataset.fragReview = fragment.frag_review || '';
             item.onclick = () => selectFragment(fragment.id);
             fragmentList.appendChild(item);
         });
@@ -188,6 +189,7 @@ function updateFragmentItemInList(fragmentId, fragmentData = null) {
             <span class="tag">${fragment.cst_code}</span>
             <span class="tag">${fragment.sc_code}</span>
         `;
+        fragmentItem.dataset.fragReview = fragment.frag_review || '';
 
     } catch (error) {
         console.error('Error updating fragment item:', error);
@@ -599,6 +601,58 @@ async function createNewFragment(direction) {
     }
 }
 
+// Move fragment content to adjacent fragment (prev or next)
+async function moveFragmentTo(direction) {
+    if (!state.selectedFragmentId) {
+        alert('No fragment selected');
+        return;
+    }
+    
+    try {
+        // Get current fragment detail to retrieve cst_file
+        const currentFragment = await getCurrentFragmentDetail();
+        if (!currentFragment) {
+            alert('Failed to get current fragment details');
+            return;
+        }
+        
+        // Construct request body
+        const requestBody = {
+            frag_idx: currentFragment.frag_idx,
+            xml_file: currentFragment.cst_file,
+            direction: direction
+        };
+        
+        // Make POST request to move endpoint
+        const response = await fetch('/api/fragments/move', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || 'Failed to move fragment');
+        }
+        
+        const result = await response.json();
+        
+        // Update DOM for current fragment (now moved/empty)
+        updateFragmentItemInList(result.current_fragment.id, result.current_fragment);
+        
+        // Update DOM for target fragment (now has merged content)
+        updateFragmentItemInList(result.target_fragment.id, result.target_fragment);
+        
+        // Refresh the current fragment detail view to show updated boundaries and content
+        await fetchAndDisplayFragmentDetails(state.selectedFragmentId);
+        
+        console.log(`Fragment content moved to ${direction} successfully`);
+    } catch (error) {
+        console.error('Error moving fragment:', error);
+        alert(`Failed to move fragment: ${error.message}`);
+    }
+}
+
 // Setup event listeners for buttons
 function setupEventListeners() {
     // Auto-save metadata on input change with debouncing
@@ -685,7 +739,7 @@ function setupEventListeners() {
     if (el) {
         el.onclick = () => {
             showConfirmModal("Move the current fragment's content to the PREVIOUS fragment?", () => {
-                // FIXME moveFragmentTo('prev');
+                moveFragmentTo('prev');
             });
         };
     }
@@ -694,7 +748,7 @@ function setupEventListeners() {
     if (el) {
         el.onclick = () => {
             showConfirmModal("Move the current fragment's content to the NEXT fragment?", () => {
-                // FIXME moveFragmentTo('next');
+                moveFragmentTo('next');
             });
         };
     }

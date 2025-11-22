@@ -127,6 +127,11 @@ body, html {
     border-bottom: none;
 }
 
+/* Visual distinction for moved fragments */
+.panel-item[data-frag-review="moved"] {
+    background-color: #d0d0d0;
+}
+
 /* Fragment list column layout */
 #fragment-list .panel-item {
     display: flex;
@@ -425,6 +430,11 @@ textarea {
     color: white;
 }
 
+/* Dark mode styling for moved fragments */
+[data-theme="dark"] .panel-item[data-frag-review="moved"] {
+    background-color: #3a3a3a;
+}
+
 [data-theme="dark"] .input,
 [data-theme="dark"] .textarea,
 [data-theme="dark"] .select select {
@@ -449,6 +459,18 @@ textarea {
 [data-theme="dark"] .modal-card {
     background-color: var(--bulma-modal-card-background-color);
     color: var(--bulma-modal-card-color);
+}
+
+[data-theme="dark"] .modal-card-head,
+[data-theme="dark"] .modal-card-body,
+[data-theme="dark"] .modal-card-foot {
+    background-color: var(--bulma-modal-card-background-color);
+    color: var(--bulma-modal-card-color);
+    border-color: var(--bulma-border-color);
+}
+
+[data-theme="dark"] .modal-card-title {
+    color: var(--bulma-text-color);
 }
 
 [data-theme="dark"] .dropdown-menu {

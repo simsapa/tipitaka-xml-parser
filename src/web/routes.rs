@@ -13,13 +13,14 @@ use diesel::prelude::*;
 use crate::web::state::DbState;
 use crate::web::models::{
     FileListItem, FragmentListItem, FragmentDetail, AdjacentFragment,
-    UpdateMetadataRequest, BoundaryAdjustmentRequest, BoundaryAdjustmentResponse, BoundaryAction, CreateFragmentRequest, CreateFragmentResponse, AppSettings, NikayaGroup
+    UpdateMetadataRequest, BoundaryAdjustmentRequest, BoundaryAdjustmentResponse, BoundaryAction, CreateFragmentRequest, CreateFragmentResponse, MoveFragmentRequest, MoveFragmentResponse, AppSettings, NikayaGroup
 };
 use crate::web::settings;
 use crate::fragments_schema::xml_fragments;
 use crate::fragments_models::{
     XmlFragmentRecord, UpdateFragmentMetadata, UpdateFragmentBoundary, UpdateFragmentIndex, NewXmlFragment
 };
+use crate::fragment_operations::{Direction, move_fragment_content};
 
 /// Serve the main index.html page
 #[get("/")]
@@ -144,13 +145,16 @@ fn get_fragment_detail(
         .first(&mut conn)
         .map_err(|e| format!("Fragment not found: {}", e))?;
     
-    // Get previous fragment (same file, frag_idx - 1)
-    let prev_fragment: Option<AdjacentFragment> = xml_fragments::table
-        .filter(xml_fragments::cst_file.eq(&current.cst_file))
-        .filter(xml_fragments::frag_idx.eq(current.frag_idx - 1))
-        .first::<XmlFragmentRecord>(&mut conn)
-        .optional()
-        .map_err(|e| format!("Query failed for previous fragment: {}", e))?
+    // Get previous fragment (skip over moved fragments)
+    use crate::fragment_operations::{find_target_fragment, Direction};
+    
+    let prev_fragment: Option<AdjacentFragment> = find_target_fragment(
+        &mut conn,
+        &current.cst_file,
+        current.frag_idx,
+        Direction::Prev,
+    )
+        .map_err(|e| format!("Failed to find previous fragment: {}", e))?
         .map(|r| AdjacentFragment {
             id: r.id,
             frag_idx: r.frag_idx,
@@ -162,13 +166,14 @@ fn get_fragment_detail(
             cst_sutta: r.cst_sutta,
         });
     
-    // Get next fragment (same file, frag_idx + 1)
-    let next_fragment: Option<AdjacentFragment> = xml_fragments::table
-        .filter(xml_fragments::cst_file.eq(&current.cst_file))
-        .filter(xml_fragments::frag_idx.eq(current.frag_idx + 1))
-        .first::<XmlFragmentRecord>(&mut conn)
-        .optional()
-        .map_err(|e| format!("Query failed for next fragment: {}", e))?
+    // Get next fragment (skip over moved fragments)
+    let next_fragment: Option<AdjacentFragment> = find_target_fragment(
+        &mut conn,
+        &current.cst_file,
+        current.frag_idx,
+        Direction::Next,
+    )
+        .map_err(|e| format!("Failed to find next fragment: {}", e))?
         .map(|r| AdjacentFragment {
             id: r.id,
             frag_idx: r.frag_idx,
@@ -514,6 +519,60 @@ fn delete_fragment(
     }).map_err(|e| format!("Delete transaction failed: {}", e))?;
     
     Ok(Json("Fragment deleted and merged successfully".to_string()))
+}
+
+/// POST /api/fragments/move - Move fragment content to an adjacent fragment
+///
+/// This endpoint moves the content of a fragment to an adjacent (previous or next) fragment,
+/// empties the source fragment, clears its metadata, and marks it as "moved".
+/// The function will skip over any fragments that are already marked as "moved".
+#[post("/api/fragments/move", data = "<request>")]
+fn move_fragment(
+    request: Json<MoveFragmentRequest>,
+    db_state: &State<DbState>
+) -> Result<Json<MoveFragmentResponse>, String> {
+    // Parse direction string to Direction enum
+    let direction = match request.direction.as_str() {
+        "prev" => Direction::Prev,
+        "next" => Direction::Next,
+        _ => return Err(format!("Invalid direction: {}. Must be 'prev' or 'next'", request.direction)),
+    };
+    
+    // Get database connection
+    let mut conn = db_state.connect()
+        .map_err(|e| format!("Database connection failed: {}", e))?;
+    
+    // Call the helper function
+    let (current_fragment, target_fragment) = move_fragment_content(
+        &mut conn,
+        &request.xml_file,
+        request.frag_idx,
+        direction,
+    ).map_err(|e| format!("Move operation failed: {}", e))?;
+    
+    // Map XmlFragmentRecord to FragmentListItem DTOs
+    let current_item = FragmentListItem {
+        id: current_fragment.id,
+        frag_idx: current_fragment.frag_idx,
+        frag_type: current_fragment.frag_type,
+        frag_review: current_fragment.frag_review,
+        cst_code: current_fragment.cst_code,
+        sc_code: current_fragment.sc_code,
+    };
+    
+    let target_item = FragmentListItem {
+        id: target_fragment.id,
+        frag_idx: target_fragment.frag_idx,
+        frag_type: target_fragment.frag_type,
+        frag_review: target_fragment.frag_review,
+        cst_code: target_fragment.cst_code,
+        sc_code: target_fragment.sc_code,
+    };
+    
+    Ok(Json(MoveFragmentResponse {
+        current_fragment: current_item,
+        target_fragment: target_item,
+    }))
 }
 
 /// POST /api/fragments/:id/create - Create a new Sutta fragment before or after the current one
@@ -1150,6 +1209,7 @@ pub fn get_routes() -> Vec<Route> {
         update_fragment_metadata,
         adjust_fragment_boundary,
         delete_fragment,
+        move_fragment,
         create_fragment,
         get_settings,
         save_settings_endpoint,

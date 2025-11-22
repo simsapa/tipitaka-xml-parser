@@ -46,7 +46,7 @@ pub struct NewXmlFragment<'a> {
 }
 
 /// Queryable XML fragment model
-#[derive(Queryable, Selectable)]
+#[derive(Debug, Queryable, Selectable)]
 #[diesel(table_name = xml_fragments)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct XmlFragmentRecord {
@@ -83,6 +83,19 @@ pub struct UpdateFragmentMetadata {
     pub cst_sutta: Option<String>,
     pub cst_paranum: Option<String>,
     pub sc_sutta: Option<String>,
+}
+
+/// Changeset for clearing moved fragment metadata (sets all optional fields to NULL)
+#[derive(AsChangeset)]
+#[diesel(table_name = xml_fragments)]
+pub struct ClearMovedFragmentMetadata {
+    pub frag_review: Option<String>,
+    pub cst_code: Option<Option<String>>,
+    pub sc_code: Option<Option<String>>,
+    pub cst_vagga: Option<Option<String>>,
+    pub cst_sutta: Option<Option<String>>,
+    pub cst_paranum: Option<Option<String>>,
+    pub sc_sutta: Option<Option<String>>,
 }
 
 /// Changeset for updating XML fragment boundaries
