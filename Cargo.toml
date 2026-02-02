@@ -31,6 +31,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rocket = { version = "0.5", features = ["json"] }
 rocket_dyn_templates = { version = "0.2", features = ["handlebars"] }
 tokio = { version = "1", features = ["rt-multi-thread"] }
+arangors = "0.6.0"
 
 [dev-dependencies]
 tempfile = "3.8"

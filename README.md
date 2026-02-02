@@ -50,7 +50,7 @@ The project includes a web-based user interface for reviewing and correcting fra
 
 The web UI uses a TOML configuration file (`web-ui-config.toml`) for all settings. On first run, it will create a default config file:
 
-```bash
+```
 cargo run -- web-ui
 ```
 
@@ -62,7 +62,7 @@ This will create `web-ui-config.toml` in the current directory. Edit this file t
 
 Then run the command again to start the server:
 
-```bash
+```
 cargo run -- web-ui
 ```
 
@@ -70,13 +70,13 @@ cargo run -- web-ui
 
 You can also specify a custom config file path:
 
-```bash
+```
 cargo run -- web-ui --config /path/to/custom-config.toml
 ```
 
 Or override the port from the command line:
 
-```bash
+```
 cargo run -- web-ui --port 8080
 ```
 
