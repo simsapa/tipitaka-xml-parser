@@ -7,6 +7,14 @@ let state = {
     fragments: []
 };
 
+// ArangoDB connection state
+window.paliTitlesCache = null;  // Cache for Pali titles from ArangoDB (uid -> name mapping)
+window.arangoConnected = false; // Track ArangoDB connection state
+
+// Validation state
+let validationResults = null;   // Results from last validation run
+let selectedCheckType = null;   // Currently selected check type ID
+
 // Initialize the application
 function init() {
     loadStateFromLocalStorage();
@@ -15,6 +23,12 @@ function init() {
     setupResizablePanels();
     setupMenuDropdown();
     setupThemeSync();
+    setupValidationModal();
+
+    // Check ArangoDB status on init and every 5 seconds
+    checkArangoStatus();
+    setInterval(checkArangoStatus, 5000);
+
     console.log('Fragment Review Application initialized');
 }
 
@@ -123,17 +137,23 @@ async function fetchAndPopulateFragmentList(filename) {
         fragments.forEach(fragment => {
             const item = document.createElement('div');
             item.className = 'panel-item';
-            
+
             const statusColor = getStatusColor(fragment.frag_review);
             item.innerHTML = `
+                ${createReviewDropdownHtml(fragment.id, fragment.frag_review)}
                 <span class="tag">${fragment.frag_idx}</span>
                 <span class="tag is-${statusColor}">${fragment.frag_type}</span>
                 <span class="tag">${fragment.cst_code}</span>
                 <span class="tag">${fragment.sc_code}</span>
             `;
             item.dataset.fragmentId = fragment.id;
+            item.dataset.fragIdx = fragment.frag_idx;
             item.dataset.fragReview = fragment.frag_review || '';
-            item.onclick = () => selectFragment(fragment.id);
+            item.onclick = (e) => {
+                // Don't select fragment if clicking on the dropdown
+                if (e.target.classList.contains('review-dropdown')) return;
+                selectFragment(fragment.id);
+            };
             fragmentList.appendChild(item);
         });
         
@@ -149,14 +169,102 @@ async function fetchAndPopulateFragmentList(filename) {
 // Get Bulma color class for review status
 function getStatusColor(status) {
     if (!status) return 'light';
-    
+
     const colorMap = {
         'unchecked': 'light',
         'in-progress': 'warning',
         'checked': 'success',
-        'needs-review': 'danger'
+        'needs-review': 'danger',
+        'moved': 'info'
     };
     return colorMap[status] || 'light';
+}
+
+// Review status options with their labels
+const reviewStatusOptions = [
+    { value: '', label: 'U', title: 'unchecked' },
+    { value: 'in-progress', label: 'I', title: 'in-progress' },
+    { value: 'checked', label: 'C', title: 'checked' },
+    { value: 'needs-review', label: 'N', title: 'needs-review' },
+    { value: 'moved', label: 'M', title: 'moved' }
+];
+
+// Get first letter label for review status
+function getReviewStatusLabel(status) {
+    const option = reviewStatusOptions.find(o => o.value === (status || ''));
+    return option ? option.label : 'U';
+}
+
+// Generate review status dropdown HTML for fragment list
+function createReviewDropdownHtml(fragmentId, currentStatus) {
+    const options = reviewStatusOptions.map(opt => {
+        const selected = (opt.value === (currentStatus || '')) ? 'selected' : '';
+        return `<option value="${opt.value}" ${selected} title="${opt.title}">${opt.label}</option>`;
+    }).join('');
+
+    return `<select class="review-dropdown" data-fragment-id="${fragmentId}" title="Review status">${options}</select>`;
+}
+
+// Update review status from fragment list dropdown
+async function updateReviewStatusFromList(fragmentId, newStatus) {
+    try {
+        const response = await fetch(`/api/fragments/${fragmentId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ frag_review: newStatus })
+        });
+
+        if (!response.ok) throw new Error('Failed to update review status');
+
+        const updatedFragment = await response.json();
+
+        // Update state
+        const stateIndex = state.fragments.findIndex(f => f.id === fragmentId);
+        if (stateIndex !== -1) {
+            state.fragments[stateIndex] = updatedFragment;
+        }
+
+        // Update the fragment item's data attribute and status color
+        const fragmentItem = document.querySelector(`#fragment-list .panel-item[data-fragment-id="${fragmentId}"]`);
+        if (fragmentItem) {
+            fragmentItem.dataset.fragReview = updatedFragment.frag_review || '';
+
+            // Update the frag_type tag color (3rd child element)
+            const fragTypeTag = fragmentItem.querySelector('.tag:nth-child(3)');
+            if (fragTypeTag) {
+                // Remove old color classes
+                fragTypeTag.classList.remove('is-light', 'is-warning', 'is-success', 'is-danger', 'is-info');
+                // Add new color class
+                const newColor = getStatusColor(updatedFragment.frag_review);
+                fragTypeTag.classList.add(`is-${newColor}`);
+            }
+        }
+
+        // If this is the currently selected fragment, update the metadata panel dropdown too
+        if (state.selectedFragmentId === fragmentId) {
+            document.getElementById('frag_review').value = updatedFragment.frag_review || '';
+        }
+    } catch (error) {
+        console.error('Error updating review status:', error);
+        alert('Failed to update review status');
+    }
+}
+
+// Auto-fill sc_sutta field based on sc_code using cached Pali titles from ArangoDB
+function autoFillScSutta(scCode) {
+    if (!scCode || !window.paliTitlesCache) return;
+
+    // Extract the base sutta code (e.g., "dn1" from "dn1:1.1" or "sn1.1" from "sn1.1:1")
+    // The ArangoDB titles use the base code without segment numbers
+    const baseCode = scCode.split(':')[0];
+
+    // Look up the title in the cache
+    const title = window.paliTitlesCache[baseCode];
+
+    if (title) {
+        document.getElementById('sc_sutta').value = title;
+        document.getElementById('sc_sutta_inline').value = title;
+    }
 }
 
 // Update a single fragment item in the list without reloading the entire list
@@ -184,6 +292,7 @@ function updateFragmentItemInList(fragmentId, fragmentData = null) {
         // Update the DOM content
         const statusColor = getStatusColor(fragment.frag_review);
         fragmentItem.innerHTML = `
+            ${createReviewDropdownHtml(fragment.id, fragment.frag_review)}
             <span class="tag">${fragment.frag_idx}</span>
             <span class="tag is-${statusColor}">${fragment.frag_type}</span>
             <span class="tag">${fragment.cst_code}</span>
@@ -310,6 +419,7 @@ async function fetchAndDisplayFragmentDetails(fragmentId) {
         document.getElementById('cst_paranum').value = detail.cst_paranum || '';
         document.getElementById('sc_code').value = detail.sc_code || '';
         document.getElementById('sc_sutta').value = detail.sc_sutta || '';
+        document.getElementById('sc_sutta_inline').value = detail.sc_sutta || '';
         document.getElementById('start_line').value = detail.start_line;
         document.getElementById('start_char').value = detail.start_char;
         document.getElementById('end_line').value = detail.end_line;
@@ -345,24 +455,28 @@ async function fetchAndDisplayFragmentDetails(fragmentId) {
             document.getElementById('prev_sc_code').value = detail.prev_fragment.sc_code || '';
             document.getElementById('prev_cst_vagga').value = detail.prev_fragment.cst_vagga || '';
             document.getElementById('prev_cst_sutta').value = detail.prev_fragment.cst_sutta || '';
+            document.getElementById('prev_sc_sutta').value = detail.prev_fragment.sc_sutta || '';
         } else {
             document.getElementById('prev_cst_code').value = '';
             document.getElementById('prev_sc_code').value = '';
             document.getElementById('prev_cst_vagga').value = '';
             document.getElementById('prev_cst_sutta').value = '';
+            document.getElementById('prev_sc_sutta').value = '';
         }
-        
+
         // Update next fragment metadata fields
         if (detail.next_fragment) {
             document.getElementById('next_cst_code').value = detail.next_fragment.cst_code || '';
             document.getElementById('next_sc_code').value = detail.next_fragment.sc_code || '';
             document.getElementById('next_cst_vagga').value = detail.next_fragment.cst_vagga || '';
             document.getElementById('next_cst_sutta').value = detail.next_fragment.cst_sutta || '';
+            document.getElementById('next_sc_sutta').value = detail.next_fragment.sc_sutta || '';
         } else {
             document.getElementById('next_cst_code').value = '';
             document.getElementById('next_sc_code').value = '';
             document.getElementById('next_cst_vagga').value = '';
             document.getElementById('next_cst_sutta').value = '';
+            document.getElementById('next_sc_sutta').value = '';
         }
         
         // Scroll previous fragment textarea to bottom
@@ -433,6 +547,7 @@ function clearFragmentDetails() {
     document.getElementById('cst_sutta').value = '';
     document.getElementById('cst_paranum').value = '';
     document.getElementById('sc_sutta').value = '';
+    document.getElementById('sc_sutta_inline').value = '';
     document.getElementById('start_line').value = '';
     document.getElementById('start_char').value = '';
     document.getElementById('end_line').value = '';
@@ -444,12 +559,14 @@ function clearFragmentDetails() {
     document.getElementById('prev_sc_code').value = '';
     document.getElementById('prev_cst_vagga').value = '';
     document.getElementById('prev_cst_sutta').value = '';
-    
+    document.getElementById('prev_sc_sutta').value = '';
+
     // Clear next fragment fields
     document.getElementById('next_cst_code').value = '';
     document.getElementById('next_sc_code').value = '';
     document.getElementById('next_cst_vagga').value = '';
     document.getElementById('next_cst_sutta').value = '';
+    document.getElementById('next_sc_sutta').value = '';
     
     document.getElementById('prev-content').value = '';
     document.getElementById('current-content-top').value = '';
@@ -655,6 +772,15 @@ async function moveFragmentTo(direction) {
 
 // Setup event listeners for buttons
 function setupEventListeners() {
+    // Event delegation for review status dropdowns in fragment list
+    document.getElementById('fragment-list').addEventListener('change', function(e) {
+        if (e.target.classList.contains('review-dropdown')) {
+            const fragmentId = parseInt(e.target.dataset.fragmentId);
+            const newStatus = e.target.value;
+            updateReviewStatusFromList(fragmentId, newStatus);
+        }
+    });
+
     // Auto-save metadata on input change with debouncing
     let updateTimeout;
     function debouncedUpdateFragmentMetadata() {
@@ -680,6 +806,21 @@ function setupEventListeners() {
     setupInputHandlers('cst_sutta');
     setupInputHandlers('cst_paranum');
     setupInputHandlers('sc_sutta');
+
+    // Auto-fill sc_sutta when sc_code changes
+    document.getElementById('sc_code').addEventListener('input', function() {
+        autoFillScSutta(this.value);
+    });
+
+    // Sync sc_sutta and sc_sutta_inline fields
+    document.getElementById('sc_sutta').addEventListener('input', function() {
+        document.getElementById('sc_sutta_inline').value = this.value;
+    });
+    document.getElementById('sc_sutta_inline').addEventListener('input', function() {
+        document.getElementById('sc_sutta').value = this.value;
+        debouncedUpdateFragmentMetadata();
+    });
+    document.getElementById('sc_sutta_inline').addEventListener('change', updateFragmentMetadata);
     
     // Previous fragment metadata input handlers with debouncing
     let prevUpdateTimeout;
@@ -1092,7 +1233,7 @@ async function restoreStateAfterInit() {
         const fileItem = document.querySelector(`#file-list .panel-item[data-filename="${state.selectedFile}"]`);
         if (fileItem) {
             await selectFile(state.selectedFile);
-            
+
             // Try to select the previously selected fragment
             if (state.selectedFragmentId) {
                 // Use setTimeout to ensure fragment list is fully loaded
@@ -1105,6 +1246,340 @@ async function restoreStateAfterInit() {
             }
         }
     }
+}
+
+// ============================================================================
+// ArangoDB Status Functions
+// ============================================================================
+
+// Check ArangoDB connection status and update indicator
+async function checkArangoStatus() {
+    const indicator = document.getElementById('arango-status');
+    if (!indicator) return;
+
+    try {
+        const response = await fetch('/api/arangodb/status');
+        if (!response.ok) throw new Error('Failed to check ArangoDB status');
+
+        const data = await response.json();
+        const wasConnected = window.arangoConnected;
+        window.arangoConnected = data.connected;
+
+        if (data.connected) {
+            indicator.classList.remove('disconnected');
+            indicator.classList.add('connected');
+            indicator.title = 'ArangoDB: Connected';
+
+            // If connection was just restored and cache is empty, fetch titles
+            if (!wasConnected && !window.paliTitlesCache) {
+                fetchPaliTitles();
+            }
+        } else {
+            indicator.classList.remove('connected');
+            indicator.classList.add('disconnected');
+            indicator.title = data.error ? `ArangoDB: ${data.error}` : 'ArangoDB: Disconnected';
+        }
+    } catch (err) {
+        console.error('Error checking ArangoDB status:', err);
+        indicator.classList.remove('connected');
+        indicator.classList.add('disconnected');
+        indicator.title = 'ArangoDB: Connection check failed';
+        window.arangoConnected = false;
+    }
+}
+
+// Fetch Pali titles from ArangoDB and populate cache
+async function fetchPaliTitles() {
+    try {
+        const response = await fetch('/api/arangodb/pali-titles');
+        if (!response.ok) throw new Error('Failed to fetch Pali titles');
+
+        window.paliTitlesCache = await response.json();
+        console.log(`Loaded ${Object.keys(window.paliTitlesCache).length} Pali titles from ArangoDB`);
+    } catch (err) {
+        console.error('Error fetching Pali titles:', err);
+        // Don't set cache to null on error - keep any existing cache
+    }
+}
+
+// ============================================================================
+// Validation Modal Functions
+// ============================================================================
+
+// Open the validation modal
+function openValidationModal() {
+    // Show modal
+    document.getElementById('validation-modal').classList.add('is-active');
+
+    // If we have cached results, restore the UI state
+    if (validationResults) {
+        // Update badges for all check types
+        for (const [checkId, result] of Object.entries(validationResults)) {
+            const badge = document.getElementById(`badge-${checkId}`);
+            if (badge) {
+                const errorCount = result.errors.length;
+                badge.textContent = errorCount.toString();
+                badge.classList.remove('has-errors', 'no-errors');
+                badge.classList.add(errorCount > 0 ? 'has-errors' : 'no-errors');
+            }
+        }
+
+        // Restore selected check type or select first one
+        if (selectedCheckType && validationResults[selectedCheckType]) {
+            selectCheckType(selectedCheckType);
+        } else {
+            const firstCheckId = Object.keys(validationResults)[0];
+            if (firstCheckId) {
+                selectCheckType(firstCheckId);
+            }
+        }
+    } else {
+        // No cached results - show initial state
+        selectedCheckType = null;
+        document.querySelectorAll('.validation-check-item').forEach(item => {
+            item.classList.remove('is-active');
+        });
+        document.querySelectorAll('.check-badge').forEach(badge => {
+            badge.textContent = '-';
+            badge.classList.remove('has-errors', 'no-errors');
+        });
+        document.getElementById('validation-results-title').textContent = 'Select a check to view results';
+        document.getElementById('validation-results-list').innerHTML = '<div class="validation-placeholder">Run validation to see results</div>';
+        document.getElementById('auto-fix-btn').style.display = 'none';
+    }
+}
+
+// Close the validation modal
+function closeValidationModal() {
+    document.getElementById('validation-modal').classList.remove('is-active');
+}
+
+// Run all validation checks
+async function runValidation() {
+    const btn = document.getElementById('run-validation-btn');
+    const spinner = btn.querySelector('.validation-spinner');
+    const btnText = btn.querySelector('span:last-child');
+
+    // Show loading state
+    spinner.style.display = 'inline-block';
+    btnText.textContent = 'Running...';
+    btn.disabled = true;
+
+    try {
+        const response = await fetch('/api/validation/run', { method: 'POST' });
+        if (!response.ok) throw new Error('Validation request failed');
+
+        const data = await response.json();
+        validationResults = data.checks;
+
+        // Update badges for all check types
+        for (const [checkId, result] of Object.entries(validationResults)) {
+            const badge = document.getElementById(`badge-${checkId}`);
+            if (badge) {
+                const errorCount = result.errors.length;
+                badge.textContent = errorCount.toString();
+                badge.classList.remove('has-errors', 'no-errors');
+                badge.classList.add(errorCount > 0 ? 'has-errors' : 'no-errors');
+            }
+        }
+
+        // Select first check type
+        const firstCheckId = Object.keys(validationResults)[0];
+        if (firstCheckId) {
+            selectCheckType(firstCheckId);
+        }
+
+    } catch (err) {
+        console.error('Error running validation:', err);
+        alert('Failed to run validation: ' + err.message);
+    } finally {
+        // Reset button state
+        spinner.style.display = 'none';
+        btnText.textContent = 'Run Validation';
+        btn.disabled = false;
+    }
+}
+
+// Select a check type and show its results
+function selectCheckType(checkId) {
+    selectedCheckType = checkId;
+
+    // Update active state on check items
+    document.querySelectorAll('.validation-check-item').forEach(item => {
+        item.classList.toggle('is-active', item.dataset.checkId === checkId);
+    });
+
+    // Render results
+    renderValidationResults(checkId);
+}
+
+// Render validation results for a check type
+function renderValidationResults(checkId) {
+    const resultsList = document.getElementById('validation-results-list');
+    const resultsTitle = document.getElementById('validation-results-title');
+    const autoFixBtn = document.getElementById('auto-fix-btn');
+
+    if (!validationResults || !validationResults[checkId]) {
+        resultsList.innerHTML = '<div class="validation-placeholder">No results available</div>';
+        resultsTitle.textContent = 'No results';
+        autoFixBtn.style.display = 'none';
+        return;
+    }
+
+    const result = validationResults[checkId];
+    resultsTitle.textContent = `${result.name} (${result.errors.length} issues)`;
+
+    // Show/hide auto-fix button
+    autoFixBtn.style.display = (result.auto_fixable && result.auto_fixes.length > 0) ? 'inline-block' : 'none';
+
+    if (result.errors.length === 0) {
+        resultsList.innerHTML = '<div class="validation-placeholder" style="color: #48c774;">No issues found</div>';
+        return;
+    }
+
+    // Build results HTML
+    let html = '';
+    for (const error of result.errors) {
+        html += `
+            <div class="validation-result-item">
+                <div class="result-info">
+                    <span class="result-location">${error.cst_file} #${error.frag_idx}</span>
+                    <span class="result-message">${error.message}</span>
+                </div>
+                <div class="result-actions">
+                    <button class="button is-small is-info" onclick="openFragmentFromValidation('${error.cst_file}', ${error.frag_idx})">
+                        Open
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+    resultsList.innerHTML = html;
+}
+
+// Open a fragment from validation results
+async function openFragmentFromValidation(cstFile, fragIdx) {
+    // Close validation modal
+    closeValidationModal();
+
+    // Select the file
+    await selectFile(cstFile);
+
+    // Wait a moment for fragments to load, then find and select the fragment
+    setTimeout(() => {
+        const fragmentItem = document.querySelector(`#fragment-list .panel-item[data-frag-idx="${fragIdx}"]`);
+        if (fragmentItem) {
+            const fragmentId = parseInt(fragmentItem.dataset.fragmentId);
+            selectFragment(fragmentId);
+            // Scroll fragment into view
+            fragmentItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+            console.warn(`Fragment with frag_idx ${fragIdx} not found in file ${cstFile}`);
+        }
+    }, 200);
+}
+
+// Show auto-fix confirmation dialog
+function showAutoFixConfirmation() {
+    if (!validationResults || !selectedCheckType) return;
+
+    const result = validationResults[selectedCheckType];
+    if (!result.auto_fixes || result.auto_fixes.length === 0) return;
+
+    const changesList = document.getElementById('autofix-changes-list');
+    let html = '';
+
+    for (const fix of result.auto_fixes) {
+        html += `
+            <div class="autofix-change-item">
+                <span class="change-file">${fix.cst_file}</span>
+                <span class="change-idx">#${fix.frag_idx}</span>
+                <span class="change-code">${fix.sc_code}</span>
+                <span class="change-arrow">→</span>
+                <span class="change-value">${fix.suggested_value}</span>
+            </div>
+        `;
+    }
+    changesList.innerHTML = html;
+
+    // Show confirmation modal
+    document.getElementById('autofix-confirm-modal').classList.add('is-active');
+}
+
+// Close auto-fix confirmation modal
+function closeAutoFixModal() {
+    document.getElementById('autofix-confirm-modal').classList.remove('is-active');
+}
+
+// Apply auto-fixes
+async function applyAutoFixes() {
+    if (!validationResults || !selectedCheckType) return;
+
+    const result = validationResults[selectedCheckType];
+    if (!result.auto_fixes || result.auto_fixes.length === 0) return;
+
+    // Prepare fixes request
+    const fixes = result.auto_fixes.map(fix => ({
+        fragment_id: fix.fragment_id,
+        suggested_value: fix.suggested_value
+    }));
+
+    try {
+        const response = await fetch('/api/validation/auto-fix/missing-sc-sutta', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fixes })
+        });
+
+        if (!response.ok) throw new Error('Auto-fix request failed');
+
+        const data = await response.json();
+        if (data.success) {
+            alert(`Successfully updated ${data.updated_count} fragments`);
+            // Close confirmation modal and re-run validation
+            closeAutoFixModal();
+            await runValidation();
+        } else {
+            throw new Error(data.error || 'Unknown error');
+        }
+    } catch (err) {
+        console.error('Error applying auto-fixes:', err);
+        alert('Failed to apply auto-fixes: ' + err.message);
+    }
+}
+
+// Setup validation modal event listeners
+function setupValidationModal() {
+    // Menu item click
+    document.getElementById('menu-validation').addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('menu-dropdown').classList.remove('is-active');
+        openValidationModal();
+    });
+
+    // Run Validation button
+    document.getElementById('run-validation-btn').addEventListener('click', runValidation);
+
+    // Check type selection
+    document.querySelectorAll('.validation-check-item').forEach(item => {
+        item.addEventListener('click', () => {
+            selectCheckType(item.dataset.checkId);
+        });
+    });
+
+    // Auto-Fix All button
+    document.getElementById('auto-fix-btn').addEventListener('click', showAutoFixConfirmation);
+
+    // Close buttons
+    document.getElementById('validation-modal-close').addEventListener('click', closeValidationModal);
+    document.getElementById('validation-close').addEventListener('click', closeValidationModal);
+    document.getElementById('validation-modal').querySelector('.modal-background').addEventListener('click', closeValidationModal);
+
+    // Auto-fix confirmation modal
+    document.getElementById('autofix-modal-close').addEventListener('click', closeAutoFixModal);
+    document.getElementById('autofix-cancel').addEventListener('click', closeAutoFixModal);
+    document.getElementById('autofix-apply').addEventListener('click', applyAutoFixes);
+    document.getElementById('autofix-confirm-modal').querySelector('.modal-background').addEventListener('click', closeAutoFixModal);
 }
 
 // Initialize when DOM is ready

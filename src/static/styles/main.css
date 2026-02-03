@@ -97,30 +97,35 @@ body, html {
     color: white;
 }
 
-.panel-item.is-active .tag:not(:nth-child(2)) {
+.panel-item.is-active .tag:not(:nth-child(3)) {
     background-color: white !important;
     color: #363636 !important;
 }
 
-/* Preserve frag_type (2nd child) status colors even when selected */
-.panel-item.is-active .tag:nth-child(2).is-success {
+/* Preserve frag_type (3rd child, after dropdown) status colors even when selected */
+.panel-item.is-active .tag:nth-child(3).is-success {
     background-color: #48c774 !important;
     color: white !important;
 }
 
-.panel-item.is-active .tag:nth-child(2).is-warning {
+.panel-item.is-active .tag:nth-child(3).is-warning {
     background-color: #ffdd57 !important;
     color: rgba(0, 0, 0, 0.7) !important;
 }
 
-.panel-item.is-active .tag:nth-child(2).is-danger {
+.panel-item.is-active .tag:nth-child(3).is-danger {
     background-color: #f14668 !important;
     color: white !important;
 }
 
-.panel-item.is-active .tag:nth-child(2).is-light {
+.panel-item.is-active .tag:nth-child(3).is-light {
     background-color: #f5f5f5 !important;
     color: #363636 !important;
+}
+
+.panel-item.is-active .tag:nth-child(3).is-info {
+    background-color: #3e8ed0 !important;
+    color: white !important;
 }
 
 .panel-item:last-child {
@@ -135,8 +140,33 @@ body, html {
 /* Fragment list column layout */
 #fragment-list .panel-item {
     display: flex;
-    align-items: left;
+    align-items: center;
     gap: 0.5rem;
+}
+
+/* Review status dropdown in fragment list */
+#fragment-list .panel-item .review-dropdown {
+    width: 2.2rem;
+    padding: 0.15rem 0.25rem;
+    font-size: 0.85rem;
+    border: 1px solid #dbdbdb;
+    border-radius: 4px;
+    background-color: #fff;
+    cursor: pointer;
+    flex-shrink: 0;
+    text-align: center;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+#fragment-list .panel-item .review-dropdown:hover {
+    border-color: #b5b5b5;
+}
+
+#fragment-list .panel-item .review-dropdown:focus {
+    border-color: #485fc7;
+    outline: none;
 }
 
 #fragment-list .panel-item .tag {
@@ -145,23 +175,23 @@ body, html {
     flex-shrink: 0;
 }
 
-#fragment-list .panel-item .tag:nth-child(1) {
+#fragment-list .panel-item .tag:nth-child(2) {
     min-width: 3rem; /* For frag_idx like "242" */
     justify-content: left;
 }
 
-#fragment-list .panel-item .tag:nth-child(2) {
+#fragment-list .panel-item .tag:nth-child(3) {
     min-width: 5rem; /* For frag_type like "Header" */
     justify-content: left;
 }
 
-#fragment-list .panel-item .tag:nth-child(3) {
+#fragment-list .panel-item .tag:nth-child(4) {
     min-width: 8rem; /* For cst_code like "sn2.10.10.12" */
     justify-content: left;
     font-family: mono;
 }
 
-#fragment-list .panel-item .tag:nth-child(4) {
+#fragment-list .panel-item .tag:nth-child(5) {
     min-width: 7rem; /* For sc_code like "sn24.35" */
     justify-content: left;
     font-family: mono;
@@ -281,6 +311,16 @@ body, html {
 /* Settings modal wider */
 #settings-modal .modal-card {
     max-width: 600px;
+}
+
+/* Validation modal wider */
+#validation-modal .modal-card {
+    max-width: 900px;
+}
+
+/* Auto-fix confirmation modal wider */
+#autofix-confirm-modal .modal-card {
+    max-width: 900px;
 }
 
 /* Scrollbar styling for webkit browsers */
@@ -428,6 +468,17 @@ textarea {
 [data-theme="dark"] .panel-item.is-active {
     background-color: #3273dc;
     color: white;
+}
+
+/* Dark mode review dropdown */
+[data-theme="dark"] #fragment-list .panel-item .review-dropdown {
+    background-color: var(--bulma-input-background-color);
+    border-color: var(--bulma-border-color);
+    color: var(--bulma-text-color);
+}
+
+[data-theme="dark"] #fragment-list .panel-item .review-dropdown:hover {
+    border-color: var(--bulma-border-hover-color);
 }
 
 /* Dark mode styling for moved fragments */
@@ -594,4 +645,289 @@ textarea {
     background-color: #2a2a2a !important;
     color: var(--bulma-text-color) !important;
     font-weight: bold !important;
+}
+
+/* ============================================================================
+   ArangoDB Status Indicator
+   ============================================================================ */
+
+.arango-status-indicator {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-left: 0.5rem;
+    cursor: help;
+    vertical-align: middle;
+    background-color: #b5b5b5; /* Grey - checking/unknown state */
+    transition: background-color 0.3s ease;
+}
+
+.arango-status-indicator.connected {
+    background-color: #48c774; /* Green - connected */
+}
+
+.arango-status-indicator.disconnected {
+    background-color: #f14668; /* Red - disconnected */
+}
+
+/* ============================================================================
+   Validation Modal Styles
+   ============================================================================ */
+
+.validation-container {
+    display: flex;
+    height: 500px;
+}
+
+.validation-checks-panel {
+    flex: 0 0 250px;
+    border-right: 1px solid #dbdbdb;
+    display: flex;
+    flex-direction: column;
+}
+
+.validation-header {
+    padding: 1rem;
+    border-bottom: 1px solid #dbdbdb;
+}
+
+.validation-header .button {
+    width: 100%;
+}
+
+.validation-checks-list {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.validation-check-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    border-bottom: 1px solid #f5f5f5;
+    transition: background-color 0.2s;
+}
+
+.validation-check-item:hover {
+    background-color: #f5f5f5;
+}
+
+.validation-check-item.is-active {
+    background-color: #3273dc;
+    color: white;
+}
+
+.validation-check-item.is-active .tag {
+    background-color: white;
+    color: #363636;
+}
+
+.check-name {
+    font-weight: 500;
+}
+
+.check-badge {
+    min-width: 2rem;
+    justify-content: center;
+}
+
+.check-badge.has-errors {
+    background-color: #f14668 !important;
+    color: white !important;
+}
+
+.check-badge.no-errors {
+    background-color: #48c774 !important;
+    color: white !important;
+}
+
+.validation-results-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.validation-results-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #dbdbdb;
+    background-color: #f5f5f5;
+}
+
+.results-title {
+    font-weight: 500;
+    color: #363636;
+}
+
+.validation-results-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.5rem;
+}
+
+.validation-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #7a7a7a;
+    font-style: italic;
+}
+
+.validation-result-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.25rem;
+    background-color: #fff;
+    border: 1px solid #dbdbdb;
+    border-radius: 4px;
+    font-size: 0.875rem;
+}
+
+.validation-result-item:hover {
+    background-color: #f5f5f5;
+}
+
+.result-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex: 1;
+    min-width: 0;
+}
+
+.result-location {
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: #3273dc;
+}
+
+.result-message {
+    color: #363636;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.result-actions {
+    flex-shrink: 0;
+    margin-left: 0.5rem;
+}
+
+/* Validation spinner */
+.validation-spinner {
+    display: inline-block;
+    width: 1em;
+    height: 1em;
+    border: 2px solid #fff;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spinner 0.75s linear infinite;
+}
+
+@keyframes spinner {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Auto-fix changes list */
+.autofix-changes-list {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid #dbdbdb;
+    border-radius: 4px;
+}
+
+.autofix-change-item {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) 60px minmax(100px, 1fr) 30px minmax(150px, 2fr);
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #f5f5f5;
+    font-size: 0.875rem;
+    align-items: center;
+}
+
+.autofix-change-item .change-idx {
+    font-family: monospace;
+    color: #7a7a7a;
+}
+
+.autofix-change-item .change-arrow {
+    text-align: center;
+    color: #7a7a7a;
+}
+
+.autofix-change-item:last-child {
+    border-bottom: none;
+}
+
+.autofix-change-item .change-file {
+    font-family: monospace;
+    color: #3273dc;
+}
+
+.autofix-change-item .change-code {
+    font-family: monospace;
+}
+
+.autofix-change-item .change-value {
+    color: #48c774;
+    font-weight: 500;
+}
+
+/* Dark mode for validation modal */
+[data-theme="dark"] .validation-checks-panel {
+    border-right-color: var(--bulma-border-color);
+}
+
+[data-theme="dark"] .validation-header {
+    border-bottom-color: var(--bulma-border-color);
+}
+
+[data-theme="dark"] .validation-check-item {
+    border-bottom-color: var(--bulma-border-color);
+}
+
+[data-theme="dark"] .validation-check-item:hover {
+    background-color: var(--bulma-background-color);
+}
+
+[data-theme="dark"] .validation-results-header {
+    background-color: var(--bulma-background-color);
+    border-bottom-color: var(--bulma-border-color);
+}
+
+[data-theme="dark"] .results-title {
+    color: var(--bulma-text-color);
+}
+
+[data-theme="dark"] .validation-result-item {
+    background-color: var(--bulma-background-color);
+    border-color: var(--bulma-border-color);
+}
+
+[data-theme="dark"] .validation-result-item:hover {
+    background-color: #363636;
+}
+
+[data-theme="dark"] .result-message {
+    color: var(--bulma-text-color);
+}
+
+[data-theme="dark"] .autofix-changes-list {
+    border-color: var(--bulma-border-color);
+}
+
+[data-theme="dark"] .autofix-change-item {
+    border-bottom-color: var(--bulma-border-color);
 }
