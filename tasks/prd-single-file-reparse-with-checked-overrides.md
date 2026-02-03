@@ -551,6 +551,8 @@ After manually setting `frag_idx 162` to `sc_code = sn5.1`, `sc_sutta = Āḷavi
 - Expected outputs: `tests/data/expected/`
 - Test input data (reference databases, correction data): `tests/data/fixtures/`
 
+**Note**: There are already XML files in `tests/data/` that can be used for test cases. Relevant parts of the main SQLite database at `data/fragments.sqlite3` can be extracted as a testing database for running the test cases, avoiding the need to create fixtures from scratch.
+
 ## 10. Open Questions
 
 All questions have been resolved:
