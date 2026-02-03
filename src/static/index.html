@@ -74,9 +74,14 @@
                                             <a href="#" class="dropdown-item" id="menu-regenerate">
                                                 Regenerate
                                             </a>
+                                            <a href="#" class="dropdown-item" id="menu-validation">
+                                                Database Validation
+                                            </a>
                                         </div>
                                     </div>
                                 </div>
+                                <!-- ArangoDB Status Indicator -->
+                                <span id="arango-status" class="arango-status-indicator" title="Checking ArangoDB connection..."></span>
                             </div>
                             <div class="level-right"></div>
                         </div>
@@ -231,6 +236,14 @@
                                                 </div>
                                             </div>
                                         </div>
+                                        <div class="column">
+                                            <div class="field">
+                                                <label class="label is-small">SC Sutta</label>
+                                                <div class="control">
+                                                    <input class="input is-small" type="text" id="prev_sc_sutta">
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                                 <!-- NOTE: work-in-progress feature
@@ -241,7 +254,7 @@
                             </div>
                             <textarea class="textarea is-family-monospace" id="prev-content" rows="8" readonly></textarea>
                         </div>
-                        
+
                         <!-- Current Fragment -->
                         <div class="fragment-section">
                             <div class="level">
@@ -277,6 +290,14 @@
                                                 <label class="label is-small">CST Sutta</label>
                                                 <div class="control">
                                                     <input class="input is-small" type="text" id="cst_sutta">
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="column">
+                                            <div class="field">
+                                                <label class="label is-small">SC Sutta</label>
+                                                <div class="control">
+                                                    <input class="input is-small" type="text" id="sc_sutta_inline">
                                                 </div>
                                             </div>
                                         </div>
@@ -349,6 +370,14 @@
                                                 <label class="label is-small">CST Sutta</label>
                                                 <div class="control">
                                                     <input class="input is-small" type="text" id="next_cst_sutta">
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="column">
+                                            <div class="field">
+                                                <label class="label is-small">SC Sutta</label>
+                                                <div class="control">
+                                                    <input class="input is-small" type="text" id="next_sc_sutta">
                                                 </div>
                                             </div>
                                         </div>
@@ -541,7 +570,79 @@
             </footer>
         </div>
     </div>
-    
+
+    <!-- Validation Modal -->
+    <div class="modal" id="validation-modal">
+        <div class="modal-background"></div>
+        <div class="modal-card" style="width: 900px; max-height: 90vh;">
+            <header class="modal-card-head">
+                <p class="modal-card-title">Database Validation</p>
+                <button class="delete" aria-label="close" id="validation-modal-close"></button>
+            </header>
+            <section class="modal-card-body" style="overflow-y: auto; padding: 0;">
+                <div class="validation-container">
+                    <!-- Left panel: Check types list -->
+                    <div class="validation-checks-panel">
+                        <div class="validation-header">
+                            <button class="button is-primary" id="run-validation-btn">
+                                <span class="icon"><span class="validation-spinner" style="display: none;"></span></span>
+                                <span>Run Validation</span>
+                            </button>
+                        </div>
+                        <div class="validation-checks-list" id="validation-checks-list">
+                            <div class="validation-check-item" data-check-id="missing_sc_code">
+                                <span class="check-name">Missing sc_code</span>
+                                <span class="tag is-light check-badge" id="badge-missing_sc_code">-</span>
+                            </div>
+                            <div class="validation-check-item" data-check-id="missing_sc_sutta">
+                                <span class="check-name">Missing sc_sutta</span>
+                                <span class="tag is-light check-badge" id="badge-missing_sc_sutta">-</span>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Right panel: Results -->
+                    <div class="validation-results-panel">
+                        <div class="validation-results-header">
+                            <span class="results-title" id="validation-results-title">Select a check to view results</span>
+                            <button class="button is-warning is-small" id="auto-fix-btn" style="display: none;">
+                                Auto-Fix All
+                            </button>
+                        </div>
+                        <div class="validation-results-list" id="validation-results-list">
+                            <div class="validation-placeholder">
+                                Run validation to see results
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            <footer class="modal-card-foot">
+                <button class="button" id="validation-close">Close</button>
+            </footer>
+        </div>
+    </div>
+
+    <!-- Auto-Fix Confirmation Modal -->
+    <div class="modal" id="autofix-confirm-modal">
+        <div class="modal-background"></div>
+        <div class="modal-card" style="width: 900px; max-height: 80vh;">
+            <header class="modal-card-head">
+                <p class="modal-card-title">Confirm Auto-Fix Changes</p>
+                <button class="delete" aria-label="close" id="autofix-modal-close"></button>
+            </header>
+            <section class="modal-card-body" style="overflow-y: auto;">
+                <p class="mb-4">The following changes will be applied:</p>
+                <div class="autofix-changes-list" id="autofix-changes-list">
+                    <!-- Changes will be populated here -->
+                </div>
+            </section>
+            <footer class="modal-card-foot">
+                <button class="button is-success" id="autofix-apply">Apply Changes</button>
+                <button class="button" id="autofix-cancel">Cancel</button>
+            </footer>
+        </div>
+    </div>
+
     <script src="/static/scripts/app.js"></script>
 </body>
 </html>

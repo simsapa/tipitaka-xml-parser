@@ -3,6 +3,7 @@
 /// This module contains data transfer objects used by the web API
 /// for communicating with the frontend.
 
+use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 
 /// File list item with fragment count and nikaya information
@@ -70,6 +71,7 @@ pub struct AdjacentFragment {
     pub sc_code: Option<String>,
     pub cst_vagga: Option<String>,
     pub cst_sutta: Option<String>,
+    pub sc_sutta: Option<String>,
 }
 
 /// Request body for updating fragment metadata
@@ -183,4 +185,63 @@ impl Default for AppSettings {
             color_theme: None,
         }
     }
+}
+
+// ============================================================================
+// ArangoDB Integration Models
+// ============================================================================
+
+/// Response for ArangoDB connection status check
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ArangoStatusResponse {
+    /// Whether connection to ArangoDB was successful
+    pub connected: bool,
+    /// Error message if connection failed (for tooltip display)
+    pub error: Option<String>,
+}
+
+/// Response type for Pali titles endpoint
+/// Maps uid (sc_code) to name (title), e.g., "dn1" -> "Brahmajālasutta"
+pub type PaliTitlesResponse = HashMap<String, String>;
+
+// ============================================================================
+// Validation Models
+// ============================================================================
+
+use crate::web::validation::ValidationCheckResult;
+
+/// Response for running all validation checks
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ValidationRunResponse {
+    /// Map of check_id to validation result
+    pub checks: HashMap<String, ValidationCheckResult>,
+    /// Whether ArangoDB was connected (affects auto-fix availability)
+    pub arango_connected: bool,
+}
+
+/// Request to apply auto-fixes for missing sc_sutta
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AutoFixRequest {
+    /// List of fixes to apply
+    pub fixes: Vec<AutoFixItem>,
+}
+
+/// Single auto-fix item
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AutoFixItem {
+    /// Fragment database ID
+    pub fragment_id: i32,
+    /// Value to set for sc_sutta
+    pub suggested_value: String,
+}
+
+/// Response after applying auto-fixes
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AutoFixResponse {
+    /// Whether the operation succeeded
+    pub success: bool,
+    /// Number of fragments updated
+    pub updated_count: i32,
+    /// Error message if operation failed
+    pub error: Option<String>,
 }

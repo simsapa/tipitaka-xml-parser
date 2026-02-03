@@ -13,9 +13,13 @@ use diesel::prelude::*;
 use crate::web::state::DbState;
 use crate::web::models::{
     FileListItem, FragmentListItem, FragmentDetail, AdjacentFragment,
-    UpdateMetadataRequest, BoundaryAdjustmentRequest, BoundaryAdjustmentResponse, BoundaryAction, CreateFragmentRequest, CreateFragmentResponse, MoveFragmentRequest, MoveFragmentResponse, AppSettings, NikayaGroup
+    UpdateMetadataRequest, BoundaryAdjustmentRequest, BoundaryAdjustmentResponse, BoundaryAction, CreateFragmentRequest, CreateFragmentResponse, MoveFragmentRequest, MoveFragmentResponse, AppSettings, NikayaGroup,
+    ArangoStatusResponse, PaliTitlesResponse,
+    ValidationRunResponse, AutoFixRequest, AutoFixResponse,
 };
 use crate::web::settings;
+use crate::web::arangodb;
+use crate::web::validation;
 use crate::fragments_schema::xml_fragments;
 use crate::fragments_models::{
     XmlFragmentRecord, UpdateFragmentMetadata, UpdateFragmentBoundary, UpdateFragmentIndex, NewXmlFragment
@@ -164,8 +168,9 @@ fn get_fragment_detail(
             sc_code: r.sc_code,
             cst_vagga: r.cst_vagga,
             cst_sutta: r.cst_sutta,
+            sc_sutta: r.sc_sutta,
         });
-    
+
     // Get next fragment (skip over moved fragments)
     let next_fragment: Option<AdjacentFragment> = find_target_fragment(
         &mut conn,
@@ -183,6 +188,7 @@ fn get_fragment_detail(
             sc_code: r.sc_code,
             cst_vagga: r.cst_vagga,
             cst_sutta: r.cst_sutta,
+            sc_sutta: r.sc_sutta,
         });
     
     let detail = FragmentDetail {
@@ -1049,6 +1055,97 @@ fn regenerate(request: Json<RegenerateRequest>) -> Json<RegenerateResponse> {
     })
 }
 
+// ============================================================================
+// ArangoDB Integration Endpoints
+// ============================================================================
+
+/// GET /api/arangodb/status - Check ArangoDB connection status
+#[get("/api/arangodb/status")]
+async fn get_arangodb_status() -> Json<ArangoStatusResponse> {
+    let (connected, error) = arangodb::check_connection_status().await;
+    Json(ArangoStatusResponse { connected, error })
+}
+
+/// GET /api/arangodb/pali-titles - Get all Pali root titles from ArangoDB
+///
+/// Returns a JSON object mapping uid (sc_code) to name (title).
+/// Example: {"dn1": "Brahmajālasutta", "dn2": "Sāmaññaphalasutta", ...}
+#[get("/api/arangodb/pali-titles")]
+async fn get_pali_titles() -> Result<Json<PaliTitlesResponse>, String> {
+    let titles = arangodb::get_pali_titles()
+        .await
+        .map_err(|e| format!("Failed to fetch Pali titles: {}", e))?;
+    Ok(Json(titles))
+}
+
+// ============================================================================
+// Validation Endpoints
+// ============================================================================
+
+/// POST /api/validation/run - Run all validation checks
+///
+/// Runs all validation checks and returns results. If ArangoDB is connected,
+/// auto-fix suggestions will be included for applicable checks.
+#[post("/api/validation/run")]
+async fn run_validation(db_state: &State<DbState>) -> Result<Json<ValidationRunResponse>, String> {
+    let mut conn = db_state.connect()
+        .map_err(|e| format!("Database connection failed: {}", e))?;
+
+    // Try to get Pali titles from ArangoDB for auto-fix suggestions
+    let (arango_connected, pali_titles) = match arangodb::get_pali_titles().await {
+        Ok(titles) => (true, Some(titles)),
+        Err(_) => (false, None),
+    };
+
+    let checks = validation::run_all_validations(&mut conn, pali_titles.as_ref());
+
+    Ok(Json(ValidationRunResponse {
+        checks,
+        arango_connected,
+    }))
+}
+
+/// POST /api/validation/auto-fix/missing-sc-sutta - Apply auto-fixes for missing sc_sutta
+///
+/// Accepts a list of fixes and updates the sc_sutta field for each fragment.
+#[post("/api/validation/auto-fix/missing-sc-sutta", data = "<request>")]
+fn apply_missing_sc_sutta_fixes(
+    db_state: &State<DbState>,
+    request: Json<AutoFixRequest>,
+) -> Json<AutoFixResponse> {
+    let mut conn = match db_state.connect() {
+        Ok(c) => c,
+        Err(e) => return Json(AutoFixResponse {
+            success: false,
+            updated_count: 0,
+            error: Some(format!("Database connection failed: {}", e)),
+        }),
+    };
+
+    let mut updated_count = 0;
+
+    for fix in &request.fixes {
+        let result = diesel::update(xml_fragments::table.filter(xml_fragments::id.eq(fix.fragment_id)))
+            .set(xml_fragments::sc_sutta.eq(&fix.suggested_value))
+            .execute(&mut conn);
+
+        match result {
+            Ok(count) => updated_count += count as i32,
+            Err(e) => return Json(AutoFixResponse {
+                success: false,
+                updated_count,
+                error: Some(format!("Failed to update fragment {}: {}", fix.fragment_id, e)),
+            }),
+        }
+    }
+
+    Json(AutoFixResponse {
+        success: true,
+        updated_count,
+        error: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -1202,9 +1299,9 @@ mod tests {
 /// Get all routes for the web application
 pub fn get_routes() -> Vec<Route> {
     routes![
-        index, 
-        get_files, 
-        get_file_fragments, 
+        index,
+        get_files,
+        get_file_fragments,
         get_fragment_detail,
         update_fragment_metadata,
         adjust_fragment_boundary,
@@ -1213,6 +1310,10 @@ pub fn get_routes() -> Vec<Route> {
         create_fragment,
         get_settings,
         save_settings_endpoint,
-        regenerate
+        regenerate,
+        get_arangodb_status,
+        get_pali_titles,
+        run_validation,
+        apply_missing_sc_sutta_fixes
     ]
 }

@@ -3,10 +3,12 @@
 /// This module provides a web-based interface for reviewing and correcting
 /// XML fragment boundaries parsed from Tipitaka XML files.
 
+pub mod arangodb;
 pub mod routes;
 pub mod models;
 pub mod state;
 pub mod settings;
+pub mod validation;
 
 // Re-export commonly used functions
 pub use settings::{load_settings, load_settings_from_path, load_or_create_default_settings};
