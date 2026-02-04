@@ -560,6 +560,7 @@ mod tests {
         }
         
         #[derive(QueryableByName)]
+        #[allow(dead_code)]
         struct NikayaIdResult {
             #[diesel(sql_type = diesel::sql_types::BigInt)]
             _nikaya_id: i64,

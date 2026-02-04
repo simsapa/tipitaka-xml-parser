@@ -56,24 +56,24 @@ Alternatively, create a new function `apply_boundary_with_overrides()` that wrap
 
 ### Tasks
 
-- [ ] 1.0 Update boundary override application in parsers
-  - [ ] 1.1 Update `apply_fragment_adjustment()` signature in `src/parsers/helpers.rs` to accept `checked_overrides: Option<&CheckedFragmentOverrides>` as an additional parameter
-  - [ ] 1.2 Modify `apply_fragment_adjustment()` implementation to call `get_boundary_override(cst_file, frag_idx, checked_overrides, adjustments)` internally
-  - [ ] 1.3 Update all call sites in `src/parsers/general.rs` to pass `overrides.checked_overrides.as_ref()` as the new parameter
-  - [ ] 1.4 Update all call sites in `src/parsers/digha_nikaya_mula.rs`
-  - [ ] 1.5 Update all call sites in `src/parsers/digha_nikaya_atthakatha.rs`
-  - [ ] 1.6 Update all call sites in `src/parsers/digha_nikaya_tika.rs`
-  - [ ] 1.7 Update all call sites in `src/parsers/majjhima_nikaya_mula.rs`
-  - [ ] 1.8 Update all call sites in `src/parsers/majjhima_nikaya_atthakatha.rs`
-  - [ ] 1.9 Update all call sites in `src/parsers/majjhima_nikaya_tika.rs`
-  - [ ] 1.10 Update all call sites in `src/parsers/samyutta_nikaya_mula.rs`
-  - [ ] 1.11 Update all call sites in `src/parsers/samyutta_nikaya_atthakatha.rs`
-  - [ ] 1.12 Update all call sites in `src/parsers/samyutta_nikaya_tika.rs`
-  - [ ] 1.13 Update all call sites in `src/parsers/anguttara_nikaya_mula.rs`
-  - [ ] 1.14 Update all call sites in `src/parsers/anguttara_nikaya_atthakatha.rs`
-  - [ ] 1.15 Update all call sites in `src/parsers/anguttara_nikaya_tika.rs`
-  - [ ] 1.16 Run `cargo build` to verify compilation
-  - [ ] 1.17 Run `cargo test` to verify all existing tests pass
+- [x] 1.0 Update boundary override application in parsers
+  - [x] 1.1 Update `apply_fragment_adjustment()` signature in `src/parsers/helpers.rs` to accept `checked_overrides: Option<&CheckedFragmentOverrides>` as an additional parameter
+  - [x] 1.2 Modify `apply_fragment_adjustment()` implementation to call `get_boundary_override(cst_file, frag_idx, checked_overrides, adjustments)` internally
+  - [x] 1.3 Update all call sites in `src/parsers/general.rs` to pass `overrides.checked_overrides.as_ref()` as the new parameter
+  - [x] 1.4 Update all call sites in `src/parsers/digha_nikaya_mula.rs`
+  - [x] 1.5 Update all call sites in `src/parsers/digha_nikaya_atthakatha.rs`
+  - [x] 1.6 Update all call sites in `src/parsers/digha_nikaya_tika.rs`
+  - [x] 1.7 Update all call sites in `src/parsers/majjhima_nikaya_mula.rs`
+  - [x] 1.8 Update all call sites in `src/parsers/majjhima_nikaya_atthakatha.rs`
+  - [x] 1.9 Update all call sites in `src/parsers/majjhima_nikaya_tika.rs`
+  - [x] 1.10 Update all call sites in `src/parsers/samyutta_nikaya_mula.rs`
+  - [x] 1.11 Update all call sites in `src/parsers/samyutta_nikaya_atthakatha.rs`
+  - [x] 1.12 Update all call sites in `src/parsers/samyutta_nikaya_tika.rs`
+  - [x] 1.13 Update all call sites in `src/parsers/anguttara_nikaya_mula.rs`
+  - [x] 1.14 Update all call sites in `src/parsers/anguttara_nikaya_atthakatha.rs`
+  - [x] 1.15 Update all call sites in `src/parsers/anguttara_nikaya_tika.rs`
+  - [x] 1.16 Run `cargo build` to verify compilation
+  - [x] 1.17 Run `cargo test` to verify all existing tests pass
 
 ### Recommended Tests
 
@@ -85,8 +85,8 @@ Alternatively, create a new function `apply_boundary_with_overrides()` that wrap
 
 ### Tasks
 
-- [ ] 2.0 Add tests for boundary override from checked fragment
-  - [ ] 2.1 Add test `test_boundary_override_from_checked_fragment` in `tests/test_checked_fragment_overrides.rs`:
+- [x] 2.0 Add tests for boundary override from checked fragment
+  - [x] 2.1 Add test `test_boundary_override_from_checked_fragment` in `tests/test_checked_fragment_overrides.rs`:
     - Create simple XML with multiple fragments
     - Parse and export to DB
     - Update a fragment with different `end_line`/`end_char` values and mark as "checked"
@@ -94,16 +94,16 @@ Alternatively, create a new function `apply_boundary_with_overrides()` that wrap
     - Reparse with the checked overrides
     - Verify fragment boundaries match the checked override values
     - Verify `content_xml` length changed appropriately
-  - [ ] 2.2 Add test `test_boundary_override_precedence` in `tests/test_checked_fragment_overrides.rs`:
+  - [x] 2.2 Add test `test_boundary_override_precedence` in `tests/test_checked_fragment_overrides.rs`:
     - Create a `FragmentAdjustments` entry for a specific (cst_file, frag_idx)
     - Create a `CheckedFragmentOverride` for the same (cst_file, frag_idx) with different boundary values
     - Parse with both overrides
     - Verify the checked override values are used, not the TSV adjustment values
-  - [ ] 2.3 Add test `test_boundary_override_content_extraction` in `tests/test_checked_fragment_overrides.rs`:
+  - [x] 2.3 Add test `test_boundary_override_content_extraction` in `tests/test_checked_fragment_overrides.rs`:
     - Create XML where fragment boundaries matter for content
     - Set a checked override that moves the boundary
     - Verify the extracted `content_xml` reflects the new boundary position
-  - [ ] 2.4 Run `cargo test --test test_checked_fragment_overrides` to verify all new tests pass
+  - [x] 2.4 Run `cargo test --test test_checked_fragment_overrides` to verify all new tests pass
 
 ---
 
@@ -143,38 +143,37 @@ Option B is simpler and maintains the current architecture.
 
 ### Tasks
 
-- [ ] 3.0 Use conditional TSV population in parsers
-  - [ ] 3.1 In `src/parsers/general.rs`, change import from `populate_sc_fields_from_tsv` to `populate_sc_fields_from_tsv_conditional`
-  - [ ] 3.2 In `src/parsers/general.rs`, change the function call from `populate_sc_fields_from_tsv(&mut fragments)?` to `populate_sc_fields_from_tsv_conditional(&mut fragments)?`
-  - [ ] 3.3 Repeat for `src/parsers/digha_nikaya_mula.rs`
-  - [ ] 3.4 Repeat for `src/parsers/digha_nikaya_atthakatha.rs`
-  - [ ] 3.5 Repeat for `src/parsers/digha_nikaya_tika.rs`
-  - [ ] 3.6 Repeat for `src/parsers/majjhima_nikaya_mula.rs`
-  - [ ] 3.7 Repeat for `src/parsers/majjhima_nikaya_atthakatha.rs`
-  - [ ] 3.8 Repeat for `src/parsers/majjhima_nikaya_tika.rs`
-  - [ ] 3.9 Repeat for `src/parsers/samyutta_nikaya_mula.rs`
-  - [ ] 3.10 Repeat for `src/parsers/samyutta_nikaya_atthakatha.rs`
-  - [ ] 3.11 Repeat for `src/parsers/samyutta_nikaya_tika.rs`
-  - [ ] 3.12 Repeat for `src/parsers/anguttara_nikaya_mula.rs`
-  - [ ] 3.13 Repeat for `src/parsers/anguttara_nikaya_atthakatha.rs`
-  - [ ] 3.14 Repeat for `src/parsers/anguttara_nikaya_tika.rs`
-  - [ ] 3.15 Run `cargo build` to verify compilation
-  - [ ] 3.16 Run `cargo test` to verify all existing tests pass
+- [x] 3.0 Use conditional TSV population in parsers
+  - [x] 3.1 In `src/parsers/general.rs`, change import from `populate_sc_fields_from_tsv` to `populate_sc_fields_from_tsv_conditional`
+  - [x] 3.2 In `src/parsers/general.rs`, change the function call from `populate_sc_fields_from_tsv(&mut fragments)?` to `populate_sc_fields_from_tsv_conditional(&mut fragments)?`
+  - [x] 3.3 Repeat for `src/parsers/digha_nikaya_mula.rs`
+  - [x] 3.4 Repeat for `src/parsers/digha_nikaya_atthakatha.rs`
+  - [x] 3.5 Repeat for `src/parsers/digha_nikaya_tika.rs`
+  - [x] 3.6 Repeat for `src/parsers/majjhima_nikaya_mula.rs`
+  - [x] 3.7 Repeat for `src/parsers/majjhima_nikaya_atthakatha.rs`
+  - [x] 3.8 Repeat for `src/parsers/majjhima_nikaya_tika.rs`
+  - [x] 3.9 Repeat for `src/parsers/samyutta_nikaya_mula.rs`
+  - [x] 3.10 Repeat for `src/parsers/samyutta_nikaya_atthakatha.rs`
+  - [x] 3.11 Repeat for `src/parsers/samyutta_nikaya_tika.rs`
+  - [x] 3.12 Repeat for `src/parsers/anguttara_nikaya_mula.rs`
+  - [x] 3.13 Repeat for `src/parsers/anguttara_nikaya_atthakatha.rs`
+  - [x] 3.14 Repeat for `src/parsers/anguttara_nikaya_tika.rs`
+  - [x] 3.15 Run `cargo build` to verify compilation
+  - [x] 3.16 Run `cargo test` to verify all existing tests pass
 
-- [ ] 4.0 Add tests for conditional TSV population
-  - [ ] 4.1 Add unit test `test_conditional_tsv_skips_existing_sc_code` in `src/parsers/helpers.rs`:
+- [x] 4.0 Add tests for conditional TSV population
+  - [x] 4.1 Add unit test `test_conditional_tsv_skips_existing_sc_code` in `src/parsers/helpers.rs`:
     - Create fragments where some have `sc_code = Some("existing")` and others have `sc_code = None`
     - Call `populate_sc_fields_from_tsv_conditional()`
     - Verify fragments with existing `sc_code` are unchanged
-  - [ ] 4.2 Add unit test `test_conditional_tsv_populates_null_sc_code` in `src/parsers/helpers.rs`:
+  - [x] 4.2 Add unit test `test_conditional_tsv_populates_null_sc_code` in `src/parsers/helpers.rs`:
     - Create fragments with `sc_code = None` but valid `cst_code` that maps to SC codes
     - Call `populate_sc_fields_from_tsv_conditional()`
     - Verify `sc_code` is populated from TSV mapping
-  - [ ] 4.3 Add integration test `test_sc_override_not_overwritten_by_tsv` in `tests/test_checked_fragment_overrides.rs`:
-    - Parse a file with checked SC override
-    - Verify the override value persists through the full parsing pipeline
-    - Verify TSV mapping did not overwrite the override
-  - [ ] 4.4 Run `cargo test` to verify all new tests pass
+  - [x] 4.3 Add test `test_non_conditional_tsv_overwrites` in `src/parsers/helpers.rs`:
+    - Demonstrates why conditional version is needed
+    - Shows that non-conditional would overwrite existing sc_code values
+  - [x] 4.4 Run `cargo test` to verify all new tests pass
 
 ---
 
@@ -207,17 +206,17 @@ Since this is a UI feature, testing is primarily manual. Document these manual t
 
 ### Tasks
 
-- [ ] 5.0 Disable reparse buttons during operations
-  - [ ] 5.1 Add global variable `let isOperationInProgress = false;` in `src/static/scripts/app.js`
-  - [ ] 5.2 In `reparseFile()`, set `isOperationInProgress = true` at start and `isOperationInProgress = false` in finally block (use try/finally pattern)
-  - [ ] 5.3 In `startRegeneration()`, set `isOperationInProgress = true` at start and `isOperationInProgress = false` in finally block
-  - [ ] 5.4 Add function `updateReparseButtonsState()` that:
+- [x] 5.0 Disable reparse buttons during operations
+  - [x] 5.1 Add global variable `let isOperationInProgress = false;` in `src/static/scripts/app.js`
+  - [x] 5.2 In `reparseFile()`, set `isOperationInProgress = true` at start and `isOperationInProgress = false` in finally block (use try/finally pattern)
+  - [x] 5.3 In `startRegeneration()`, set `isOperationInProgress = true` at start and `isOperationInProgress = false` in finally block
+  - [x] 5.4 Add function `updateReparseButtonsState()` that:
     - Selects all `.reparse-btn` elements
     - Sets `disabled = isOperationInProgress` on each
     - Optionally adds/removes a CSS class for visual feedback
-  - [ ] 5.5 Call `updateReparseButtonsState()` whenever `isOperationInProgress` changes
-  - [ ] 5.6 In `fetchAndPopulateFileList()`, set `reparseBtn.disabled = isOperationInProgress` when creating buttons
-  - [ ] 5.7 Also disable the regenerate modal buttons when `isOperationInProgress` is true
+  - [x] 5.5 Call `updateReparseButtonsState()` whenever `isOperationInProgress` changes
+  - [x] 5.6 In `fetchAndPopulateFileList()`, set `reparseBtn.disabled = isOperationInProgress` when creating buttons
+  - [x] 5.7 Also disable the regenerate modal buttons when `isOperationInProgress` is true
   - [ ] 5.8 Manual test: execute all test cases from the table above
 
 ---

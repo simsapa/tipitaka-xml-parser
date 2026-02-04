@@ -6,7 +6,8 @@
 use tipitaka_xml_parser::nikaya_detector::detect_nikaya_structure;
 use tipitaka_xml_parser::parse_into_fragments;
 use tipitaka_xml_parser::types::{
-    CheckedFragmentOverride, CheckedFragmentOverrides, FragmentKey, FragmentType, ParserOverrides,
+    CheckedFragmentOverride, CheckedFragmentOverrides, FragmentAdjustment, FragmentAdjustments,
+    FragmentKey, FragmentType, ParserOverrides,
 };
 
 /// Test that CheckedFragmentOverrides take precedence over FragmentAdjustments
@@ -224,5 +225,305 @@ fn test_extract_checked_overrides() {
         frag_review.as_deref(),
         Some("checked"),
         "frag_review should be restored"
+    );
+}
+
+/// Test that boundary overrides from checked fragments are applied during parsing
+///
+/// This test verifies that when a checked fragment has end_line/end_char values,
+/// they are used to determine the fragment boundaries instead of the default detection.
+#[test]
+fn test_boundary_override_from_checked_fragment() {
+    // Create test XML with multiple lines to make boundary changes measurable
+    let xml = r#"<?xml version="1.0"?>
+<TEI.2>
+<teiHeader></teiHeader>
+<text>
+<body>
+<p rend="nikaya">Dīghanikāyo</p>
+<div id="dn1" type="book">
+<head rend="book">Sīlakkhandhavaggapāḷi</head>
+<div id="dn1_1" type="sutta">
+<head rend="chapter">1. Brahmajālasutta</head>
+<p rend="bodytext" n="1">First paragraph.</p>
+<p rend="bodytext" n="2">Second paragraph.</p>
+<p rend="bodytext" n="3">Third paragraph.</p>
+</div>
+</div>
+</body>
+</text>
+</TEI.2>"#;
+
+    let structure = detect_nikaya_structure(xml).unwrap();
+
+    // Parse without overrides first to get baseline
+    let fragments_baseline =
+        parse_into_fragments(xml, &structure, "test.xml", &ParserOverrides::default(), false)
+            .unwrap();
+
+    // Find the sutta fragment
+    let sutta_frag = fragments_baseline
+        .iter()
+        .find(|f| matches!(f.frag_type, FragmentType::Sutta))
+        .expect("Should find a Sutta fragment");
+
+    let original_end_line = sutta_frag.end_line;
+    let original_content_len = sutta_frag.content_xml.len();
+
+    // Now parse with a checked override that changes the end boundary
+    // Set end_line to one line before the original end (still after start)
+    assert!(
+        original_end_line > sutta_frag.start_line + 1,
+        "Sutta fragment should span multiple lines for this test"
+    );
+    let override_end_line = original_end_line - 1; // One line before the end
+
+    let mut checked_overrides = CheckedFragmentOverrides::new();
+    let key = FragmentKey {
+        cst_file: "test.xml".to_string(),
+        frag_idx: sutta_frag.frag_idx,
+    };
+    checked_overrides.insert(
+        key,
+        CheckedFragmentOverride {
+            end_line: Some(override_end_line),
+            end_char: Some(0),
+            sc_code: None,
+            sc_sutta: None,
+        },
+    );
+
+    let overrides = ParserOverrides {
+        adjustments: None,
+        checked_overrides: Some(checked_overrides),
+    };
+
+    let fragments_with_override =
+        parse_into_fragments(xml, &structure, "test.xml", &overrides, false).unwrap();
+
+    // Find the same fragment
+    let overridden_frag = fragments_with_override
+        .iter()
+        .find(|f| f.frag_idx == sutta_frag.frag_idx)
+        .expect("Should find the same fragment");
+
+    // The end_line should be different
+    assert_ne!(
+        overridden_frag.end_line, original_end_line,
+        "end_line should be changed by the override"
+    );
+    assert_eq!(
+        overridden_frag.end_line, override_end_line,
+        "end_line should match the override value"
+    );
+
+    // The content should be shorter
+    assert!(
+        overridden_frag.content_xml.len() < original_content_len,
+        "content_xml should be shorter with earlier boundary"
+    );
+}
+
+/// Test that checked boundary overrides take precedence over TSV adjustments
+///
+/// When both CheckedFragmentOverrides and FragmentAdjustments have boundary values
+/// for the same fragment, the checked override should win.
+#[test]
+fn test_boundary_override_precedence() {
+    let xml = r#"<?xml version="1.0"?>
+<TEI.2>
+<teiHeader></teiHeader>
+<text>
+<body>
+<p rend="nikaya">Dīghanikāyo</p>
+<div id="dn1" type="book">
+<head rend="book">Sīlakkhandhavaggapāḷi</head>
+<div id="dn1_1" type="sutta">
+<head rend="chapter">1. Brahmajālasutta</head>
+<p rend="bodytext" n="1">First paragraph content here.</p>
+<p rend="bodytext" n="2">Second paragraph content here.</p>
+<p rend="bodytext" n="3">Third paragraph content here.</p>
+<p rend="bodytext" n="4">Fourth paragraph content here.</p>
+</div>
+</div>
+</body>
+</text>
+</TEI.2>"#;
+
+    let structure = detect_nikaya_structure(xml).unwrap();
+
+    // Parse without overrides first to find the sutta fragment
+    let fragments_baseline =
+        parse_into_fragments(xml, &structure, "test.xml", &ParserOverrides::default(), false)
+            .unwrap();
+
+    let sutta_frag = fragments_baseline
+        .iter()
+        .find(|f| matches!(f.frag_type, FragmentType::Sutta))
+        .expect("Should find a Sutta fragment");
+
+    let original_end_line = sutta_frag.end_line;
+
+    // Create both adjustment and checked override with DIFFERENT values
+    // Both need to be valid (between start and original end)
+    assert!(
+        original_end_line > sutta_frag.start_line + 2,
+        "Fragment must span enough lines for this test"
+    );
+
+    // Adjustment sets end 2 lines before original, checked sets it 1 line before original
+    // Checked should win (closer to original end)
+    let adjustment_end_line = original_end_line - 2;
+    let checked_end_line = original_end_line - 1;
+
+    // Create FragmentAdjustments (TSV)
+    let mut adjustments = FragmentAdjustments::new();
+    let key = FragmentKey {
+        cst_file: "test.xml".to_string(),
+        frag_idx: sutta_frag.frag_idx,
+    };
+    adjustments.insert(
+        key.clone(),
+        FragmentAdjustment {
+            cst_file: "test.xml".to_string(),
+            frag_idx: sutta_frag.frag_idx,
+            end_line: Some(adjustment_end_line),
+            end_char: Some(0),
+        },
+    );
+
+    // Create CheckedFragmentOverrides
+    let mut checked_overrides = CheckedFragmentOverrides::new();
+    checked_overrides.insert(
+        key,
+        CheckedFragmentOverride {
+            end_line: Some(checked_end_line),
+            end_char: Some(0),
+            sc_code: None,
+            sc_sutta: None,
+        },
+    );
+
+    let overrides = ParserOverrides {
+        adjustments: Some(adjustments),
+        checked_overrides: Some(checked_overrides),
+    };
+
+    let fragments_with_both =
+        parse_into_fragments(xml, &structure, "test.xml", &overrides, false).unwrap();
+
+    // Find the overridden fragment
+    let overridden_frag = fragments_with_both
+        .iter()
+        .find(|f| f.frag_idx == sutta_frag.frag_idx)
+        .expect("Should find the same fragment");
+
+    // The checked override value should win (not the adjustment value)
+    assert_eq!(
+        overridden_frag.end_line, checked_end_line,
+        "Checked override should take precedence over TSV adjustment"
+    );
+    assert_ne!(
+        overridden_frag.end_line, adjustment_end_line,
+        "TSV adjustment value should NOT be used when checked override exists"
+    );
+}
+
+/// Test that fragment content is correctly extracted based on overridden boundaries
+///
+/// This verifies the content_xml field reflects the boundary change.
+#[test]
+fn test_boundary_override_content_extraction() {
+    // Create XML where we can verify content extraction
+    let xml = r#"<?xml version="1.0"?>
+<TEI.2>
+<teiHeader></teiHeader>
+<text>
+<body>
+<p rend="nikaya">Dīghanikāyo</p>
+<div id="dn1" type="book">
+<head rend="book">Sīlakkhandhavaggapāḷi</head>
+<div id="dn1_1" type="sutta">
+<head rend="chapter">1. Brahmajālasutta</head>
+<p rend="bodytext" n="1">AAAA</p>
+<p rend="bodytext" n="2">BBBB</p>
+<p rend="bodytext" n="3">CCCC</p>
+</div>
+</div>
+</body>
+</text>
+</TEI.2>"#;
+
+    let structure = detect_nikaya_structure(xml).unwrap();
+
+    // Parse without overrides to get full content
+    let fragments_baseline =
+        parse_into_fragments(xml, &structure, "test.xml", &ParserOverrides::default(), false)
+            .unwrap();
+
+    let sutta_frag = fragments_baseline
+        .iter()
+        .find(|f| matches!(f.frag_type, FragmentType::Sutta))
+        .expect("Should find a Sutta fragment");
+
+    // Full content should contain all markers
+    assert!(
+        sutta_frag.content_xml.contains("AAAA"),
+        "Full content should contain AAAA"
+    );
+    assert!(
+        sutta_frag.content_xml.contains("CCCC"),
+        "Full content should contain CCCC"
+    );
+
+    // Find line number of "BBBB" - we'll set end boundary just before it
+    let lines: Vec<&str> = xml.lines().collect();
+    let bbbb_line = lines
+        .iter()
+        .position(|line| line.contains("BBBB"))
+        .map(|i| i + 1) // Convert to 1-indexed
+        .expect("Should find BBBB line");
+
+    // Create override with boundary that cuts off before BBBB
+    let mut checked_overrides = CheckedFragmentOverrides::new();
+    let key = FragmentKey {
+        cst_file: "test.xml".to_string(),
+        frag_idx: sutta_frag.frag_idx,
+    };
+    checked_overrides.insert(
+        key,
+        CheckedFragmentOverride {
+            end_line: Some(bbbb_line),
+            end_char: Some(0), // At start of BBBB line
+            sc_code: None,
+            sc_sutta: None,
+        },
+    );
+
+    let overrides = ParserOverrides {
+        adjustments: None,
+        checked_overrides: Some(checked_overrides),
+    };
+
+    let fragments_with_override =
+        parse_into_fragments(xml, &structure, "test.xml", &overrides, false).unwrap();
+
+    let overridden_frag = fragments_with_override
+        .iter()
+        .find(|f| f.frag_idx == sutta_frag.frag_idx)
+        .expect("Should find the same fragment");
+
+    // With the override, AAAA should be present but BBBB and CCCC should be cut off
+    assert!(
+        overridden_frag.content_xml.contains("AAAA"),
+        "Overridden content should still contain AAAA"
+    );
+    assert!(
+        !overridden_frag.content_xml.contains("BBBB"),
+        "Overridden content should NOT contain BBBB (cut off by boundary)"
+    );
+    assert!(
+        !overridden_frag.content_xml.contains("CCCC"),
+        "Overridden content should NOT contain CCCC (cut off by boundary)"
     );
 }

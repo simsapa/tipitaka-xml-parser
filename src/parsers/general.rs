@@ -16,7 +16,7 @@ use crate::parsers::helpers::{
     extract_vagga_title_from_content,
     extract_first_paranum,
     apply_fragment_adjustment,
-    populate_sc_fields_from_tsv,
+    populate_sc_fields_from_tsv_conditional,
 };
 
 /// General XML parser implementation
@@ -741,6 +741,7 @@ pub fn parse_into_fragments(
                             current_char,
                             cst_file,
                             fragments.len(),
+                            overrides.checked_overrides.as_ref(),
                             overrides.adjustments.as_ref(),
                         );
                         
@@ -812,6 +813,7 @@ pub fn parse_into_fragments(
                                             event_start_char,
                                             cst_file,
                                             fragments.len(),
+                                            overrides.checked_overrides.as_ref(),
                                             overrides.adjustments.as_ref(),
                                         );
                                         
@@ -901,6 +903,7 @@ pub fn parse_into_fragments(
                                                 event_start_char,
                                                 cst_file,
                                                 fragments.len(),
+                                                overrides.checked_overrides.as_ref(),
                                                 overrides.adjustments.as_ref(),
                                             );
                                             
@@ -1020,6 +1023,7 @@ pub fn parse_into_fragments(
                                 close_char,
                                 cst_file,
                                 fragments.len(),
+                                overrides.checked_overrides.as_ref(),
                                 overrides.adjustments.as_ref(),
                             );
                             
@@ -1136,6 +1140,7 @@ pub fn parse_into_fragments(
                                     close_char,
                                     cst_file,
                                     fragments.len(),
+                                    overrides.checked_overrides.as_ref(),
                                     overrides.adjustments.as_ref(),
                                 );
                                 
@@ -1235,6 +1240,7 @@ pub fn parse_into_fragments(
                             event_start_char,
                             cst_file,
                             fragments.len(),
+                            overrides.checked_overrides.as_ref(),
                             overrides.adjustments.as_ref(),
                         );
                         
@@ -1297,6 +1303,7 @@ pub fn parse_into_fragments(
             reader.current_char(),
             cst_file,
             fragments.len(),
+            overrides.checked_overrides.as_ref(),
             overrides.adjustments.as_ref(),
         );
         
@@ -1338,7 +1345,7 @@ pub fn parse_into_fragments(
     
     // Populate SC fields from embedded TSV if requested
     if populate_sc_fields {
-        populate_sc_fields_from_tsv(&mut fragments)?;
+        populate_sc_fields_from_tsv_conditional(&mut fragments)?;
     }
     
     Ok(fragments)
