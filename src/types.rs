@@ -106,6 +106,76 @@ pub struct FragmentKey {
 /// Container for fragment adjustments loaded from TSV
 pub type FragmentAdjustments = HashMap<FragmentKey, FragmentAdjustment>;
 
+/// Override data from a checked fragment in the database.
+///
+/// This type supersedes `FragmentAdjustment` by including SC field overrides
+/// in addition to boundary overrides. When a user marks a fragment as "checked"
+/// and corrects its `sc_code` or `sc_sutta`, those values can be used as overrides
+/// during parsing to help the parser through problematic areas.
+///
+/// During parsing:
+/// - Boundary overrides (`end_line`, `end_char`) are applied during fragment finalization
+/// - SC field overrides (`sc_code`, `sc_sutta`) are applied in post-processing
+///
+/// `CheckedFragmentOverrides` take precedence over `FragmentAdjustments`.
+#[derive(Debug, Clone, Default)]
+pub struct CheckedFragmentOverride {
+    /// Override end line (1-indexed). Applied during fragment finalization.
+    pub end_line: Option<usize>,
+    /// Override end character position (0-indexed). Applied during fragment finalization.
+    pub end_char: Option<usize>,
+    /// Override SC reference code (e.g., "sn5.1"). Applied in post-processing.
+    pub sc_code: Option<String>,
+    /// Override SC sutta name (e.g., "Āḷavikāsutta"). Applied in post-processing.
+    pub sc_sutta: Option<String>,
+}
+
+/// Container for checked fragment overrides extracted from the database.
+/// Key is `(cst_file, frag_idx)` matching the `FragmentKey` type.
+pub type CheckedFragmentOverrides = HashMap<FragmentKey, CheckedFragmentOverride>;
+
+/// Combined override configuration for parsing.
+///
+/// This struct bundles all override types to simplify function signatures.
+/// During parsing, overrides are applied in this priority order:
+/// 1. `checked_overrides` - User-verified corrections from the database (highest priority)
+/// 2. `adjustments` - Legacy TSV-based boundary adjustments (fallback)
+///
+/// When both exist for the same `(cst_file, frag_idx)`:
+/// - Check `checked_overrides` first; if found, use it
+/// - Only fall back to `adjustments` if no checked override exists
+#[derive(Debug, Clone, Default)]
+pub struct ParserOverrides {
+    /// Legacy fragment adjustments loaded from embedded TSV.
+    /// Contains boundary overrides (`end_line`, `end_char`) only.
+    pub adjustments: Option<FragmentAdjustments>,
+    /// Checked fragment overrides extracted from the database.
+    /// Contains both boundary and SC field overrides.
+    pub checked_overrides: Option<CheckedFragmentOverrides>,
+}
+
+/// Parsed components from an SC code for context propagation.
+///
+/// When applying SC overrides, the `sc_code` is parsed to extract group numbers
+/// that can be used to derive `sc_code` values for subsequent fragments.
+///
+/// # Examples
+/// - `sn5.1` → `ScCodeComponents { prefix: "sn", samyutta: Some(5), sutta: Some(1), .. }`
+/// - `an3.1` → `ScCodeComponents { prefix: "an", nipata: Some(3), sutta: Some(1), .. }`
+/// - `dn1` → `ScCodeComponents { prefix: "dn", sutta: Some(1), .. }`
+/// - `mn41` → `ScCodeComponents { prefix: "mn", sutta: Some(41), .. }`
+#[derive(Debug, Clone, Default)]
+pub struct ScCodeComponents {
+    /// Nikaya prefix (e.g., "sn", "an", "dn", "mn")
+    pub prefix: String,
+    /// Samyutta number for SN (e.g., sn5.1 → 5)
+    pub samyutta: Option<i32>,
+    /// Nipata (book) number for AN (e.g., an3.1 → 3)
+    pub nipata: Option<i32>,
+    /// Sutta number (last number in the code)
+    pub sutta: Option<i32>,
+}
+
 use anyhow::{Context, Result};
 
 // NOTE: Should remain private to limit relying on the data. Provide public

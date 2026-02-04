@@ -5,7 +5,7 @@
 
 use tipitaka_xml_parser::nikaya_detector::detect_nikaya_structure;
 use tipitaka_xml_parser::parse_into_fragments;
-use tipitaka_xml_parser::types::FragmentType;
+use tipitaka_xml_parser::types::{FragmentType, ParserOverrides};
 
 #[test]
 fn test_sn_vaṅgīsa_samyutta_no_vagga() {
@@ -22,7 +22,7 @@ fn test_sn_vaṅgīsa_samyutta_no_vagga() {
         &xml_content,
         &structure,
         "s0301m.mul.xml",
-        None,
+        &ParserOverrides::default(),
         false
     ).expect("Failed to parse fragments");
     

@@ -29,7 +29,7 @@ fn test_dn_s0101m_sutta_count() {
     use tipitaka_xml_parser::nikaya_detector::detect_nikaya_structure;
     use tipitaka_xml_parser::parse_into_fragments;
     use tipitaka_xml_parser::encoding::read_xml_file;
-    use tipitaka_xml_parser::types::FragmentType;
+    use tipitaka_xml_parser::types::{FragmentType, ParserOverrides};
     
     // Load expected suttas from TSV
     let expected_suttas = load_tsv_suttas("romn/s0101m.mul.xml");
@@ -44,7 +44,7 @@ fn test_dn_s0101m_sutta_count() {
     
     let structure = detect_nikaya_structure(&xml_content).expect("Failed to detect nikaya");
     
-    let fragments = parse_into_fragments(&xml_content, &structure, "s0101m.mul.xml", None, false).expect("Failed to parse fragments");
+    let fragments = parse_into_fragments(&xml_content, &structure, "s0101m.mul.xml", &ParserOverrides::default(), false).expect("Failed to parse fragments");
     
     // Count sutta fragments
     let sutta_fragments: Vec<_> = fragments.iter()
@@ -66,7 +66,7 @@ fn test_dn_s0101m_sutta_count() {
 fn test_mn_s0201m_sutta_count() {
     use tipitaka_xml_parser::{detect_nikaya_structure, parse_into_fragments};
     use tipitaka_xml_parser::encoding::read_xml_file;
-    use tipitaka_xml_parser::FragmentType;
+    use tipitaka_xml_parser::types::{FragmentType, ParserOverrides};
     
     // Load expected suttas from TSV
     let expected_suttas = load_tsv_suttas("romn/s0201m.mul.xml");
@@ -84,7 +84,7 @@ fn test_mn_s0201m_sutta_count() {
     
     let structure = detect_nikaya_structure(&xml_content).expect("Failed to detect nikaya");
     
-    let fragments = parse_into_fragments(&xml_content, &structure, "s0201m.mul.xml", None, false).expect("Failed to parse fragments");
+    let fragments = parse_into_fragments(&xml_content, &structure, "s0201m.mul.xml", &ParserOverrides::default(), false).expect("Failed to parse fragments");
     
     // Count sutta fragments
     let sutta_fragments: Vec<_> = fragments.iter()
@@ -106,7 +106,7 @@ fn test_mn_s0201m_sutta_count() {
 fn test_mn_vagga_div_in_correct_fragment() {
     use tipitaka_xml_parser::{detect_nikaya_structure, parse_into_fragments};
     use tipitaka_xml_parser::encoding::read_xml_file;
-    use tipitaka_xml_parser::FragmentType;
+    use tipitaka_xml_parser::types::{FragmentType, ParserOverrides};
     
     // Parse the XML file
     let xml_path = PathBuf::from("tests/data/s0201m.mul.xml");
@@ -114,7 +114,7 @@ fn test_mn_vagga_div_in_correct_fragment() {
     
     let structure = detect_nikaya_structure(&xml_content).expect("Failed to detect nikaya");
     
-    let fragments = parse_into_fragments(&xml_content, &structure, "s0201m.mul.xml", None, false).expect("Failed to parse fragments");
+    let fragments = parse_into_fragments(&xml_content, &structure, "s0201m.mul.xml", &ParserOverrides::default(), false).expect("Failed to parse fragments");
     
     // Find the fragment containing the second vagga (line 1667: <div id="mn1_2" n="mn1_2" type="vagga">)
     // This should be in the same fragment as the first sutta of that vagga (line 1674: "1. Cūḷasīhanādasuttaṃ")

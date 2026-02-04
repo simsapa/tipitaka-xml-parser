@@ -8,9 +8,10 @@ use std::path::Path;
 use anyhow::{Result, Context};
 
 use crate::{
-    detect_nikaya_structure, 
+    detect_nikaya_structure,
     parse_into_fragments,
 };
+use crate::types::ParserOverrides;
 use crate::encoding::read_xml_file;
 use crate::sutta_builder::TsvRecord;
 
@@ -79,7 +80,7 @@ fn test_parse_matches_tsv_s0101m() {
     let nikaya_structure = detect_nikaya_structure(&xml_content)
         .expect("Failed to detect nikaya structure");
     
-    let fragments = parse_into_fragments(&xml_content, &nikaya_structure, "s0101m.mul.xml", None, true)
+    let fragments = parse_into_fragments(&xml_content, &nikaya_structure, "s0101m.mul.xml", &ParserOverrides::default(), true)
         .expect("Failed to parse fragments");
     
     // Filter to Sutta fragments only
@@ -156,7 +157,7 @@ fn test_parse_matches_tsv_s0201m() {
     let nikaya_structure = detect_nikaya_structure(&xml_content)
         .expect("Failed to detect nikaya structure");
     
-    let fragments = parse_into_fragments(&xml_content, &nikaya_structure, "s0201m.mul.xml", None, true)
+    let fragments = parse_into_fragments(&xml_content, &nikaya_structure, "s0201m.mul.xml", &ParserOverrides::default(), true)
         .expect("Failed to parse fragments");
     
     // Filter to Sutta fragments only
@@ -231,7 +232,7 @@ fn test_s0201m_first_sutta_fragment() {
     let nikaya_structure = detect_nikaya_structure(&xml_content)
         .expect("Failed to detect nikaya structure");
     
-    let fragments = parse_into_fragments(&xml_content, &nikaya_structure, "s0201m.mul.xml", None, true)
+    let fragments = parse_into_fragments(&xml_content, &nikaya_structure, "s0201m.mul.xml", &ParserOverrides::default(), true)
         .expect("Failed to parse fragments");
     
     // Fragment 0 should be Header, fragment 1 should be the first Sutta
@@ -283,7 +284,7 @@ fn test_s0201a_att_vagga_zero_fragment() {
     let nikaya_structure = detect_nikaya_structure(&xml_content)
         .expect("Failed to detect nikaya structure");
     
-    let fragments = parse_into_fragments(&xml_content, &nikaya_structure, "s0201a.att.xml", None, false)
+    let fragments = parse_into_fragments(&xml_content, &nikaya_structure, "s0201a.att.xml", &ParserOverrides::default(), false)
         .expect("Failed to parse fragments");
     
     // Fragment 0 should be Header, fragment 1 should be the introduction (vagga 0)
@@ -336,7 +337,7 @@ fn test_s0201a_att_kakacupama_sutta() {
     let nikaya_structure = detect_nikaya_structure(&xml_content)
         .expect("Failed to detect nikaya structure");
     
-    let fragments = parse_into_fragments(&xml_content, &nikaya_structure, "s0201a.att.xml", None, false)
+    let fragments = parse_into_fragments(&xml_content, &nikaya_structure, "s0201a.att.xml", &ParserOverrides::default(), false)
         .expect("Failed to parse fragments");
     
     // Find the fragment containing Kakacūpamasuttavaṇṇanā
@@ -365,7 +366,7 @@ fn test_s0201t_tik_culasihanada_sutta() {
     let nikaya_structure = detect_nikaya_structure(&xml_content)
         .expect("Failed to detect nikaya structure");
     
-    let fragments = parse_into_fragments(&xml_content, &nikaya_structure, "s0201t.tik.xml", None, false)
+    let fragments = parse_into_fragments(&xml_content, &nikaya_structure, "s0201t.tik.xml", &ParserOverrides::default(), false)
         .expect("Failed to parse fragments");
     
     // Find the fragment containing Cūḷasīhanādasuttavaṇṇanā

@@ -773,6 +773,21 @@ struct RegenerateResponse {
     db_replaced: bool,
 }
 
+/// Request for single-file reparse operation
+#[derive(serde::Deserialize)]
+struct ReparseFileRequest {
+    cst_file: String,
+}
+
+/// Response for single-file reparse operation
+#[derive(serde::Serialize)]
+struct ReparseFileResponse {
+    success: bool,
+    output: String,
+    fragments_count: usize,
+    review_status_restored: usize,
+}
+
 /// POST /api/regenerate - Run regeneration process
 #[post("/api/regenerate", data = "<request>")]
 fn regenerate(request: Json<RegenerateRequest>) -> Json<RegenerateResponse> {
@@ -1055,6 +1070,229 @@ fn regenerate(request: Json<RegenerateRequest>) -> Json<RegenerateResponse> {
     })
 }
 
+/// POST /api/reparse-file - Reparse a single XML file using current DB as reference
+///
+/// This endpoint reparses a single file while preserving checked fragment overrides
+/// and frag_review status from the current database.
+#[post("/api/reparse-file", data = "<request>")]
+fn reparse_file(
+    request: Json<ReparseFileRequest>,
+    db_state: &State<DbState>
+) -> Json<ReparseFileResponse> {
+    use std::path::Path;
+    use crate::encoding::read_xml_file;
+    use crate::nikaya_detector::detect_nikaya_structure;
+    use crate::xml_parser::parse_into_fragments;
+    use crate::fragment_exporter::{export_fragments_to_db, extract_checked_overrides, restore_frag_review_status};
+    use crate::types::{load_fragment_adjustments, ParserOverrides};
+
+    let cst_file = &request.cst_file;
+    let mut output = String::new();
+
+    output.push_str(&format!("=== Reparsing file: {} ===\n\n", cst_file));
+
+    // Load settings
+    let mut settings = match settings::load_settings() {
+        Ok(s) => s,
+        Err(e) => {
+            return Json(ReparseFileResponse {
+                success: false,
+                output: format!("ERROR: Failed to load settings: {}", e),
+                fragments_count: 0,
+                review_status_restored: 0,
+            });
+        }
+    };
+    settings::generate_default_paths(&mut settings);
+
+    // Validate XML directory is configured
+    if settings.xml_dir.is_empty() {
+        return Json(ReparseFileResponse {
+            success: false,
+            output: "ERROR: XML directory not configured. Please configure settings first.".to_string(),
+            fragments_count: 0,
+            review_status_restored: 0,
+        });
+    }
+
+    // Step 1: Validate the file exists in the database
+    output.push_str("Step 1: Validating file exists in database...\n");
+    {
+        let mut conn = match db_state.connect() {
+            Ok(c) => c,
+            Err(e) => {
+                return Json(ReparseFileResponse {
+                    success: false,
+                    output: format!("{}ERROR: Database connection failed: {}", output, e),
+                    fragments_count: 0,
+                    review_status_restored: 0,
+                });
+            }
+        };
+
+        let file_exists: i64 = match xml_fragments::table
+            .filter(xml_fragments::cst_file.eq(cst_file))
+            .count()
+            .get_result(&mut conn)
+        {
+            Ok(count) => count,
+            Err(e) => {
+                return Json(ReparseFileResponse {
+                    success: false,
+                    output: format!("{}ERROR: Failed to check file existence: {}", output, e),
+                    fragments_count: 0,
+                    review_status_restored: 0,
+                });
+            }
+        };
+
+        if file_exists == 0 {
+            return Json(ReparseFileResponse {
+                success: false,
+                output: format!("{}ERROR: File '{}' not found in database", output, cst_file),
+                fragments_count: 0,
+                review_status_restored: 0,
+            });
+        }
+        output.push_str(&format!("  Found {} existing fragments\n\n", file_exists));
+    }
+
+    // Step 2: Extract checked overrides and frag_review status from current DB
+    output.push_str("Step 2: Extracting checked overrides from current database...\n");
+    let db_path = Path::new(&settings.db_path);
+    let (checked_overrides, review_status) = match extract_checked_overrides(db_path, cst_file) {
+        Ok(result) => result,
+        Err(e) => {
+            return Json(ReparseFileResponse {
+                success: false,
+                output: format!("{}ERROR: Failed to extract checked overrides: {}", output, e),
+                fragments_count: 0,
+                review_status_restored: 0,
+            });
+        }
+    };
+    output.push_str(&format!("  Extracted {} checked overrides\n", checked_overrides.len()));
+    output.push_str(&format!("  Extracted {} frag_review statuses to restore\n\n", review_status.len()));
+
+    // Step 3: Load FragmentAdjustments from embedded TSV
+    output.push_str("Step 3: Loading fragment adjustments from embedded TSV...\n");
+    let adjustments = match load_fragment_adjustments() {
+        Ok(adj) => {
+            output.push_str(&format!("  Loaded {} adjustments\n\n", adj.len()));
+            Some(adj)
+        }
+        Err(e) => {
+            output.push_str(&format!("  Warning: Failed to load adjustments: {} (continuing without)\n\n", e));
+            None
+        }
+    };
+
+    // Step 4: Construct ParserOverrides
+    output.push_str("Step 4: Constructing parser overrides...\n");
+    let overrides = ParserOverrides {
+        adjustments,
+        checked_overrides: if checked_overrides.is_empty() { None } else { Some(checked_overrides) },
+    };
+    output.push_str("  ParserOverrides constructed\n\n");
+
+    // Step 5: Read and parse the XML file
+    output.push_str("Step 5: Reading and parsing XML file...\n");
+    let xml_path = Path::new(&settings.xml_dir).join(cst_file);
+
+    if !xml_path.exists() {
+        return Json(ReparseFileResponse {
+            success: false,
+            output: format!("{}ERROR: XML file not found: {:?}", output, xml_path),
+            fragments_count: 0,
+            review_status_restored: 0,
+        });
+    }
+
+    let xml_content = match read_xml_file(&xml_path) {
+        Ok(content) => {
+            output.push_str(&format!("  Read {} bytes from XML file\n", content.len()));
+            content
+        }
+        Err(e) => {
+            return Json(ReparseFileResponse {
+                success: false,
+                output: format!("{}ERROR: Failed to read XML file: {}", output, e),
+                fragments_count: 0,
+                review_status_restored: 0,
+            });
+        }
+    };
+
+    let nikaya_structure = match detect_nikaya_structure(&xml_content) {
+        Ok(ns) => {
+            output.push_str(&format!("  Detected nikaya: {}\n", ns.nikaya));
+            ns
+        }
+        Err(e) => {
+            return Json(ReparseFileResponse {
+                success: false,
+                output: format!("{}ERROR: Failed to detect nikaya structure: {}", output, e),
+                fragments_count: 0,
+                review_status_restored: 0,
+            });
+        }
+    };
+
+    let fragments = match parse_into_fragments(&xml_content, &nikaya_structure, cst_file, &overrides, true) {
+        Ok(frags) => {
+            output.push_str(&format!("  Parsed {} fragments\n\n", frags.len()));
+            frags
+        }
+        Err(e) => {
+            return Json(ReparseFileResponse {
+                success: false,
+                output: format!("{}ERROR: Failed to parse fragments: {}", output, e),
+                fragments_count: 0,
+                review_status_restored: 0,
+            });
+        }
+    };
+
+    // Step 6: Export fragments to DB (replaces existing)
+    output.push_str("Step 6: Exporting fragments to database...\n");
+    let fragments_count = match export_fragments_to_db(&fragments, &nikaya_structure, db_path) {
+        Ok(count) => {
+            output.push_str(&format!("  Exported {} fragments (replaced existing)\n\n", count));
+            count
+        }
+        Err(e) => {
+            return Json(ReparseFileResponse {
+                success: false,
+                output: format!("{}ERROR: Failed to export fragments: {}", output, e),
+                fragments_count: 0,
+                review_status_restored: 0,
+            });
+        }
+    };
+
+    // Step 7: Restore frag_review status
+    output.push_str("Step 7: Restoring frag_review status...\n");
+    let review_status_restored = match restore_frag_review_status(db_path, cst_file, &review_status) {
+        Ok(count) => {
+            output.push_str(&format!("  Restored {} frag_review statuses\n\n", count));
+            count
+        }
+        Err(e) => {
+            output.push_str(&format!("  Warning: Failed to restore frag_review status: {}\n\n", e));
+            0
+        }
+    };
+
+    output.push_str("=== Reparse completed successfully ===\n");
+
+    Json(ReparseFileResponse {
+        success: true,
+        output,
+        fragments_count,
+        review_status_restored,
+    })
+}
+
 // ============================================================================
 // ArangoDB Integration Endpoints
 // ============================================================================
@@ -1311,6 +1549,7 @@ pub fn get_routes() -> Vec<Route> {
         get_settings,
         save_settings_endpoint,
         regenerate,
+        reparse_file,
         get_arangodb_status,
         get_pali_titles,
         run_validation,

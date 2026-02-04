@@ -4,7 +4,7 @@
 //! It detects the XML file type and dispatches to the appropriate parser implementation.
 
 use anyhow::Result;
-use crate::types::{XmlFragment, FragmentAdjustments};
+use crate::types::{XmlFragment, ParserOverrides};
 use crate::nikaya_structure::NikayaStructure;
 use crate::xml_file_type::XmlFileType;
 use crate::xml_type_detector::detect_xml_file_type;
@@ -34,7 +34,7 @@ use crate::parsers::{
 /// * `xml_content` - The complete XML file content
 /// * `nikaya_structure` - The structure configuration for this nikaya
 /// * `cst_file` - Name of the XML file being parsed
-/// * `adjustments` - Optional fragment adjustments to apply
+/// * `overrides` - Parser overrides including adjustments and checked fragment overrides
 /// * `populate_sc_fields` - Whether to populate SC fields from embedded TSV
 ///
 /// # Returns
@@ -43,7 +43,7 @@ pub fn parse_into_fragments(
     xml_content: &str,
     nikaya_structure: &NikayaStructure,
     cst_file: &str,
-    adjustments: Option<&FragmentAdjustments>,
+    overrides: &ParserOverrides,
     populate_sc_fields: bool,
 ) -> Result<Vec<XmlFragment>> {
     // Detect the XML file type
@@ -98,13 +98,24 @@ pub fn parse_into_fragments(
     };
     
     // Parse using the selected parser
-    parser.parse_into_fragments(
+    let mut fragments = parser.parse_into_fragments(
         xml_content,
         nikaya_structure,
         cst_file,
-        adjustments,
+        overrides,
         populate_sc_fields,
-    )
+    )?;
+
+    // Apply SC overrides from CheckedFragmentOverrides (post-processing)
+    // This applies sc_code and sc_sutta overrides directly to fragments
+    // and propagates context to subsequent null fragments
+    if let Some(ref checked_overrides) = overrides.checked_overrides {
+        if !checked_overrides.is_empty() {
+            crate::parsers::helpers::apply_sc_overrides(&mut fragments, checked_overrides, cst_file);
+        }
+    }
+
+    Ok(fragments)
 }
 
 #[cfg(test)]
@@ -137,7 +148,7 @@ mod tests {
         let xml = create_dn_sample_xml();
         let structure = detect_nikaya_structure(&xml).expect("Should detect structure");
         
-        let fragments = parse_into_fragments(&xml, &structure, "s0101m.mul.xml", None, false)
+        let fragments = parse_into_fragments(&xml, &structure, "s0101m.mul.xml", &ParserOverrides::default(), false)
             .expect("Should parse fragments");
         
         assert!(!fragments.is_empty(), "Should have fragments");
@@ -149,7 +160,7 @@ mod tests {
         let structure = detect_nikaya_structure(&xml).unwrap();
         
         // All types should currently dispatch to general parser
-        let fragments = parse_into_fragments(&xml, &structure, "s0101m.mul.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(&xml, &structure, "s0101m.mul.xml", &ParserOverrides::default(), false).unwrap();
         
         // Verify we got valid fragments
         assert!(!fragments.is_empty());

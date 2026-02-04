@@ -14,7 +14,7 @@ use std::fs;
 use tipitaka_xml_parser::{
     nikaya_detector::detect_nikaya_structure,
     parsers::samyutta_nikaya_mula::parse_into_fragments,
-    types::{FragmentType, GroupType},
+    types::{FragmentType, GroupType, ParserOverrides},
 };
 
 #[test]
@@ -31,7 +31,7 @@ fn test_s0301m_mul_sutta_10_vagga_2() {
     assert_eq!(structure.nikaya, "samyutta");
     
     // Parse into fragments
-    let fragments = parse_into_fragments(&xml_content, &structure, "s0301m.mul.xml", None, false)
+    let fragments = parse_into_fragments(&xml_content, &structure, "s0301m.mul.xml", &ParserOverrides::default(), false)
         .expect("Should parse fragments");
     
     // Filter to get only Sutta fragments
@@ -139,7 +139,7 @@ fn test_s0301m_mul_vagga_boundaries() {
     let structure = detect_nikaya_structure(&xml_content)
         .expect("Should detect SN structure");
     
-    let fragments = parse_into_fragments(&xml_content, &structure, "s0301m.mul.xml", None, false)
+    let fragments = parse_into_fragments(&xml_content, &structure, "s0301m.mul.xml", &ParserOverrides::default(), false)
         .expect("Should parse fragments");
     
     let sutta_fragments: Vec<_> = fragments.iter()

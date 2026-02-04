@@ -4,7 +4,7 @@ use anyhow::{Result, Context};
 use quick_xml::events::Event;
 use std::collections::HashMap;
 
-use crate::types::{XmlFragment, FragmentType, GroupType, GroupLevel, FragmentAdjustments};
+use crate::types::{XmlFragment, FragmentType, GroupType, GroupLevel, ParserOverrides};
 use crate::nikaya_structure::NikayaStructure;
 use crate::xml_parser_trait::XmlParser;
 use crate::parsers::helpers::{
@@ -671,7 +671,7 @@ pub fn parse_into_fragments(
     xml_content: &str,
     nikaya_structure: &NikayaStructure,
     cst_file: &str,
-    adjustments: Option<&FragmentAdjustments>,
+    overrides: &ParserOverrides,
     populate_sc_fields: bool,
 ) -> Result<Vec<XmlFragment>> {
     let mut reader = LineTrackingReader::new(xml_content);
@@ -751,7 +751,7 @@ pub fn parse_into_fragments(
                             current_char,
                             cst_file,
                             fragments.len(),
-                            adjustments,
+                            overrides.adjustments.as_ref(),
                         );
                         
                         let content_xml = xml_content[frag_start_pos..end_pos].to_string();
@@ -822,7 +822,7 @@ pub fn parse_into_fragments(
                                             event_start_char,
                                             cst_file,
                                             fragments.len(),
-                                            adjustments,
+                                            overrides.adjustments.as_ref(),
                                         );
                                         
                                         // Create content with adjusted end position
@@ -920,7 +920,7 @@ pub fn parse_into_fragments(
                                                 event_start_char,
                                                 cst_file,
                                                 fragments.len(),
-                                                adjustments,
+                                                overrides.adjustments.as_ref(),
                                             );
                                             
                                             let content_xml = xml_content[frag_start_pos..end_pos].to_string();
@@ -1040,7 +1040,7 @@ pub fn parse_into_fragments(
                                 close_char,
                                 cst_file,
                                 fragments.len(),
-                                adjustments,
+                                overrides.adjustments.as_ref(),
                             );
                             
                             let content_xml = xml_content[frag_start_pos..end_pos].to_string();
@@ -1172,7 +1172,7 @@ pub fn parse_into_fragments(
                                         close_char,
                                         cst_file,
                                         fragments.len(),
-                                        adjustments,
+                                        overrides.adjustments.as_ref(),
                                     );
                                     
                                     let content_xml = xml_content[frag_start_pos..end_pos].to_string();
@@ -1302,7 +1302,7 @@ pub fn parse_into_fragments(
                             event_start_char,
                             cst_file,
                             fragments.len(),
-                            adjustments,
+                            overrides.adjustments.as_ref(),
                         );
                         
                         // Include everything from start up to the adjusted end position
@@ -1364,7 +1364,7 @@ pub fn parse_into_fragments(
             reader.current_char(),
             cst_file,
             fragments.len(),
-            adjustments,
+            overrides.adjustments.as_ref(),
         );
         
         let content_xml = xml_content[start_pos..end_pos].to_string();
@@ -1417,11 +1417,11 @@ impl XmlParser for SamyuttaNikayaMula {
         xml_content: &str,
         nikaya_structure: &NikayaStructure,
         cst_file: &str,
-        adjustments: Option<&FragmentAdjustments>,
+        overrides: &ParserOverrides,
         populate_sc_fields: bool,
     ) -> Result<Vec<XmlFragment>> {
         // Delegate to the public function
-        parse_into_fragments(xml_content, nikaya_structure, cst_file, adjustments, populate_sc_fields)
+        parse_into_fragments(xml_content, nikaya_structure, cst_file, overrides, populate_sc_fields)
     }
 }
 
@@ -1483,7 +1483,7 @@ mod tests {
         
         assert_eq!(structure.nikaya, "digha");
         
-        let fragments = parse_into_fragments(&xml, &structure, "test.xml", None, false).expect("Should parse fragments");
+        let fragments = parse_into_fragments(&xml, &structure, "test.xml", &ParserOverrides::default(), false).expect("Should parse fragments");
         
         // Should have at least one fragment
         assert!(!fragments.is_empty(), "Should have at least one fragment");
@@ -1493,7 +1493,7 @@ mod tests {
     fn test_parse_dn_fragment_count() {
         let xml = create_dn_sample_xml();
         let structure = detect_nikaya_structure(&xml).unwrap();
-        let fragments = parse_into_fragments(&xml, &structure, "test.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(&xml, &structure, "test.xml", &ParserOverrides::default(), false).unwrap();
         
         // Count sutta fragments
         let sutta_fragments: Vec<_> = fragments.iter()
@@ -1508,7 +1508,7 @@ mod tests {
     fn test_parse_dn_line_tracking() {
         let xml = create_dn_sample_xml();
         let structure = detect_nikaya_structure(&xml).unwrap();
-        let fragments = parse_into_fragments(&xml, &structure, "test.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(&xml, &structure, "test.xml", &ParserOverrides::default(), false).unwrap();
         
         for fragment in &fragments {
             // Line numbers should be valid (start > 0, end >= start)
@@ -1525,7 +1525,7 @@ mod tests {
         
         assert_eq!(structure.nikaya, "majjhima");
         
-        let fragments = parse_into_fragments(&xml, &structure, "test.xml", None, false).expect("Should parse fragments");
+        let fragments = parse_into_fragments(&xml, &structure, "test.xml", &ParserOverrides::default(), false).expect("Should parse fragments");
         
         assert!(!fragments.is_empty(), "Should have at least one fragment");
     }
@@ -1534,7 +1534,7 @@ mod tests {
     fn test_fragment_content_not_empty() {
         let xml = create_dn_sample_xml();
         let structure = detect_nikaya_structure(&xml).unwrap();
-        let fragments = parse_into_fragments(&xml, &structure, "test.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(&xml, &structure, "test.xml", &ParserOverrides::default(), false).unwrap();
         
         for fragment in &fragments {
             // Each fragment should have non-empty content
@@ -1547,7 +1547,7 @@ mod tests {
     fn test_character_position_tracking() {
         let xml = create_dn_sample_xml();
         let structure = detect_nikaya_structure(&xml).unwrap();
-        let fragments = parse_into_fragments(&xml, &structure, "test.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(&xml, &structure, "test.xml", &ParserOverrides::default(), false).unwrap();
         
         for fragment in &fragments {
             // Character positions should be valid
@@ -1571,7 +1571,7 @@ mod tests {
 <text><body><p rend="nikaya">Dīghanikāyo</p><div type="book"><head rend="book">Book1</head><div type="sutta"><head rend="chapter">Sutta1</head><p n="1">Text1</p></div></div></body></text>"#;
         
         let structure = detect_nikaya_structure(xml).unwrap();
-        let fragments = parse_into_fragments(xml, &structure, "test.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(xml, &structure, "test.xml", &ParserOverrides::default(), false).unwrap();
         
         // Check that we can distinguish elements on the same line
         // by their character positions
@@ -1620,7 +1620,7 @@ mod tests {
 </TEI.2>"#;
         
         let structure = detect_nikaya_structure(xml).unwrap();
-        let fragments = parse_into_fragments(xml, &structure, "s0101m.mul.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(xml, &structure, "s0101m.mul.xml", &ParserOverrides::default(), false).unwrap();
         
         // Find the sutta fragment
         let sutta_frag = fragments.iter()
@@ -1656,7 +1656,7 @@ mod tests {
 </TEI.2>"#;
         
         let structure = detect_nikaya_structure(xml).unwrap();
-        let fragments = parse_into_fragments(xml, &structure, "s0201m.mul.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(xml, &structure, "s0201m.mul.xml", &ParserOverrides::default(), false).unwrap();
         
         // Find the sutta fragment
         let sutta_frag = fragments.iter()
@@ -1693,7 +1693,7 @@ mod tests {
 </TEI.2>"#;
         
         let structure = detect_nikaya_structure(xml).unwrap();
-        let fragments = parse_into_fragments(xml, &structure, "s0301m.mul.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(xml, &structure, "s0301m.mul.xml", &ParserOverrides::default(), false).unwrap();
         
         // Find the sutta fragment
         let sutta_frag = fragments.iter()
@@ -1748,7 +1748,7 @@ mod tests {
 </TEI.2>"#;
         
         let structure = detect_nikaya_structure(xml).unwrap();
-        let fragments = parse_into_fragments(xml, &structure, "s0301m.mul.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(xml, &structure, "s0301m.mul.xml", &ParserOverrides::default(), false).unwrap();
         
         let sutta_fragments: Vec<_> = fragments.iter()
             .filter(|f| matches!(f.frag_type, FragmentType::Sutta))
@@ -1804,7 +1804,7 @@ mod tests {
 </TEI.2>"#;
         
         let structure = detect_nikaya_structure(xml).unwrap();
-        let fragments = parse_into_fragments(xml, &structure, "s0402m2.mul.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(xml, &structure, "s0402m2.mul.xml", &ParserOverrides::default(), false).unwrap();
         
         // Find the sutta fragment
         let sutta_frag = fragments.iter()

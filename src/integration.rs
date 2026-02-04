@@ -11,7 +11,7 @@ use super::{
     detect_nikaya_structure,
     parse_into_fragments,
 };
-use super::types::FragmentAdjustments;
+use super::types::{FragmentAdjustments, ParserOverrides, CheckedFragmentOverrides};
 
 /// Statistics for a single file import
 #[derive(Debug, Clone, Default)]
@@ -37,7 +37,7 @@ pub struct ProcessingStats {
 
 /// Complete import process for Tipitaka XML files using fragment-based parser
 pub struct TipitakaImporter {
-    adjustments: Option<FragmentAdjustments>,
+    overrides: ParserOverrides,
 }
 
 impl TipitakaImporter {
@@ -47,13 +47,25 @@ impl TipitakaImporter {
     /// New TipitakaImporter instance
     pub fn new() -> Result<Self> {
         Ok(Self {
-            adjustments: None,
+            overrides: ParserOverrides::default(),
         })
     }
 
-    /// Set fragment adjustments for the importer
+    /// Set fragment adjustments for the importer (legacy TSV-based adjustments)
     pub fn with_adjustments(mut self, adjustments: FragmentAdjustments) -> Self {
-        self.adjustments = Some(adjustments);
+        self.overrides.adjustments = Some(adjustments);
+        self
+    }
+
+    /// Set checked fragment overrides for the importer (database-based overrides)
+    pub fn with_checked_overrides(mut self, checked_overrides: CheckedFragmentOverrides) -> Self {
+        self.overrides.checked_overrides = Some(checked_overrides);
+        self
+    }
+
+    /// Set full parser overrides for the importer
+    pub fn with_overrides(mut self, overrides: ParserOverrides) -> Self {
+        self.overrides = overrides;
         self
     }
 
@@ -109,7 +121,7 @@ impl TipitakaImporter {
             &xml_content,
             &nikaya_structure,
             &filename,
-            self.adjustments.as_ref(),
+            &self.overrides,
             true
         )?;
 

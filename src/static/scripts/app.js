@@ -82,11 +82,35 @@ async function fetchAndPopulateFileList() {
                 // Add files under this nikaya
                 group.files.forEach(file => {
                     const item = document.createElement('div');
-                    item.className = 'panel-item';
+                    item.className = 'panel-item file-item';
                     item.style.paddingLeft = '1.5rem'; // Indent files under nikaya
-                    item.textContent = `${file.filename} (${file.fragment_count})`;
+                    item.style.display = 'flex';
+                    item.style.justifyContent = 'space-between';
+                    item.style.alignItems = 'center';
+
+                    // Create text content span
+                    const textSpan = document.createElement('span');
+                    textSpan.className = 'file-text';
+                    textSpan.textContent = `${file.filename} (${file.fragment_count})`;
+                    textSpan.style.flexGrow = '1';
+                    textSpan.style.cursor = 'pointer';
+                    textSpan.onclick = () => selectFile(file.filename);
+                    item.appendChild(textSpan);
+
+                    // Create reparse button
+                    const reparseBtn = document.createElement('button');
+                    reparseBtn.className = 'button is-small is-info reparse-btn';
+                    reparseBtn.title = 'Reparse this file using current DB as reference';
+                    reparseBtn.innerHTML = '&#x21bb;'; // Clockwise arrow (↻)
+                    reparseBtn.style.marginLeft = '0.5rem';
+                    reparseBtn.style.minWidth = '28px';
+                    reparseBtn.onclick = (e) => {
+                        e.stopPropagation(); // Prevent file selection
+                        reparseFile(file.filename);
+                    };
+                    item.appendChild(reparseBtn);
+
                     item.dataset.filename = file.filename;
-                    item.onclick = () => selectFile(file.filename);
                     fileList.appendChild(item);
                 });
             });
@@ -1113,7 +1137,10 @@ function openRegenerateModal() {
     document.getElementById('regenerate-output').textContent = '';
     document.getElementById('regenerate-with-reference').disabled = false;
     document.getElementById('regenerate-new-replace').disabled = false;
-    
+
+    // Reset modal title to default
+    document.querySelector('#regenerate-modal .modal-card-title').textContent = 'Regenerate Fragments Database';
+
     document.getElementById('regenerate-modal').classList.add('is-active');
 }
 
@@ -1183,6 +1210,74 @@ async function startRegeneration(useReferenceDb) {
         updateRegenerateStatus('Failed: ' + error.message, 'is-danger');
         
         // Only append if there's no existing output
+        const outputEl = document.getElementById('regenerate-output');
+        if (!outputEl.textContent) {
+            outputEl.textContent = 'Error: ' + error.message;
+        }
+    }
+}
+
+// Reparse a single file using current DB as reference
+async function reparseFile(cstFile) {
+    // Show confirmation dialog
+    if (!confirm(`Reparse file "${cstFile}"?\n\nThis will re-parse the XML file using the current database as reference, preserving checked fragment overrides and review status.`)) {
+        return;
+    }
+
+    // Show regenerate modal with reparse context
+    const modal = document.getElementById('regenerate-modal');
+    modal.classList.add('is-active');
+
+    // Update modal title for reparse context
+    modal.querySelector('.modal-card-title').textContent = `Reparsing: ${cstFile}`;
+
+    // Hide start message, show status
+    document.getElementById('regenerate-start-message').style.display = 'none';
+    document.getElementById('regenerate-status').style.display = 'block';
+    document.getElementById('regenerate-output-container').style.display = 'block';
+    document.getElementById('regenerate-output').textContent = '';
+
+    // Disable regenerate buttons during reparse
+    document.getElementById('regenerate-with-reference').disabled = true;
+    document.getElementById('regenerate-new-replace').disabled = true;
+
+    // Set flag to refresh after close
+    needsReloadAfterClose = false;
+
+    // Update status
+    updateRegenerateStatus('Reparsing file...', 'is-info');
+
+    try {
+        const response = await fetch('/api/reparse-file', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cst_file: cstFile })
+        });
+
+        const result = await response.json();
+
+        // Display output
+        document.getElementById('regenerate-output').textContent = result.output;
+
+        // Update status based on success
+        if (result.success) {
+            updateRegenerateStatus(
+                `Reparse completed! ${result.fragments_count} fragments, ${result.review_status_restored} review statuses restored.`,
+                'is-success'
+            );
+            needsReloadAfterClose = true;
+        } else {
+            if (result.output.includes('ERROR:')) {
+                updateRegenerateStatus('Reparse failed', 'is-danger');
+            } else {
+                updateRegenerateStatus('Reparse completed with warnings', 'is-warning');
+            }
+        }
+
+    } catch (error) {
+        console.error('Reparse failed:', error);
+        updateRegenerateStatus('Failed: ' + error.message, 'is-danger');
+
         const outputEl = document.getElementById('regenerate-output');
         if (!outputEl.textContent) {
             outputEl.textContent = 'Error: ' + error.message;

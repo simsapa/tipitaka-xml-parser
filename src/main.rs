@@ -20,6 +20,8 @@ fn parse_tipitaka_xml(
         TipitakaImporter,
         load_fragment_adjustments,
     };
+    use tipitaka_xml_parser::types::ParserOverrides;
+    use tipitaka_xml_parser::fragment_exporter::extract_all_checked_overrides;
     use std::fs;
 
     // Load fragment adjustments from embedded TSV
@@ -31,6 +33,33 @@ fn parse_tipitaka_xml(
         Err(e) => {
             return Err(format!("Failed to load fragment adjustments: {}", e));
         }
+    };
+
+    // Extract checked overrides from reference database if provided
+    let checked_overrides = if let Some(ref_db_path) = reference_fragments_db {
+        match extract_all_checked_overrides(ref_db_path) {
+            Ok(overrides) => {
+                if !overrides.is_empty() {
+                    logger::info(&format!("Loaded {} checked overrides from reference database", overrides.len()));
+                    println!("Loaded {} checked overrides from reference database", overrides.len());
+                }
+                Some(overrides)
+            }
+            Err(e) => {
+                // Not a critical error - continue without overrides
+                logger::warn(&format!("Failed to load checked overrides from reference: {}", e));
+                eprintln!("Warning: Failed to load checked overrides from reference: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Build ParserOverrides combining adjustments and checked overrides
+    let overrides = ParserOverrides {
+        adjustments,
+        checked_overrides,
     };
 
     // Collect XML files to process
@@ -112,10 +141,8 @@ fn parse_tipitaka_xml(
     let mut importer = TipitakaImporter::new()
         .map_err(|e| format!("Failed to create importer: {}", e))?;
 
-    // Add fragment adjustments if provided
-    if let Some(adj) = adjustments {
-        importer = importer.with_adjustments(adj);
-    }
+    // Add parser overrides (includes adjustments and checked overrides from reference DB)
+    importer = importer.with_overrides(overrides);
 
     // Process each XML file
     let mut errors = 0;
