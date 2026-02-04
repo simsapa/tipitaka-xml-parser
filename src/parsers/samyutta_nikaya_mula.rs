@@ -740,9 +740,14 @@ pub fn parse_into_fragments(
                     seen_body_tag = true;
                     
                     // Close the Header fragment right after the <body> tag
-                    if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) = 
+                    // Track the adjusted end position to use as the next fragment's start
+                    let mut next_frag_start_pos = current_pos;
+                    let mut next_frag_start_line = current_line;
+                    let mut next_frag_start_char = current_char;
+
+                    if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) =
                         (current_fragment_start, current_frag_type.as_ref()) {
-                        
+
                         // Apply adjustments if any
                         let (end_pos, end_line, end_char) = apply_fragment_adjustment(
                             xml_content,
@@ -754,7 +759,12 @@ pub fn parse_into_fragments(
                             overrides.checked_overrides.as_ref(),
                             overrides.adjustments.as_ref(),
                         );
-                        
+
+                        // Use adjusted end position as next fragment's start to ensure continuous boundaries
+                        next_frag_start_pos = end_pos;
+                        next_frag_start_line = end_line;
+                        next_frag_start_char = end_char;
+
                         let content_xml = xml_content[frag_start_pos..end_pos].to_string();
                         if !content_xml.trim().is_empty() {
                             fragments.push(XmlFragment {
@@ -778,10 +788,10 @@ pub fn parse_into_fragments(
                             });
                         }
                     }
-                    
-                    // Start a Sutta fragment immediately after <body>
-                    // Content between <body> and the first sutta marker will be included
-                    current_fragment_start = Some((current_pos, current_line, current_char));
+
+                    // Start a Sutta fragment at the adjusted end position of the Header fragment
+                    // This ensures no gaps or overlaps when checked overrides are used
+                    current_fragment_start = Some((next_frag_start_pos, next_frag_start_line, next_frag_start_char));
                     current_frag_type = Some(FragmentType::Sutta);
                     current_fragment_group_levels = hierarchy.get_current_levels();
                     in_sutta_content = true;

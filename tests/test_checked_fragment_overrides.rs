@@ -429,6 +429,135 @@ fn test_boundary_override_precedence() {
     );
 }
 
+/// Test that fragment boundaries remain continuous when Header fragment is extended by checked override
+///
+/// This is a regression test for the bug where extending the Header fragment's end boundary
+/// via checked override caused the next fragment (Sutta) to overlap with the Header, resulting
+/// in XML reconstruction being larger than the original.
+///
+/// The fix ensures that when a Header fragment's boundary is adjusted, the next fragment
+/// starts at the adjusted end position rather than the original position.
+#[test]
+fn test_header_fragment_boundary_continuity_with_override() {
+    // Create XML with a clear header/body boundary
+    let xml = r#"<?xml version="1.0"?>
+<TEI.2>
+<teiHeader></teiHeader>
+<text>
+<body>
+<p rend="nikaya">Saṃyuttanikāyo</p>
+<div id="sn1" type="book">
+<head rend="book">Sagāthāvaggapāḷi</head>
+<div id="sn1_1" type="samyutta">
+<head rend="samyutta">1. Devatāsaṃyuttaṃ</head>
+<div id="sn1_1_1" type="vagga">
+<head rend="vagga">1. Naḷavaggo</head>
+<p rend="subhead">1. Oghataraṇasuttaṃ</p>
+<p rend="bodytext" n="1">Test content.</p>
+</div>
+</div>
+</div>
+</body>
+</text>
+</TEI.2>"#;
+
+    let structure = detect_nikaya_structure(xml).unwrap();
+
+    // Parse without overrides to get baseline boundaries
+    let fragments_baseline =
+        parse_into_fragments(xml, &structure, "test.xml", &ParserOverrides::default(), false)
+            .unwrap();
+
+    // Find the Header fragment
+    let header_frag = fragments_baseline
+        .iter()
+        .find(|f| matches!(f.frag_type, FragmentType::Header))
+        .expect("Should find a Header fragment");
+
+    // Verify reconstruction of baseline fragments doesn't lose or duplicate bytes
+    let baseline_reconstruction: String = fragments_baseline
+        .iter()
+        .map(|f| f.content_xml.as_str())
+        .collect();
+    assert_eq!(
+        baseline_reconstruction.len(),
+        xml.len(),
+        "Baseline reconstruction should match original XML length"
+    );
+
+    // Now create a checked override that extends the Header fragment's end boundary
+    // Move end boundary to include an extra line
+    let extended_end_line = header_frag.end_line + 1;
+    let extended_end_char = 0;
+
+    let mut checked_overrides = CheckedFragmentOverrides::new();
+    let key = FragmentKey {
+        cst_file: "test.xml".to_string(),
+        frag_idx: header_frag.frag_idx,
+    };
+    checked_overrides.insert(
+        key,
+        CheckedFragmentOverride {
+            end_line: Some(extended_end_line),
+            end_char: Some(extended_end_char),
+            sc_code: None,
+            sc_sutta: None,
+        },
+    );
+
+    let overrides = ParserOverrides {
+        adjustments: None,
+        checked_overrides: Some(checked_overrides),
+    };
+
+    let fragments_with_override =
+        parse_into_fragments(xml, &structure, "test.xml", &overrides, false).unwrap();
+
+    // Find the fragments after override
+    let header_override = fragments_with_override
+        .iter()
+        .find(|f| matches!(f.frag_type, FragmentType::Header))
+        .expect("Should find Header fragment after override");
+
+    let sutta_override = fragments_with_override
+        .iter()
+        .find(|f| matches!(f.frag_type, FragmentType::Sutta))
+        .expect("Should find Sutta fragment after override");
+
+    // Verify the Header fragment was extended
+    assert_eq!(
+        header_override.end_line, extended_end_line,
+        "Header fragment should be extended to the override end_line"
+    );
+
+    // KEY REGRESSION TEST: The Sutta fragment should start exactly where the
+    // extended Header fragment ends (no gap, no overlap)
+    assert_eq!(
+        sutta_override.start_line, header_override.end_line,
+        "Sutta should start on the same line where Header ends"
+    );
+    assert_eq!(
+        sutta_override.start_char, header_override.end_char,
+        "Sutta should start at the same char position where Header ends"
+    );
+
+    // Verify reconstruction still works (no bytes lost or duplicated)
+    let override_reconstruction: String = fragments_with_override
+        .iter()
+        .map(|f| f.content_xml.as_str())
+        .collect();
+
+    assert_eq!(
+        override_reconstruction.len(),
+        xml.len(),
+        "Reconstruction with override should still match original XML length (no overlap or gap)"
+    );
+    assert_eq!(
+        override_reconstruction, xml,
+        "Reconstruction with override should exactly match original XML"
+    );
+}
+
 /// Test that fragment content is correctly extracted based on overridden boundaries
 ///
 /// This verifies the content_xml field reflects the boundary change.
