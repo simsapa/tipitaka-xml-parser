@@ -226,6 +226,16 @@ fn line_char_to_byte_pos(xml_content: &str, target_line: usize, target_char: usi
 ///
 /// Checks `CheckedFragmentOverrides` first (highest priority), then falls back
 /// to `FragmentAdjustments` if no checked override exists. Returns (end_byte_pos, end_line, end_char).
+///
+/// # Arguments
+/// * `frag_start_pos` - The start byte position of the current fragment, for validation
+///
+/// # Returns
+/// `Result<(usize, usize, usize)>` - The adjusted end position, line, and character
+///
+/// # Errors
+/// Returns an error if the overridden end position is before the fragment start position,
+/// which indicates the override is being applied to the wrong fragment (e.g., due to frag_idx shifting).
 pub fn apply_fragment_adjustment(
     xml_content: &str,
     default_end_pos: usize,
@@ -233,17 +243,27 @@ pub fn apply_fragment_adjustment(
     default_end_char: usize,
     cst_file: &str,
     frag_idx: usize,
+    frag_start_pos: usize,
     checked_overrides: Option<&CheckedFragmentOverrides>,
     adjustments: Option<&FragmentAdjustments>,
-) -> (usize, usize, usize) {
+) -> Result<(usize, usize, usize)> {
     // Use get_boundary_override which handles precedence correctly
     if let Some((end_line, end_char)) = get_boundary_override(cst_file, frag_idx, checked_overrides, adjustments) {
         let end_pos = line_char_to_byte_pos(xml_content, end_line, end_char);
-        return (end_pos, end_line, end_char);
+
+        // Validate that the override end position is not before the fragment start position
+        if end_pos < frag_start_pos {
+            return Err(anyhow::anyhow!(
+                "Invalid boundary override: end position ({}) is before fragment start position ({})\n  File: {}\n  Fragment index: {}\n  Override: end_line={}, end_char={}\n\nThis indicates the override is being applied to the wrong fragment, likely due to frag_idx shifting between parse runs. Please adjust the fragment boundary in the UI.",
+                end_pos, frag_start_pos, cst_file, frag_idx, end_line, end_char
+            ));
+        }
+
+        return Ok((end_pos, end_line, end_char));
     }
 
     // No override - use default detection
-    (default_end_pos, default_end_line, default_end_char)
+    Ok((default_end_pos, default_end_line, default_end_char))
 }
 
 /// Populate SC fields from embedded TSV mapping
@@ -385,11 +405,16 @@ pub fn get_boundary_override(
 /// * `default_end_char` - Default end character (0-indexed)
 /// * `cst_file` - The XML file name
 /// * `frag_idx` - The fragment index
+/// * `frag_start_pos` - The start byte position of the current fragment, for validation
 /// * `checked_overrides` - Optional checked fragment overrides
 /// * `adjustments` - Optional legacy fragment adjustments
 ///
 /// # Returns
-/// `(end_byte_pos, end_line, end_char)`
+/// `Result<(end_byte_pos, end_line, end_char)>`
+///
+/// # Errors
+/// Returns an error if the overridden end position is before the fragment start position,
+/// which indicates the override is being applied to the wrong fragment (e.g., due to frag_idx shifting).
 pub fn apply_boundary_override(
     xml_content: &str,
     default_end_pos: usize,
@@ -397,15 +422,25 @@ pub fn apply_boundary_override(
     default_end_char: usize,
     cst_file: &str,
     frag_idx: usize,
+    frag_start_pos: usize,
     checked_overrides: Option<&CheckedFragmentOverrides>,
     adjustments: Option<&FragmentAdjustments>,
-) -> (usize, usize, usize) {
+) -> Result<(usize, usize, usize)> {
     if let Some((end_line, end_char)) = get_boundary_override(cst_file, frag_idx, checked_overrides, adjustments) {
         let end_pos = line_char_to_byte_pos(xml_content, end_line, end_char);
-        return (end_pos, end_line, end_char);
+
+        // Validate that the override end position is not before the fragment start position
+        if end_pos < frag_start_pos {
+            return Err(anyhow::anyhow!(
+                "Invalid boundary override: end position ({}) is before fragment start position ({})\n  File: {}\n  Fragment index: {}\n  Override: end_line={}, end_char={}\n\nThis indicates the override is being applied to the wrong fragment, likely due to frag_idx shifting between parse runs. Please adjust the fragment boundary in the UI.",
+                end_pos, frag_start_pos, cst_file, frag_idx, end_line, end_char
+            ));
+        }
+
+        return Ok((end_pos, end_line, end_char));
     }
 
-    (default_end_pos, default_end_line, default_end_char)
+    Ok((default_end_pos, default_end_line, default_end_char))
 }
 
 /// Apply SC overrides from checked fragments and propagate context.
