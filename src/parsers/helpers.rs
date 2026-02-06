@@ -2,7 +2,7 @@ use anyhow::{Result, Context};
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
-use crate::types::{XmlFragment, FragmentAdjustments, FragmentKey, CheckedFragmentOverrides, ScCodeComponents};
+use crate::types::{XmlFragment, FragmentAdjustments, FragmentKey, CheckedFragmentOverrides, ScCodeComponents, ParserError};
 use crate::sutta_builder::cst_code_to_sc_code_map;
 use regex::Regex;
 
@@ -253,10 +253,12 @@ pub fn apply_fragment_adjustment(
 
         // Validate that the override end position is not before the fragment start position
         if end_pos < frag_start_pos {
-            return Err(anyhow::anyhow!(
-                "Invalid boundary override: end position ({}) is before fragment start position ({})\n  File: {}\n  Fragment index: {}\n  Override: end_line={}, end_char={}\n\nThis indicates the override is being applied to the wrong fragment, likely due to frag_idx shifting between parse runs. Please adjust the fragment boundary in the UI.",
-                end_pos, frag_start_pos, cst_file, frag_idx, end_line, end_char
-            ));
+            return Err(ParserError::InvalidBoundaryOverride {
+                details: format!(
+                    "end position ({}) is before fragment start position ({})\n  File: {}\n  Fragment index: {}\n  Override: end_line={}, end_char={}\n\nThis indicates the override is being applied to the wrong fragment, likely due to frag_idx shifting between parse runs. Please adjust the fragment boundary in the UI.",
+                    end_pos, frag_start_pos, cst_file, frag_idx, end_line, end_char
+                ),
+            }.into());
         }
 
         return Ok((end_pos, end_line, end_char));
@@ -431,10 +433,12 @@ pub fn apply_boundary_override(
 
         // Validate that the override end position is not before the fragment start position
         if end_pos < frag_start_pos {
-            return Err(anyhow::anyhow!(
-                "Invalid boundary override: end position ({}) is before fragment start position ({})\n  File: {}\n  Fragment index: {}\n  Override: end_line={}, end_char={}\n\nThis indicates the override is being applied to the wrong fragment, likely due to frag_idx shifting between parse runs. Please adjust the fragment boundary in the UI.",
-                end_pos, frag_start_pos, cst_file, frag_idx, end_line, end_char
-            ));
+            return Err(ParserError::InvalidBoundaryOverride {
+                details: format!(
+                    "end position ({}) is before fragment start position ({})\n  File: {}\n  Fragment index: {}\n  Override: end_line={}, end_char={}\n\nThis indicates the override is being applied to the wrong fragment, likely due to frag_idx shifting between parse runs. Please adjust the fragment boundary in the UI.",
+                    end_pos, frag_start_pos, cst_file, frag_idx, end_line, end_char
+                ),
+            }.into());
         }
 
         return Ok((end_pos, end_line, end_char));

@@ -11,7 +11,7 @@ use super::{
     detect_nikaya_structure,
     parse_into_fragments,
 };
-use super::types::{FragmentAdjustments, ParserOverrides, CheckedFragmentOverrides};
+use super::types::{FragmentAdjustments, ParserOverrides, CheckedFragmentOverrides, ParserError};
 
 /// Statistics for a single file import
 #[derive(Debug, Clone, Default)]
@@ -83,9 +83,9 @@ impl TipitakaImporter {
     /// 3. Compares byte-by-byte with the original XML
     /// 4. Returns an error if any mismatch is detected
     ///
-    /// If reconstruction fails, the error message will contain
-    /// "Reconstruction verification failed" which main.rs uses to detect
-    /// critical failures that should exit the program immediately.
+    /// If reconstruction fails, the error will be a typed
+    /// `ParserError::ReconstructionVerificationFailed` which main.rs uses
+    /// (via downcast) to detect critical failures that should exit immediately.
     ///
     /// # Arguments
     /// * `xml_path` - Path to the XML file to process
@@ -139,10 +139,11 @@ impl TipitakaImporter {
             let reconstructed_len = reconstructed_xml.len();
             
             if original_len != reconstructed_len {
-                return Err(anyhow::anyhow!(
-                    "Reconstruction verification failed for {}: length mismatch (original: {} bytes, reconstructed: {} bytes)",
-                    filename, original_len, reconstructed_len
-                ));
+                return Err(ParserError::ReconstructionVerificationFailed {
+                    filename: filename.clone(),
+                    details: format!("length mismatch (original: {} bytes, reconstructed: {} bytes)",
+                        original_len, reconstructed_len),
+                }.into());
             }
             
             // Find first difference
@@ -151,17 +152,18 @@ impl TipitakaImporter {
                     let context_start = idx.saturating_sub(50);
                     let context_end = (idx + 50).min(xml_content.len());
                     let context = &xml_content[context_start..context_end];
-                    return Err(anyhow::anyhow!(
-                        "Reconstruction verification failed for {} at position {}: expected '{}', got '{}'\nContext: {}",
-                        filename, idx, orig_char, recon_char, context
-                    ));
+                    return Err(ParserError::ReconstructionVerificationFailed {
+                        filename: filename.clone(),
+                        details: format!("at position {}: expected '{}', got '{}'\nContext: {}",
+                            idx, orig_char, recon_char, context),
+                    }.into());
                 }
             }
             
-            return Err(anyhow::anyhow!(
-                "Reconstruction verification failed for {}: content mismatch (details unknown)",
-                filename
-            ));
+            return Err(ParserError::ReconstructionVerificationFailed {
+                filename: filename.clone(),
+                details: "content mismatch (details unknown)".to_string(),
+            }.into());
         }
         
         logger::info(&format!("Reconstruction verified for {}", filename));
@@ -239,15 +241,25 @@ mod tests {
     }
     
     #[test]
-    fn test_reconstruction_verification_error_message() {
-        // Test that reconstruction verification errors contain the expected message
-        // We can't easily create a real reconstruction failure, but we can verify
-        // that the error message format is correct by checking the code paths
-        
-        // This test verifies the error message contains "Reconstruction verification failed"
-        // which is used by main.rs to detect reconstruction failures
-        let error_msg = "Reconstruction verification failed for test.xml: length mismatch (original: 100 bytes, reconstructed: 90 bytes)";
-        assert!(error_msg.contains("Reconstruction verification failed"),
-            "Error message should contain 'Reconstruction verification failed'");
+    fn test_reconstruction_verification_error_is_typed() {
+        // Test that reconstruction verification errors use the typed ParserError
+        // and can be identified via downcast from anyhow::Error
+        let err: anyhow::Error = ParserError::ReconstructionVerificationFailed {
+            filename: "test.xml".to_string(),
+            details: "length mismatch (original: 100 bytes, reconstructed: 90 bytes)".to_string(),
+        }.into();
+
+        // Should be dowcastable to ParserError
+        let parser_err = err.downcast_ref::<ParserError>()
+            .expect("Error should downcast to ParserError");
+
+        // Should be critical
+        assert!(parser_err.is_critical(),
+            "ReconstructionVerificationFailed should be critical");
+
+        // Display should contain structured info
+        let display = format!("{}", err);
+        assert!(display.contains("test.xml"), "Display should contain filename");
+        assert!(display.contains("length mismatch"), "Display should contain details");
     }
 }

@@ -6,6 +6,7 @@ use dotenvy::dotenv;
 use anyhow::Result;
 
 use tipitaka_xml_parser::logger;
+use tipitaka_xml_parser::types::ParserError;
 
 /// Parse Tipitaka XML files with fragment-based parser
 fn parse_tipitaka_xml(
@@ -187,12 +188,12 @@ fn parse_tipitaka_xml(
                         logger::error(&error_msg);
                         eprintln!("{}", error_msg);
                         
-                        // If this is a reconstruction failure, exit immediately
-                        // This is a critical error that indicates the fragment parser
-                        // is not correctly splitting/storing the XML content
-                        if e.to_string().contains("Reconstruction verification failed") {
-                            eprintln!("Xml reconstruction verification failed, exiting.");
-                            return Err(error_msg);
+                        // Check for critical parser errors that require immediate exit
+                        if let Some(parser_err) = e.downcast_ref::<ParserError>() {
+                            if parser_err.is_critical() {
+                                eprintln!("Critical error, exiting.\n{}", e);
+                                return Err(error_msg);
+                            }
                         }
                         
                         errors += 1;

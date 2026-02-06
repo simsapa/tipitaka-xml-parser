@@ -176,6 +176,39 @@ pub struct ScCodeComponents {
     pub sutta: Option<i32>,
 }
 
+/// Typed parser errors for critical error handling.
+///
+/// Use these variants at error origin sites and downcast from `anyhow::Error`
+/// in callers to distinguish critical errors (must exit) from non-critical ones
+/// (log and continue).
+#[derive(Debug, thiserror::Error)]
+pub enum ParserError {
+    /// Critical: fragment boundaries from DB overrides point to wrong positions.
+    /// Must exit immediately — override data is stale/corrupt.
+    #[error("Invalid boundary override: {details}")]
+    InvalidBoundaryOverride { details: String },
+
+    /// Critical: reconstructed XML from DB doesn't match original.
+    /// Must exit immediately — parser is losing data.
+    #[error("Reconstruction verification failed for {filename}: {details}")]
+    ReconstructionVerificationFailed { filename: String, details: String },
+
+    /// Non-critical: a recoverable issue for a single file.
+    /// Log the error and continue with remaining files.
+    #[error("{message}")]
+    GeneralError { message: String },
+}
+
+impl ParserError {
+    /// Returns true if the error is critical and requires immediate exit.
+    pub fn is_critical(&self) -> bool {
+        matches!(self,
+            ParserError::InvalidBoundaryOverride { .. } |
+            ParserError::ReconstructionVerificationFailed { .. }
+        )
+    }
+}
+
 use anyhow::{Context, Result};
 
 // NOTE: Should remain private to limit relying on the data. Provide public
