@@ -737,7 +737,9 @@ pub fn parse_into_fragments(
                             cst_file,
                             fragments.len(),
                             frag_start_pos,
-                            overrides.checked_overrides.as_ref(),
+                            frag_start_line,
+                            frag_start_char,
+                            overrides.correction_overrides.as_ref(),
                             overrides.adjustments.as_ref(),
                         )?;
 
@@ -815,7 +817,9 @@ pub fn parse_into_fragments(
                                             cst_file,
                                             fragments.len(),
                                             frag_start_pos,
-                                            overrides.checked_overrides.as_ref(),
+                                            frag_start_line,
+                                            frag_start_char,
+                                            overrides.correction_overrides.as_ref(),
                                             overrides.adjustments.as_ref(),
                                         )?;
                                         
@@ -906,7 +910,9 @@ pub fn parse_into_fragments(
                                                 cst_file,
                                                 fragments.len(),
                                                 frag_start_pos,
-                                                overrides.checked_overrides.as_ref(),
+                                                frag_start_line,
+                                                frag_start_char,
+                                                overrides.correction_overrides.as_ref(),
                                                 overrides.adjustments.as_ref(),
                                             )?;
                                             
@@ -1027,7 +1033,9 @@ pub fn parse_into_fragments(
                                 cst_file,
                                 fragments.len(),
                                 frag_start_pos,
-                                overrides.checked_overrides.as_ref(),
+                                frag_start_line,
+                                frag_start_char,
+                                overrides.correction_overrides.as_ref(),
                                 overrides.adjustments.as_ref(),
                             )?;
                             
@@ -1145,7 +1153,9 @@ pub fn parse_into_fragments(
                                     cst_file,
                                     fragments.len(),
                                     frag_start_pos,
-                                    overrides.checked_overrides.as_ref(),
+                                    frag_start_line,
+                                    frag_start_char,
+                                    overrides.correction_overrides.as_ref(),
                                     overrides.adjustments.as_ref(),
                                 )?;
                                 
@@ -1246,7 +1256,9 @@ pub fn parse_into_fragments(
                             cst_file,
                             fragments.len(),
                             frag_start_pos,
-                            overrides.checked_overrides.as_ref(),
+                            frag_start_line,
+                            frag_start_char,
+                            overrides.correction_overrides.as_ref(),
                             overrides.adjustments.as_ref(),
                         )?;
                         
@@ -1310,7 +1322,9 @@ pub fn parse_into_fragments(
             cst_file,
             fragments.len(),
             frag_start_pos,
-            overrides.checked_overrides.as_ref(),
+            frag_start_line,
+            frag_start_char,
+            overrides.correction_overrides.as_ref(),
             overrides.adjustments.as_ref(),
         )?;
         

@@ -11,7 +11,7 @@ use super::{
     detect_nikaya_structure,
     parse_into_fragments,
 };
-use super::types::{FragmentAdjustments, ParserOverrides, CheckedFragmentOverrides, ParserError};
+use super::types::{FragmentAdjustments, ParserOverrides, CorrectionFragmentOverrides, ParserError};
 
 /// Statistics for a single file import
 #[derive(Debug, Clone, Default)]
@@ -57,9 +57,9 @@ impl TipitakaImporter {
         self
     }
 
-    /// Set checked fragment overrides for the importer (database-based overrides)
-    pub fn with_checked_overrides(mut self, checked_overrides: CheckedFragmentOverrides) -> Self {
-        self.overrides.checked_overrides = Some(checked_overrides);
+    /// Set correction fragment overrides for the importer (database-based overrides)
+    pub fn with_correction_overrides(mut self, correction_overrides: CorrectionFragmentOverrides) -> Self {
+        self.overrides.correction_overrides = Some(correction_overrides);
         self
     }
 

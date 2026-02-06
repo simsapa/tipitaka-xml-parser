@@ -2,7 +2,7 @@ use anyhow::{Result, Context};
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
-use crate::types::{XmlFragment, FragmentAdjustments, FragmentKey, CheckedFragmentOverrides, ScCodeComponents, ParserError};
+use crate::types::{XmlFragment, FragmentAdjustments, FragmentKey, CorrectionFragmentOverrides, ScCodeComponents, ParserError};
 use crate::sutta_builder::cst_code_to_sc_code_map;
 use regex::Regex;
 
@@ -224,11 +224,16 @@ fn line_char_to_byte_pos(xml_content: &str, target_line: usize, target_char: usi
 
 /// Apply fragment adjustments to override end position
 ///
-/// Checks `CheckedFragmentOverrides` first (highest priority), then falls back
-/// to `FragmentAdjustments` if no checked override exists. Returns (end_byte_pos, end_line, end_char).
+/// Checks `CorrectionFragmentOverrides` first (highest priority), then falls back
+/// to `FragmentAdjustments` if no correction override exists. Returns (end_byte_pos, end_line, end_char).
+///
+/// For "moved" fragments (collapse=true), returns the fragment start position as the end,
+/// producing a zero-width fragment with empty content.
 ///
 /// # Arguments
 /// * `frag_start_pos` - The start byte position of the current fragment, for validation
+/// * `frag_start_line` - The start line of the current fragment (1-indexed)
+/// * `frag_start_char` - The start character of the current fragment (0-indexed)
 ///
 /// # Returns
 /// `Result<(usize, usize, usize)>` - The adjusted end position, line, and character
@@ -244,11 +249,27 @@ pub fn apply_fragment_adjustment(
     cst_file: &str,
     frag_idx: usize,
     frag_start_pos: usize,
-    checked_overrides: Option<&CheckedFragmentOverrides>,
+    frag_start_line: usize,
+    frag_start_char: usize,
+    correction_overrides: Option<&CorrectionFragmentOverrides>,
     adjustments: Option<&FragmentAdjustments>,
 ) -> Result<(usize, usize, usize)> {
-    // Use get_boundary_override which handles precedence correctly
-    if let Some((end_line, end_char)) = get_boundary_override(cst_file, frag_idx, checked_overrides, adjustments) {
+    // First: check for collapse (moved fragments)
+    if let Some(overrides) = correction_overrides {
+        let key = FragmentKey {
+            cst_file: cst_file.to_string(),
+            frag_idx,
+        };
+        if let Some(override_data) = overrides.get(&key) {
+            if override_data.collapse {
+                // Collapse: end = start (zero-width fragment)
+                return Ok((frag_start_pos, frag_start_line, frag_start_char));
+            }
+        }
+    }
+
+    // Then: check for boundary override (existing logic with precedence)
+    if let Some((end_line, end_char)) = get_boundary_override(cst_file, frag_idx, correction_overrides, adjustments) {
         let end_pos = line_char_to_byte_pos(xml_content, end_line, end_char);
 
         // Validate that the override end position is not before the fragment start position
@@ -350,13 +371,13 @@ pub fn parse_sc_code(sc_code: &str) -> Option<ScCodeComponents> {
 
 /// Get boundary override for a fragment.
 ///
-/// Checks `CheckedFragmentOverrides` first (highest priority), then falls back
-/// to `FragmentAdjustments` if no checked override exists.
+/// Checks `CorrectionFragmentOverrides` first (highest priority), then falls back
+/// to `FragmentAdjustments` if no correction override exists.
 ///
 /// # Arguments
 /// * `cst_file` - The XML file name
 /// * `frag_idx` - The fragment index
-/// * `checked_overrides` - Optional checked fragment overrides from database
+/// * `correction_overrides` - Optional correction fragment overrides from database
 /// * `adjustments` - Optional legacy fragment adjustments from TSV
 ///
 /// # Returns
@@ -364,7 +385,7 @@ pub fn parse_sc_code(sc_code: &str) -> Option<ScCodeComponents> {
 pub fn get_boundary_override(
     cst_file: &str,
     frag_idx: usize,
-    checked_overrides: Option<&CheckedFragmentOverrides>,
+    correction_overrides: Option<&CorrectionFragmentOverrides>,
     adjustments: Option<&FragmentAdjustments>,
 ) -> Option<(usize, usize)> {
     let key = FragmentKey {
@@ -372,8 +393,8 @@ pub fn get_boundary_override(
         frag_idx,
     };
 
-    // First check checked overrides (highest priority)
-    if let Some(overrides) = checked_overrides {
+    // First check correction overrides (highest priority)
+    if let Some(overrides) = correction_overrides {
         if let Some(override_data) = overrides.get(&key) {
             if let Some(end_line) = override_data.end_line {
                 let end_char = override_data.end_char.unwrap_or(0);
@@ -408,7 +429,7 @@ pub fn get_boundary_override(
 /// * `cst_file` - The XML file name
 /// * `frag_idx` - The fragment index
 /// * `frag_start_pos` - The start byte position of the current fragment, for validation
-/// * `checked_overrides` - Optional checked fragment overrides
+/// * `correction_overrides` - Optional correction fragment overrides
 /// * `adjustments` - Optional legacy fragment adjustments
 ///
 /// # Returns
@@ -425,10 +446,10 @@ pub fn apply_boundary_override(
     cst_file: &str,
     frag_idx: usize,
     frag_start_pos: usize,
-    checked_overrides: Option<&CheckedFragmentOverrides>,
+    correction_overrides: Option<&CorrectionFragmentOverrides>,
     adjustments: Option<&FragmentAdjustments>,
 ) -> Result<(usize, usize, usize)> {
-    if let Some((end_line, end_char)) = get_boundary_override(cst_file, frag_idx, checked_overrides, adjustments) {
+    if let Some((end_line, end_char)) = get_boundary_override(cst_file, frag_idx, correction_overrides, adjustments) {
         let end_pos = line_char_to_byte_pos(xml_content, end_line, end_char);
 
         // Validate that the override end position is not before the fragment start position
@@ -447,9 +468,9 @@ pub fn apply_boundary_override(
     Ok((default_end_pos, default_end_line, default_end_char))
 }
 
-/// Apply SC overrides from checked fragments and propagate context.
+/// Apply SC overrides from correction fragments and propagate context.
 ///
-/// For each checked fragment override with SC fields:
+/// For each correction fragment override with SC fields:
 /// 1. Apply the SC override directly to that fragment
 /// 2. Parse the SC code to extract context (samyutta/nipata number)
 /// 3. Propagate context to subsequent fragments with null sc_code
@@ -457,11 +478,11 @@ pub fn apply_boundary_override(
 ///
 /// # Arguments
 /// * `fragments` - Mutable vector of fragments
-/// * `checked_overrides` - Checked fragment overrides from database
+/// * `correction_overrides` - Correction fragment overrides from database
 /// * `cst_file` - The XML file name (for key lookup)
 pub fn apply_sc_overrides(
     fragments: &mut Vec<XmlFragment>,
-    checked_overrides: &CheckedFragmentOverrides,
+    correction_overrides: &CorrectionFragmentOverrides,
     cst_file: &str,
 ) {
     // Collect direct overrides and parseable overrides for propagation
@@ -474,7 +495,7 @@ pub fn apply_sc_overrides(
             frag_idx: fragment.frag_idx,
         };
 
-        if let Some(override_data) = checked_overrides.get(&key) {
+        if let Some(override_data) = correction_overrides.get(&key) {
             if let Some(ref sc_code) = override_data.sc_code {
                 // Always apply the sc_code directly
                 direct_overrides.push((idx, sc_code.clone(), override_data.sc_sutta.clone()));
@@ -749,14 +770,15 @@ mod tests {
     }
 
     #[test]
-    fn test_get_boundary_override_checked_takes_precedence() {
-        use crate::types::{CheckedFragmentOverride, FragmentAdjustment};
+    fn test_get_boundary_override_correction_takes_precedence() {
+        use crate::types::{CorrectionFragmentOverride, FragmentAdjustment};
         use std::collections::HashMap;
 
-        let mut checked = HashMap::new();
-        checked.insert(
+        let mut corrections = HashMap::new();
+        corrections.insert(
             FragmentKey { cst_file: "test.xml".to_string(), frag_idx: 0 },
-            CheckedFragmentOverride {
+            CorrectionFragmentOverride {
+                collapse: false,
                 end_line: Some(100),
                 end_char: Some(50),
                 sc_code: None,
@@ -775,12 +797,12 @@ mod tests {
             }
         );
 
-        // Checked override should take precedence
-        let result = get_boundary_override("test.xml", 0, Some(&checked), Some(&adjustments));
+        // Correction override should take precedence
+        let result = get_boundary_override("test.xml", 0, Some(&corrections), Some(&adjustments));
         assert_eq!(result, Some((100, 50)));
 
-        // Without checked override, should fall back to adjustments
-        let result = get_boundary_override("test.xml", 1, Some(&checked), Some(&adjustments));
+        // Without correction override, should fall back to adjustments
+        let result = get_boundary_override("test.xml", 1, Some(&corrections), Some(&adjustments));
         assert_eq!(result, None); // No override for frag_idx 1
     }
 

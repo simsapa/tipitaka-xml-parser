@@ -22,7 +22,7 @@ fn parse_tipitaka_xml(
         load_fragment_adjustments,
     };
     use tipitaka_xml_parser::types::ParserOverrides;
-    use tipitaka_xml_parser::fragment_exporter::extract_all_checked_overrides;
+    use tipitaka_xml_parser::fragment_exporter::extract_all_correction_overrides;
     use std::fs;
 
     // Load fragment adjustments from embedded TSV
@@ -36,20 +36,20 @@ fn parse_tipitaka_xml(
         }
     };
 
-    // Extract checked overrides from reference database if provided
-    let checked_overrides = if let Some(ref_db_path) = reference_fragments_db {
-        match extract_all_checked_overrides(ref_db_path) {
+    // Extract correction overrides from reference database if provided
+    let correction_overrides = if let Some(ref_db_path) = reference_fragments_db {
+        match extract_all_correction_overrides(ref_db_path) {
             Ok(overrides) => {
                 if !overrides.is_empty() {
-                    logger::info(&format!("Loaded {} checked overrides from reference database", overrides.len()));
-                    println!("Loaded {} checked overrides from reference database", overrides.len());
+                    logger::info(&format!("Loaded {} correction overrides from reference database", overrides.len()));
+                    println!("Loaded {} correction overrides from reference database", overrides.len());
                 }
                 Some(overrides)
             }
             Err(e) => {
                 // Not a critical error - continue without overrides
-                logger::warn(&format!("Failed to load checked overrides from reference: {}", e));
-                eprintln!("Warning: Failed to load checked overrides from reference: {}", e);
+                logger::warn(&format!("Failed to load correction overrides from reference: {}", e));
+                eprintln!("Warning: Failed to load correction overrides from reference: {}", e);
                 None
             }
         }
@@ -57,10 +57,10 @@ fn parse_tipitaka_xml(
         None
     };
 
-    // Build ParserOverrides combining adjustments and checked overrides
+    // Build ParserOverrides combining adjustments and correction overrides
     let overrides = ParserOverrides {
         adjustments,
-        checked_overrides,
+        correction_overrides,
     };
 
     // Collect XML files to process

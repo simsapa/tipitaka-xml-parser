@@ -1083,7 +1083,7 @@ fn reparse_file(
     use crate::encoding::read_xml_file;
     use crate::nikaya_detector::detect_nikaya_structure;
     use crate::xml_parser::parse_into_fragments;
-    use crate::fragment_exporter::{export_fragments_to_db, extract_checked_overrides, restore_frag_review_status};
+    use crate::fragment_exporter::{export_fragments_to_db, extract_correction_overrides, restore_frag_review_status};
     use crate::types::{load_fragment_adjustments, ParserOverrides};
 
     let cst_file = &request.cst_file;
@@ -1157,21 +1157,21 @@ fn reparse_file(
         output.push_str(&format!("  Found {} existing fragments\n\n", file_exists));
     }
 
-    // Step 2: Extract checked overrides and frag_review status from current DB
-    output.push_str("Step 2: Extracting checked overrides from current database...\n");
+    // Step 2: Extract correction overrides and frag_review status from current DB
+    output.push_str("Step 2: Extracting correction overrides from current database...\n");
     let db_path = Path::new(&settings.db_path);
-    let (checked_overrides, review_status) = match extract_checked_overrides(db_path, cst_file) {
+    let (correction_overrides, review_status) = match extract_correction_overrides(db_path, cst_file) {
         Ok(result) => result,
         Err(e) => {
             return Json(ReparseFileResponse {
                 success: false,
-                output: format!("{}ERROR: Failed to extract checked overrides: {}", output, e),
+                output: format!("{}ERROR: Failed to extract correction overrides: {}", output, e),
                 fragments_count: 0,
                 review_status_restored: 0,
             });
         }
     };
-    output.push_str(&format!("  Extracted {} checked overrides\n", checked_overrides.len()));
+    output.push_str(&format!("  Extracted {} correction overrides\n", correction_overrides.len()));
     output.push_str(&format!("  Extracted {} frag_review statuses to restore\n\n", review_status.len()));
 
     // Step 3: Load FragmentAdjustments from embedded TSV
@@ -1191,7 +1191,7 @@ fn reparse_file(
     output.push_str("Step 4: Constructing parser overrides...\n");
     let overrides = ParserOverrides {
         adjustments,
-        checked_overrides: if checked_overrides.is_empty() { None } else { Some(checked_overrides) },
+        correction_overrides: if correction_overrides.is_empty() { None } else { Some(correction_overrides) },
     };
     output.push_str("  ParserOverrides constructed\n\n");
 

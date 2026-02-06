@@ -106,23 +106,29 @@ pub struct FragmentKey {
 /// Container for fragment adjustments loaded from TSV
 pub type FragmentAdjustments = HashMap<FragmentKey, FragmentAdjustment>;
 
-/// Override data from a checked fragment in the database.
+/// Override data from a corrected fragment in the database.
 ///
 /// This type supersedes `FragmentAdjustment` by including SC field overrides
-/// in addition to boundary overrides. When a user marks a fragment as "checked"
-/// and corrects its `sc_code` or `sc_sutta`, those values can be used as overrides
-/// during parsing to help the parser through problematic areas.
+/// in addition to boundary overrides. Covers both "checked" fragments (with
+/// user-verified corrections) and "moved" fragments (collapsed to zero-width).
 ///
 /// During parsing:
+/// - If `collapse` is true, the fragment is made zero-width (end = start)
 /// - Boundary overrides (`end_line`, `end_char`) are applied during fragment finalization
+///   (ignored when `collapse` is true)
 /// - SC field overrides (`sc_code`, `sc_sutta`) are applied in post-processing
 ///
-/// `CheckedFragmentOverrides` take precedence over `FragmentAdjustments`.
+/// `CorrectionFragmentOverrides` take precedence over `FragmentAdjustments`.
 #[derive(Debug, Clone, Default)]
-pub struct CheckedFragmentOverride {
+pub struct CorrectionFragmentOverride {
+    /// If true, collapse this fragment to zero-width (for "moved" fragments).
+    /// The parser will set end = start, producing an empty fragment.
+    pub collapse: bool,
     /// Override end line (1-indexed). Applied during fragment finalization.
+    /// Ignored when `collapse` is true.
     pub end_line: Option<usize>,
     /// Override end character position (0-indexed). Applied during fragment finalization.
+    /// Ignored when `collapse` is true.
     pub end_char: Option<usize>,
     /// Override SC reference code (e.g., "sn5.1"). Applied in post-processing.
     pub sc_code: Option<String>,
@@ -130,28 +136,28 @@ pub struct CheckedFragmentOverride {
     pub sc_sutta: Option<String>,
 }
 
-/// Container for checked fragment overrides extracted from the database.
+/// Container for correction fragment overrides extracted from the database.
 /// Key is `(cst_file, frag_idx)` matching the `FragmentKey` type.
-pub type CheckedFragmentOverrides = HashMap<FragmentKey, CheckedFragmentOverride>;
+pub type CorrectionFragmentOverrides = HashMap<FragmentKey, CorrectionFragmentOverride>;
 
 /// Combined override configuration for parsing.
 ///
 /// This struct bundles all override types to simplify function signatures.
 /// During parsing, overrides are applied in this priority order:
-/// 1. `checked_overrides` - User-verified corrections from the database (highest priority)
+/// 1. `correction_overrides` - User corrections from the database (highest priority)
 /// 2. `adjustments` - Legacy TSV-based boundary adjustments (fallback)
 ///
 /// When both exist for the same `(cst_file, frag_idx)`:
-/// - Check `checked_overrides` first; if found, use it
-/// - Only fall back to `adjustments` if no checked override exists
+/// - Check `correction_overrides` first; if found, use it
+/// - Only fall back to `adjustments` if no correction override exists
 #[derive(Debug, Clone, Default)]
 pub struct ParserOverrides {
     /// Legacy fragment adjustments loaded from embedded TSV.
     /// Contains boundary overrides (`end_line`, `end_char`) only.
     pub adjustments: Option<FragmentAdjustments>,
-    /// Checked fragment overrides extracted from the database.
-    /// Contains both boundary and SC field overrides.
-    pub checked_overrides: Option<CheckedFragmentOverrides>,
+    /// Correction fragment overrides extracted from the database.
+    /// Contains both boundary and SC field overrides, plus collapse flag for moved fragments.
+    pub correction_overrides: Option<CorrectionFragmentOverrides>,
 }
 
 /// Parsed components from an SC code for context propagation.

@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use tipitaka_xml_parser::fragment_exporter::{
-    export_fragments_to_db, extract_checked_overrides, restore_frag_review_status,
+    export_fragments_to_db, extract_correction_overrides, restore_frag_review_status,
 };
 use tipitaka_xml_parser::nikaya_detector::detect_nikaya_structure;
 use tipitaka_xml_parser::parse_into_fragments;
@@ -69,7 +69,7 @@ fn test_reparse_idempotent() {
 
 /// Test that reparse preserves checked fragment overrides
 #[test]
-fn test_reparse_preserves_checked_overrides() {
+fn test_reparse_preserves_correction_overrides() {
     use diesel::prelude::*;
     use diesel::sqlite::SqliteConnection;
     use tipitaka_xml_parser::fragments_schema::xml_fragments;
@@ -114,15 +114,15 @@ fn test_reparse_preserves_checked_overrides() {
     .unwrap();
 
     // Extract checked overrides
-    let (checked_overrides, review_status) =
-        extract_checked_overrides(db_path, cst_file).unwrap();
+    let (correction_overrides, review_status) =
+        extract_correction_overrides(db_path, cst_file).unwrap();
 
-    assert!(!checked_overrides.is_empty(), "Should have checked overrides");
+    assert!(!correction_overrides.is_empty(), "Should have checked overrides");
 
     // Re-parse with checked overrides
     let overrides = ParserOverrides {
         adjustments: None,
-        checked_overrides: Some(checked_overrides),
+        correction_overrides: Some(correction_overrides),
     };
 
     let reparsed_fragments =
@@ -227,8 +227,8 @@ fn test_reparse_restores_all_review_statuses() {
     .unwrap();
 
     // Extract checked overrides (should get all 3)
-    let (checked_overrides, review_status) =
-        extract_checked_overrides(db_path, cst_file).unwrap();
+    let (correction_overrides, review_status) =
+        extract_correction_overrides(db_path, cst_file).unwrap();
 
     assert_eq!(review_status.len(), 3, "Should have 3 review statuses");
     assert_eq!(
@@ -247,7 +247,7 @@ fn test_reparse_restores_all_review_statuses() {
     // Re-parse and export
     let overrides = ParserOverrides {
         adjustments: None,
-        checked_overrides: Some(checked_overrides),
+        correction_overrides: Some(correction_overrides),
     };
 
     let reparsed_fragments =

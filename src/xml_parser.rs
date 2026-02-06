@@ -106,12 +106,12 @@ pub fn parse_into_fragments(
         populate_sc_fields,
     )?;
 
-    // Apply SC overrides from CheckedFragmentOverrides (post-processing)
+    // Apply SC overrides from CorrectionFragmentOverrides (post-processing)
     // This applies sc_code and sc_sutta overrides directly to fragments
     // and propagates context to subsequent null fragments
-    if let Some(ref checked_overrides) = overrides.checked_overrides {
-        if !checked_overrides.is_empty() {
-            crate::parsers::helpers::apply_sc_overrides(&mut fragments, checked_overrides, cst_file);
+    if let Some(ref correction_overrides) = overrides.correction_overrides {
+        if !correction_overrides.is_empty() {
+            crate::parsers::helpers::apply_sc_overrides(&mut fragments, correction_overrides, cst_file);
         }
     }
 

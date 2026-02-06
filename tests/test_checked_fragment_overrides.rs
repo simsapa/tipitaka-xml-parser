@@ -1,18 +1,18 @@
-//! Integration tests for CheckedFragmentOverrides
+//! Integration tests for CorrectionFragmentOverrides
 //!
-//! Tests that CheckedFragmentOverrides take precedence over FragmentAdjustments
+//! Tests that CorrectionFragmentOverrides take precedence over FragmentAdjustments
 //! and that SC code parsing and propagation work correctly.
 
 use tipitaka_xml_parser::nikaya_detector::detect_nikaya_structure;
 use tipitaka_xml_parser::parse_into_fragments;
 use tipitaka_xml_parser::types::{
-    CheckedFragmentOverride, CheckedFragmentOverrides, FragmentAdjustment, FragmentAdjustments,
+    CorrectionFragmentOverride, CorrectionFragmentOverrides, FragmentAdjustment, FragmentAdjustments,
     FragmentKey, FragmentType, ParserOverrides,
 };
 
-/// Test that CheckedFragmentOverrides take precedence over FragmentAdjustments
+/// Test that CorrectionFragmentOverrides take precedence over FragmentAdjustments
 #[test]
-fn test_checked_overrides_precedence() {
+fn test_correction_overrides_precedence() {
     // Create a simple XML sample
     let xml = r#"<?xml version="1.0"?>
 <TEI.2>
@@ -45,14 +45,15 @@ fn test_checked_overrides_precedence() {
         .expect("Should find a Sutta fragment");
 
     // Now parse with a checked override for sc_code
-    let mut checked_overrides = CheckedFragmentOverrides::new();
+    let mut correction_overrides = CorrectionFragmentOverrides::new();
     let key = FragmentKey {
         cst_file: "test.xml".to_string(),
         frag_idx: sutta_frag.frag_idx,
     };
-    checked_overrides.insert(
+    correction_overrides.insert(
         key,
-        CheckedFragmentOverride {
+        CorrectionFragmentOverride {
+            collapse: false,
             end_line: None,
             end_char: None,
             sc_code: Some("dn1.override".to_string()),
@@ -62,7 +63,7 @@ fn test_checked_overrides_precedence() {
 
     let overrides = ParserOverrides {
         adjustments: None,
-        checked_overrides: Some(checked_overrides),
+        correction_overrides: Some(correction_overrides),
     };
 
     let fragments_with_override =
@@ -123,10 +124,10 @@ fn test_sc_code_parsing() {
 
 /// Test that database extraction functions work correctly
 #[test]
-fn test_extract_checked_overrides() {
+fn test_extract_correction_overrides() {
     use tempfile::NamedTempFile;
     use tipitaka_xml_parser::fragment_exporter::{
-        export_fragments_to_db, extract_checked_overrides, restore_frag_review_status,
+        export_fragments_to_db, extract_correction_overrides, restore_frag_review_status,
     };
 
     // Create test XML
@@ -178,7 +179,7 @@ fn test_extract_checked_overrides() {
     .unwrap();
 
     // Now extract checked overrides
-    let (overrides, review_status) = extract_checked_overrides(db_path, "test.xml").unwrap();
+    let (overrides, review_status) = extract_correction_overrides(db_path, "test.xml").unwrap();
 
     assert_eq!(overrides.len(), 1, "Should have 1 checked override");
     assert_eq!(
@@ -278,14 +279,15 @@ fn test_boundary_override_from_checked_fragment() {
     );
     let override_end_line = original_end_line - 1; // One line before the end
 
-    let mut checked_overrides = CheckedFragmentOverrides::new();
+    let mut correction_overrides = CorrectionFragmentOverrides::new();
     let key = FragmentKey {
         cst_file: "test.xml".to_string(),
         frag_idx: sutta_frag.frag_idx,
     };
-    checked_overrides.insert(
+    correction_overrides.insert(
         key,
-        CheckedFragmentOverride {
+        CorrectionFragmentOverride {
+            collapse: false,
             end_line: Some(override_end_line),
             end_char: Some(0),
             sc_code: None,
@@ -295,7 +297,7 @@ fn test_boundary_override_from_checked_fragment() {
 
     let overrides = ParserOverrides {
         adjustments: None,
-        checked_overrides: Some(checked_overrides),
+        correction_overrides: Some(correction_overrides),
     };
 
     let fragments_with_override =
@@ -326,7 +328,7 @@ fn test_boundary_override_from_checked_fragment() {
 
 /// Test that checked boundary overrides take precedence over TSV adjustments
 ///
-/// When both CheckedFragmentOverrides and FragmentAdjustments have boundary values
+/// When both CorrectionFragmentOverrides and FragmentAdjustments have boundary values
 /// for the same fragment, the checked override should win.
 #[test]
 fn test_boundary_override_precedence() {
@@ -392,11 +394,12 @@ fn test_boundary_override_precedence() {
         },
     );
 
-    // Create CheckedFragmentOverrides
-    let mut checked_overrides = CheckedFragmentOverrides::new();
-    checked_overrides.insert(
+    // Create CorrectionFragmentOverrides
+    let mut correction_overrides = CorrectionFragmentOverrides::new();
+    correction_overrides.insert(
         key,
-        CheckedFragmentOverride {
+        CorrectionFragmentOverride {
+            collapse: false,
             end_line: Some(checked_end_line),
             end_char: Some(0),
             sc_code: None,
@@ -406,7 +409,7 @@ fn test_boundary_override_precedence() {
 
     let overrides = ParserOverrides {
         adjustments: Some(adjustments),
-        checked_overrides: Some(checked_overrides),
+        correction_overrides: Some(correction_overrides),
     };
 
     let fragments_with_both =
@@ -490,14 +493,15 @@ fn test_header_fragment_boundary_continuity_with_override() {
     let extended_end_line = header_frag.end_line + 1;
     let extended_end_char = 0;
 
-    let mut checked_overrides = CheckedFragmentOverrides::new();
+    let mut correction_overrides = CorrectionFragmentOverrides::new();
     let key = FragmentKey {
         cst_file: "test.xml".to_string(),
         frag_idx: header_frag.frag_idx,
     };
-    checked_overrides.insert(
+    correction_overrides.insert(
         key,
-        CheckedFragmentOverride {
+        CorrectionFragmentOverride {
+            collapse: false,
             end_line: Some(extended_end_line),
             end_char: Some(extended_end_char),
             sc_code: None,
@@ -507,7 +511,7 @@ fn test_header_fragment_boundary_continuity_with_override() {
 
     let overrides = ParserOverrides {
         adjustments: None,
-        checked_overrides: Some(checked_overrides),
+        correction_overrides: Some(correction_overrides),
     };
 
     let fragments_with_override =
@@ -614,14 +618,15 @@ fn test_boundary_override_content_extraction() {
         .expect("Should find BBBB line");
 
     // Create override with boundary that cuts off before BBBB
-    let mut checked_overrides = CheckedFragmentOverrides::new();
+    let mut correction_overrides = CorrectionFragmentOverrides::new();
     let key = FragmentKey {
         cst_file: "test.xml".to_string(),
         frag_idx: sutta_frag.frag_idx,
     };
-    checked_overrides.insert(
+    correction_overrides.insert(
         key,
-        CheckedFragmentOverride {
+        CorrectionFragmentOverride {
+            collapse: false,
             end_line: Some(bbbb_line),
             end_char: Some(0), // At start of BBBB line
             sc_code: None,
@@ -631,7 +636,7 @@ fn test_boundary_override_content_extraction() {
 
     let overrides = ParserOverrides {
         adjustments: None,
-        checked_overrides: Some(checked_overrides),
+        correction_overrides: Some(correction_overrides),
     };
 
     let fragments_with_override =

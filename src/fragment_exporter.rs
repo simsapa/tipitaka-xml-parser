@@ -9,7 +9,7 @@ use diesel::sqlite::SqliteConnection;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use std::path::Path;
 
-use crate::types::{XmlFragment, CheckedFragmentOverride, CheckedFragmentOverrides, FragmentKey};
+use crate::types::{XmlFragment, CorrectionFragmentOverride, CorrectionFragmentOverrides, FragmentKey};
 use std::collections::HashMap;
 use crate::nikaya_structure::NikayaStructure;
 use crate::fragments_models::{NewNikayaStructure, NewXmlFragment};
@@ -206,11 +206,14 @@ pub fn validate_fragments_db(db_path: &Path) -> Result<ValidationStats> {
     })
 }
 
-/// Extract checked fragment overrides and frag_review status from the database.
+/// Extract correction fragment overrides and frag_review status from the database.
 ///
 /// Queries fragments where `frag_review` is not null, empty, or 'unchecked' for the given file.
 /// Returns both the overrides (for use during parsing) and the frag_review status map
 /// (for restoration after parsing).
+///
+/// "Moved" fragments get `collapse: true` with no boundary/SC overrides.
+/// Other reviewed fragments get their boundary and SC values as overrides.
 ///
 /// # Arguments
 /// * `db_path` - Path to the fragments database
@@ -218,17 +221,17 @@ pub fn validate_fragments_db(db_path: &Path) -> Result<ValidationStats> {
 ///
 /// # Returns
 /// Tuple of:
-/// - `CheckedFragmentOverrides` - HashMap of overrides keyed by (cst_file, frag_idx)
+/// - `CorrectionFragmentOverrides` - HashMap of overrides keyed by (cst_file, frag_idx)
 /// - `HashMap<usize, String>` - Map of frag_idx to frag_review status for restoration
-pub fn extract_checked_overrides(
+pub fn extract_correction_overrides(
     db_path: &Path,
     cst_file: &str,
-) -> Result<(CheckedFragmentOverrides, HashMap<usize, String>)> {
+) -> Result<(CorrectionFragmentOverrides, HashMap<usize, String>)> {
     let mut conn = SqliteConnection::establish(db_path.to_str().unwrap())
         .context("Failed to connect to fragments database")?;
 
     #[derive(QueryableByName)]
-    struct CheckedFragmentRow {
+    struct CorrectionFragmentRow {
         #[diesel(sql_type = diesel::sql_types::Integer)]
         frag_idx: i32,
         #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
@@ -245,7 +248,7 @@ pub fn extract_checked_overrides(
 
     // Query fragments with frag_review status that indicates they've been reviewed
     // Excludes: NULL, empty string, and 'unchecked'
-    let rows: Vec<CheckedFragmentRow> = diesel::sql_query(
+    let rows: Vec<CorrectionFragmentRow> = diesel::sql_query(
         "SELECT frag_idx, end_line, end_char, sc_code, sc_sutta, frag_review
          FROM xml_fragments
          WHERE cst_file = ?
@@ -255,20 +258,33 @@ pub fn extract_checked_overrides(
     )
     .bind::<diesel::sql_types::Text, _>(cst_file)
     .load(&mut conn)
-    .context("Failed to query checked fragments")?;
+    .context("Failed to query correction fragments")?;
 
-    let mut overrides = CheckedFragmentOverrides::new();
+    let mut overrides = CorrectionFragmentOverrides::new();
     let mut review_status = HashMap::new();
 
     for row in rows {
         let frag_idx = row.frag_idx as usize;
+        let frag_review = row.frag_review.as_deref().unwrap_or("");
 
-        // Build the override
-        let override_data = CheckedFragmentOverride {
-            end_line: row.end_line.map(|v| v as usize),
-            end_char: row.end_char.map(|v| v as usize),
-            sc_code: row.sc_code,
-            sc_sutta: row.sc_sutta,
+        // Build the override based on frag_review status
+        let override_data = match frag_review {
+            "moved" => CorrectionFragmentOverride {
+                collapse: true,
+                // Don't use stale boundary values from moved fragments
+                end_line: None,
+                end_char: None,
+                // Moved fragments have no SC data
+                sc_code: None,
+                sc_sutta: None,
+            },
+            _ => CorrectionFragmentOverride {
+                collapse: false,
+                end_line: row.end_line.map(|v| v as usize),
+                end_char: row.end_char.map(|v| v as usize),
+                sc_code: row.sc_code,
+                sc_sutta: row.sc_sutta,
+            },
         };
 
         let key = FragmentKey {
@@ -287,24 +303,24 @@ pub fn extract_checked_overrides(
     Ok((overrides, review_status))
 }
 
-/// Extract checked fragment overrides from the database for all files.
+/// Extract correction fragment overrides from the database for all files.
 ///
-/// This variant queries ALL checked fragments across all files, used during
-/// full database regeneration.
+/// This variant queries ALL corrected fragments across all files, used during
+/// full database regeneration. "Moved" fragments get `collapse: true`.
 ///
 /// # Arguments
 /// * `db_path` - Path to the fragments database
 ///
 /// # Returns
-/// `CheckedFragmentOverrides` - HashMap of overrides keyed by (cst_file, frag_idx)
-pub fn extract_all_checked_overrides(
+/// `CorrectionFragmentOverrides` - HashMap of overrides keyed by (cst_file, frag_idx)
+pub fn extract_all_correction_overrides(
     db_path: &Path,
-) -> Result<CheckedFragmentOverrides> {
+) -> Result<CorrectionFragmentOverrides> {
     let mut conn = SqliteConnection::establish(db_path.to_str().unwrap())
         .context("Failed to connect to fragments database")?;
 
     #[derive(QueryableByName)]
-    struct CheckedFragmentRow {
+    struct CorrectionFragmentRow {
         #[diesel(sql_type = diesel::sql_types::Text)]
         cst_file: String,
         #[diesel(sql_type = diesel::sql_types::Integer)]
@@ -317,27 +333,41 @@ pub fn extract_all_checked_overrides(
         sc_code: Option<String>,
         #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
         sc_sutta: Option<String>,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+        frag_review: Option<String>,
     }
 
     // Query ALL fragments with reviewed status across all files
-    let rows: Vec<CheckedFragmentRow> = diesel::sql_query(
-        "SELECT cst_file, frag_idx, end_line, end_char, sc_code, sc_sutta
+    let rows: Vec<CorrectionFragmentRow> = diesel::sql_query(
+        "SELECT cst_file, frag_idx, end_line, end_char, sc_code, sc_sutta, frag_review
          FROM xml_fragments
          WHERE frag_review IS NOT NULL
            AND frag_review != ''
            AND frag_review != 'unchecked'"
     )
     .load(&mut conn)
-    .context("Failed to query all checked fragments")?;
+    .context("Failed to query all correction fragments")?;
 
-    let mut overrides = CheckedFragmentOverrides::new();
+    let mut overrides = CorrectionFragmentOverrides::new();
 
     for row in rows {
-        let override_data = CheckedFragmentOverride {
-            end_line: row.end_line.map(|v| v as usize),
-            end_char: row.end_char.map(|v| v as usize),
-            sc_code: row.sc_code,
-            sc_sutta: row.sc_sutta,
+        let frag_review = row.frag_review.as_deref().unwrap_or("");
+
+        let override_data = match frag_review {
+            "moved" => CorrectionFragmentOverride {
+                collapse: true,
+                end_line: None,
+                end_char: None,
+                sc_code: None,
+                sc_sutta: None,
+            },
+            _ => CorrectionFragmentOverride {
+                collapse: false,
+                end_line: row.end_line.map(|v| v as usize),
+                end_char: row.end_char.map(|v| v as usize),
+                sc_code: row.sc_code,
+                sc_sutta: row.sc_sutta,
+            },
         };
 
         let key = FragmentKey {
@@ -737,7 +767,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_checked_overrides() {
+    fn test_extract_correction_overrides() {
         let temp_db = NamedTempFile::new().unwrap();
         let db_path = temp_db.path();
 
@@ -834,17 +864,20 @@ mod tests {
         export_fragments_to_db(&fragments, &structure, db_path).unwrap();
 
         // Extract checked overrides
-        let (overrides, review_status) = super::extract_checked_overrides(db_path, "s0301m.mul.xml").unwrap();
+        let (overrides, review_status) = super::extract_correction_overrides(db_path, "s0301m.mul.xml").unwrap();
 
         // Should have 2 overrides (checked and in-progress, not unchecked or None)
-        assert_eq!(overrides.len(), 2, "Should extract 2 checked overrides");
+        assert_eq!(overrides.len(), 2, "Should extract 2 correction overrides");
         assert_eq!(review_status.len(), 2, "Should have 2 review statuses");
 
-        // Check the checked fragment override
+        // Verify collapse is false for non-moved fragments
         let key_162 = crate::types::FragmentKey {
             cst_file: "s0301m.mul.xml".to_string(),
             frag_idx: 162,
         };
+        assert!(!overrides.get(&key_162).unwrap().collapse, "Checked fragment should not be collapsed");
+
+        // Check the checked fragment override
         let override_162 = overrides.get(&key_162).expect("Should have override for frag_idx 162");
         assert_eq!(override_162.sc_code, Some("sn5.1".to_string()));
         assert_eq!(override_162.sc_sutta, Some("Āḷavikāsutta".to_string()));
@@ -952,7 +985,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_all_checked_overrides() {
+    fn test_extract_all_correction_overrides() {
         let temp_db = NamedTempFile::new().unwrap();
         let db_path = temp_db.path();
 
@@ -1030,7 +1063,7 @@ mod tests {
         export_fragments_to_db(&fragments2, &structure, db_path).unwrap();
 
         // Extract all checked overrides
-        let overrides = super::extract_all_checked_overrides(db_path).unwrap();
+        let overrides = super::extract_all_correction_overrides(db_path).unwrap();
 
         // Should have 2 overrides (one from each file, not the unchecked one)
         assert_eq!(overrides.len(), 2, "Should extract 2 checked overrides from all files");
