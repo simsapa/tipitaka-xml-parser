@@ -225,10 +225,14 @@ fn line_char_to_byte_pos(xml_content: &str, target_line: usize, target_char: usi
 /// Apply fragment adjustments to override end position
 ///
 /// Checks `CorrectionFragmentOverrides` first (highest priority), then falls back
-/// to `FragmentAdjustments` if no correction override exists. Returns (end_byte_pos, end_line, end_char).
+/// to `FragmentAdjustments` if no correction override exists.
+///
+/// Returns `(end_byte_pos, end_line, end_char, collapsed)`.
 ///
 /// For "moved" fragments (collapse=true), returns the fragment start position as the end,
-/// producing a zero-width fragment with empty content.
+/// producing a zero-width fragment with empty content. The `collapsed` flag is set to `true`
+/// so callers know to push the fragment even though its content is empty — this keeps
+/// `frag_idx` (derived from `fragments.len()`) in sync with the correction overrides.
 ///
 /// # Arguments
 /// * `frag_start_pos` - The start byte position of the current fragment, for validation
@@ -236,7 +240,7 @@ fn line_char_to_byte_pos(xml_content: &str, target_line: usize, target_char: usi
 /// * `frag_start_char` - The start character of the current fragment (0-indexed)
 ///
 /// # Returns
-/// `Result<(usize, usize, usize)>` - The adjusted end position, line, and character
+/// `Result<(usize, usize, usize, bool)>` - The adjusted (end_pos, end_line, end_char, collapsed)
 ///
 /// # Errors
 /// Returns an error if the overridden end position is before the fragment start position,
@@ -253,7 +257,7 @@ pub fn apply_fragment_adjustment(
     frag_start_char: usize,
     correction_overrides: Option<&CorrectionFragmentOverrides>,
     adjustments: Option<&FragmentAdjustments>,
-) -> Result<(usize, usize, usize)> {
+) -> Result<(usize, usize, usize, bool)> {
     // First: check for collapse (moved fragments)
     if let Some(overrides) = correction_overrides {
         let key = FragmentKey {
@@ -263,7 +267,7 @@ pub fn apply_fragment_adjustment(
         if let Some(override_data) = overrides.get(&key) {
             if override_data.collapse {
                 // Collapse: end = start (zero-width fragment)
-                return Ok((frag_start_pos, frag_start_line, frag_start_char));
+                return Ok((frag_start_pos, frag_start_line, frag_start_char, true));
             }
         }
     }
@@ -282,11 +286,11 @@ pub fn apply_fragment_adjustment(
             }.into());
         }
 
-        return Ok((end_pos, end_line, end_char));
+        return Ok((end_pos, end_line, end_char, false));
     }
 
     // No override - use default detection
-    Ok((default_end_pos, default_end_line, default_end_char))
+    Ok((default_end_pos, default_end_line, default_end_char, false))
 }
 
 /// Populate SC fields from embedded TSV mapping

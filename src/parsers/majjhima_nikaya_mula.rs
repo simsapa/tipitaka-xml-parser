@@ -729,7 +729,7 @@ pub fn parse_into_fragments(
                         (current_fragment_start, current_frag_type.as_ref()) {
 
                         // Apply adjustments if any
-                        let (end_pos, end_line, end_char) = apply_fragment_adjustment(
+                        let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                             xml_content,
                             current_pos,
                             current_line,
@@ -749,7 +749,7 @@ pub fn parse_into_fragments(
                         next_frag_start_char = end_char;
 
                         let content_xml = xml_content[frag_start_pos..end_pos].to_string();
-                        if !content_xml.trim().is_empty() {
+                        if collapsed || !content_xml.trim().is_empty() {
                             fragments.push(XmlFragment {
                                 nikaya: nikaya_structure.nikaya.clone(),
                                 frag_type: frag_type.clone(),
@@ -809,7 +809,7 @@ pub fn parse_into_fragments(
                                     
                                         if has_sutta_content {
                                             // Close at the current position (before the new vagga/sutta div)
-                                            let (end_pos, end_line, end_char) = apply_fragment_adjustment(
+                                            let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                                                 xml_content,
                                                 event_start_pos,
                                                 event_start_line,
@@ -822,11 +822,11 @@ pub fn parse_into_fragments(
                                                 overrides.correction_overrides.as_ref(),
                                                 overrides.adjustments.as_ref(),
                                             )?;
-                                        
+
                                         // Create content with adjusted end position
                                         let content_xml = xml_content[frag_start_pos..end_pos].to_string();
-                                        
-                                if !content_xml.trim().is_empty() {
+
+                                if collapsed || !content_xml.trim().is_empty() {
                                     fragments.push(XmlFragment {
                                         nikaya: nikaya_structure.nikaya.clone(),
                                         frag_type: frag_type.clone(),
@@ -902,7 +902,7 @@ pub fn parse_into_fragments(
                                         
                                         if has_sutta_content {
                                             // Close at the current position (before the new vagga chapter)
-                                            let (end_pos, end_line, end_char) = apply_fragment_adjustment(
+                                            let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                                                 xml_content,
                                                 event_start_pos,
                                                 event_start_line,
@@ -915,10 +915,10 @@ pub fn parse_into_fragments(
                                                 overrides.correction_overrides.as_ref(),
                                                 overrides.adjustments.as_ref(),
                                             )?;
-                                            
+
                                             let content_xml = xml_content[frag_start_pos..end_pos].to_string();
-                                            
-                                            if !content_xml.trim().is_empty() {
+
+                                            if collapsed || !content_xml.trim().is_empty() {
                                                 fragments.push(XmlFragment {
                                                     nikaya: nikaya_structure.nikaya.clone(),
                                                     frag_type: frag_type.clone(),
@@ -1025,7 +1025,7 @@ pub fn parse_into_fragments(
                             (current_fragment_start, current_frag_type.as_ref()) {
                             
                             // Apply adjustments if any
-                            let (end_pos, end_line, end_char) = apply_fragment_adjustment(
+                            let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                                 xml_content,
                                 close_pos,
                                 close_line,
@@ -1038,9 +1038,9 @@ pub fn parse_into_fragments(
                                 overrides.correction_overrides.as_ref(),
                                 overrides.adjustments.as_ref(),
                             )?;
-                            
+
                             let content_xml = xml_content[frag_start_pos..end_pos].to_string();
-                                 if !content_xml.trim().is_empty() {
+                                 if collapsed || !content_xml.trim().is_empty() {
                                     fragments.push(XmlFragment {
                                         nikaya: nikaya_structure.nikaya.clone(),
                                         frag_type: frag_type.clone(),
@@ -1060,7 +1060,7 @@ pub fn parse_into_fragments(
                                         sc_code: None,
                                         sc_sutta: None,
                                     });
-                                    
+
                                     // If we adjusted the end position, start the next fragment there
                                     // to avoid gaps in XML reconstruction
                                     current_fragment_start = Some((end_pos, end_line, end_char));
@@ -1072,10 +1072,10 @@ pub fn parse_into_fragments(
                             // No previous fragment to close, start from the original position
                             current_fragment_start = Some((start_pos, start_line, start_char));
                         }
-                        
+
                         current_frag_type = Some(FragmentType::Sutta);
                         current_fragment_group_levels = hierarchy.get_current_levels();
-                        
+
                         // Only track div depth if this is a div-based sutta marker
                         if should_track_div_depth {
                             sutta_div_depth = Some(div_depth);
@@ -1145,7 +1145,7 @@ pub fn parse_into_fragments(
                                 (current_fragment_start, current_frag_type.as_ref()) {
                                 
                                 // Apply adjustments if any
-                                let (end_pos, end_line, end_char) = apply_fragment_adjustment(
+                                let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                                     xml_content,
                                     close_pos,
                                     close_line,
@@ -1158,9 +1158,9 @@ pub fn parse_into_fragments(
                                     overrides.correction_overrides.as_ref(),
                                     overrides.adjustments.as_ref(),
                                 )?;
-                                
+
                                 let content_xml = xml_content[frag_start_pos..end_pos].to_string();
-                                if !content_xml.trim().is_empty() {
+                                if collapsed || !content_xml.trim().is_empty() {
                                     fragments.push(XmlFragment {
                                         nikaya: nikaya_structure.nikaya.clone(),
                                         frag_type: frag_type.clone(),
@@ -1248,7 +1248,7 @@ pub fn parse_into_fragments(
                         (current_fragment_start, current_frag_type.as_ref()) {
                         
                         // Apply adjustments if any
-                        let (end_pos, end_line, end_char) = apply_fragment_adjustment(
+                        let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                             xml_content,
                             event_start_pos,
                             event_start_line,
@@ -1261,10 +1261,10 @@ pub fn parse_into_fragments(
                             overrides.correction_overrides.as_ref(),
                             overrides.adjustments.as_ref(),
                         )?;
-                        
+
                         // Include everything from start up to the adjusted end position
         let content_xml = xml_content[frag_start_pos..end_pos].to_string();
-        if !content_xml.trim().is_empty() {
+        if collapsed || !content_xml.trim().is_empty() {
             fragments.push(XmlFragment {
                 nikaya: nikaya_structure.nikaya.clone(),
                 frag_type: frag_type.clone(),
@@ -1314,7 +1314,7 @@ pub fn parse_into_fragments(
         (current_fragment_start, current_frag_type) {
         
         // Apply adjustments if any
-        let (end_pos, end_line, end_char) = apply_fragment_adjustment(
+        let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
             xml_content,
             xml_content.len(),
             reader.current_line(),
@@ -1327,9 +1327,9 @@ pub fn parse_into_fragments(
             overrides.correction_overrides.as_ref(),
             overrides.adjustments.as_ref(),
         )?;
-        
+
         let content_xml = xml_content[frag_start_pos..end_pos].to_string();
-        if !content_xml.trim().is_empty() {
+        if collapsed || !content_xml.trim().is_empty() {
                             fragments.push(XmlFragment {
                                 nikaya: nikaya_structure.nikaya.clone(),
                                 frag_type: frag_type.clone(),
