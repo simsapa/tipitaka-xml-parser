@@ -4,17 +4,16 @@
 //! as Reference" button.
 //!
 //! Test data:
-//! - `tests/data/test-db/fragments-unmodified.sqlite3` - pristine database copy
+//! - `tests/data/fragments-for-testing.sqlite3`
 //! - `tests/data/regenerate-test-config.toml` - config with adapted paths
 //!
 //! The flow:
 //! 1. Read config from `tests/data/regenerate-test-config.toml`
-//! 2. Copy `fragments-unmodified.sqlite3` → `fragments.sqlite3` (fresh start)
-//! 3. Extract correction overrides from `fragments.sqlite3` (acting as reference)
-//! 4. Load fragment adjustments from embedded TSV
-//! 5. Build `ParserOverrides` combining both
-//! 6. Create `TipitakaImporter` with overrides
-//! 7. For each XML file: `importer.export_fragments(xml_path, new_db_path)`
+//! 2. Extract correction overrides from `fragments.sqlite3` (acting as reference)
+//! 3. Load fragment adjustments from embedded TSV
+//! 4. Build `ParserOverrides` combining both
+//! 5. Create `TipitakaImporter` with overrides
+//! 6. For each XML file: `importer.export_fragments(xml_path, new_db_path)`
 //!    (includes reconstruction verification)
 
 use std::path::{Path, PathBuf};
@@ -33,9 +32,6 @@ use tipitaka_xml_parser::web::arangodb;
 /// Path to the test-specific config (relative to project root where cargo runs)
 const TEST_CONFIG_PATH: &str = "tests/data/regenerate-test-config.toml";
 
-/// Pristine database that is never modified; copied to db_path before each test
-const UNMODIFIED_DB: &str = "tests/data/test-db/fragments-unmodified.sqlite3";
-
 /// Load test config from `tests/data/regenerate-test-config.toml`
 fn load_test_config() -> AppSettings {
     let config_path = PathBuf::from(TEST_CONFIG_PATH);
@@ -52,35 +48,20 @@ fn load_test_config() -> AppSettings {
 /// Helper to set up the regeneration test environment.
 ///
 /// 1. Reads config from `tests/data/regenerate-test-config.toml`
-/// 2. Copies `fragments-unmodified.sqlite3` → config `db_path` (fresh start)
-/// 3. Extracts correction overrides from the fresh copy
-/// 4. Fetches Pali titles from ArangoDB (if available)
-/// 5. Creates a temp dir with a new DB path for output
+/// 2. Extracts correction overrides
+/// 3. Fetches Pali titles from ArangoDB (if available)
+/// 4. Creates a temp dir with a new DB path for output
 ///
 /// Returns (temp_dir, new_db_path, importer, settings).
 fn setup_regeneration() -> (TempDir, PathBuf, TipitakaImporter, AppSettings) {
     let settings = load_test_config();
 
-    // Verify the pristine database exists
-    let unmodified_db = PathBuf::from(UNMODIFIED_DB);
-    assert!(unmodified_db.exists(),
-        "Unmodified database not found at {:?}.\n\
-         Create it by running: cp data/fragments.sqlite3 {}",
-        unmodified_db, UNMODIFIED_DB);
-
     // Verify xml_dir exists
     let xml_dir = PathBuf::from(&settings.xml_dir);
     assert!(xml_dir.exists(), "XML directory not found at {:?}", xml_dir);
 
-    // Copy unmodified DB → db_path from config (ensures a fresh start each run)
+    // Extract correction overrides
     let db_path = PathBuf::from(&settings.db_path);
-    if let Some(parent) = db_path.parent() {
-        fs::create_dir_all(parent).expect("Failed to create db_path parent directory");
-    }
-    fs::copy(&unmodified_db, &db_path)
-        .expect("Failed to copy unmodified database to db_path");
-
-    // Extract correction overrides from the fresh copy (acting as reference)
     let correction_overrides = extract_all_correction_overrides(&db_path)
         .expect("Failed to extract correction overrides");
 
@@ -160,18 +141,18 @@ fn test_regenerate_single_file_s0101a_att() {
         "Failed to export fragments for {}: {}", filename, result.unwrap_err());
 }
 
-/// Test regeneration of the DN files to catch errors quickly.
+/// Test regeneration of a few DN files to catch errors quickly.
 #[test]
 fn test_regenerate_dn_files() {
     let (_temp_dir, new_db_path, importer, settings) = setup_regeneration();
 
     let dn_files = &[
         "s0101m.mul.xml",
-        "s0102m.mul.xml",
-        "s0103m.mul.xml",
         "s0101a.att.xml",
+        "s0101t.tik.xml",
+        "s0102m.mul.xml",
         "s0102a.att.xml",
-        "s0103a.att.xml",
+        "s0102t.tik.xml",
     ];
 
     for filename in dn_files {
