@@ -967,6 +967,45 @@ pub fn extract_sutta_title_from_content(content: &str) -> Option<String> {
     first_subhead_title.or(first_chapter_title)
 }
 
+/// Macro to implement the XmlParser trait for a nikaya parser struct
+///
+/// This macro generates a standard XmlParser implementation that delegates
+/// to the shared `parse_into_fragments` function. All nikaya-specific parsers
+/// use this same pattern.
+///
+/// # Usage
+/// ```ignore
+/// impl_xml_parser!(DighaNikayaMula);
+/// impl_xml_parser!(MajjhimaNikayaMula);
+/// ```
+#[macro_export]
+macro_rules! impl_xml_parser {
+    ($struct_name:ident) => {
+        impl XmlParser for $struct_name {
+            fn parse_into_fragments(
+                &self,
+                xml_content: &str,
+                nikaya_structure: &NikayaStructure,
+                cst_file: &str,
+                overrides: &ParserOverrides,
+                populate_sc_fields: bool,
+            ) -> Result<Vec<XmlFragment>> {
+                // Delegate to the public function
+                parse_into_fragments(
+                    xml_content,
+                    nikaya_structure,
+                    cst_file,
+                    overrides,
+                    populate_sc_fields,
+                )
+            }
+        }
+    };
+}
+
+/// Re-export the macro for convenience
+pub use impl_xml_parser;
+
 #[cfg(test)]
 mod tests {
     use super::*;

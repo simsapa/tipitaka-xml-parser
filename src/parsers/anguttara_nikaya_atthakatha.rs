@@ -15,6 +15,7 @@ use crate::parsers::helpers::{
     apply_fragment_adjustment,
     populate_sc_fields_from_tsv_conditional,
     HierarchyTracker,
+    impl_xml_parser,
 };
 
 pub struct AnguttaraNikayaAtthakatha;
@@ -1164,19 +1165,7 @@ pub fn parse_into_fragments(
     Ok(fragments)
 }
 
-impl XmlParser for AnguttaraNikayaAtthakatha {
-    fn parse_into_fragments(
-        &self,
-        xml_content: &str,
-        nikaya_structure: &NikayaStructure,
-        cst_file: &str,
-        overrides: &ParserOverrides,
-        populate_sc_fields: bool,
-    ) -> Result<Vec<XmlFragment>> {
-        // Delegate to the public function
-        parse_into_fragments(xml_content, nikaya_structure, cst_file, overrides, populate_sc_fields)
-    }
-}
+impl_xml_parser!(AnguttaraNikayaAtthakatha);
 
 #[cfg(test)]
 mod tests {

@@ -1,6 +1,6 @@
 # Plan 03: Create Macro for XmlParser Trait Implementations
 
-Status: **TODO**
+Status: **DONE**
 
 ## Implementation Overview
 

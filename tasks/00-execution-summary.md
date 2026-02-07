@@ -10,7 +10,7 @@ The plans are numbered in order of **safety and dependencies**:
 
 1. [x] DONE **Plan 01** - Extract HierarchyTracker (🟢 Very Low Risk)
 2. [x] DONE **Plan 02** - Extract extract_sutta_title_from_content (🟢 Very Low Risk)
-3. [ ] TODO **Plan 03** - Create XmlParser Macro (🟢 Very Low Risk)
+3. [x] DONE **Plan 03** - Create XmlParser Macro (🟢 Very Low Risk)
 4. [ ] TODO **Plan 04** - Extract FragmentBoundaryDetector (🟢 Low Risk)
 
 ## Plan Dependencies
