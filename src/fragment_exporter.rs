@@ -9,7 +9,8 @@ use diesel::sqlite::SqliteConnection;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use std::path::Path;
 
-use crate::types::XmlFragment;
+use crate::types::{XmlFragment, CorrectionFragmentOverride, CorrectionFragmentOverrides, FragmentKey};
+use std::collections::HashMap;
 use crate::nikaya_structure::NikayaStructure;
 use crate::fragments_models::{NewNikayaStructure, NewXmlFragment};
 use crate::fragments_schema::nikaya_structures;
@@ -205,6 +206,367 @@ pub fn validate_fragments_db(db_path: &Path) -> Result<ValidationStats> {
     })
 }
 
+/// Validate that first and last fragments are Header type.
+///
+/// This is a structural invariant: XML files must start and end with Header fragments
+/// (containing metadata), not Sutta fragments. This validation ensures the parser
+/// correctly identifies fragment boundaries.
+///
+/// # Arguments
+/// * `fragments` - Parsed fragments to validate
+/// * `filename` - Name of the XML file being processed (for error reporting)
+///
+/// # Returns
+/// Ok(()) if validation passes, or HeaderValidationFailed error if not
+pub fn validate_first_last_headers(
+    fragments: &[XmlFragment],
+    filename: &str,
+) -> Result<()> {
+    use crate::types::{FragmentType, ParserError};
+
+    if fragments.is_empty() {
+        return Err(ParserError::HeaderValidationFailed {
+            filename: filename.to_string(),
+            details: "no fragments found".to_string(),
+        }.into());
+    }
+
+    // Check first fragment
+    let first = &fragments[0];
+    if first.frag_type != FragmentType::Header {
+        return Err(ParserError::HeaderValidationFailed {
+            filename: filename.to_string(),
+            details: format!(
+                "first fragment (frag_idx {}) is {:?}, expected Header",
+                first.frag_idx,
+                first.frag_type
+            ),
+        }.into());
+    }
+
+    // Check last fragment
+    let last = &fragments[fragments.len() - 1];
+    if last.frag_type != FragmentType::Header {
+        return Err(ParserError::HeaderValidationFailed {
+            filename: filename.to_string(),
+            details: format!(
+                "last fragment (frag_idx {}) is {:?}, expected Header",
+                last.frag_idx,
+                last.frag_type
+            ),
+        }.into());
+    }
+
+    Ok(())
+}
+
+/// Extract correction fragment overrides and frag_review status from the database.
+///
+/// Queries fragments where `frag_review` is not null, empty, or 'unchecked' for the given file.
+/// Returns both the overrides (for use during parsing) and the frag_review status map
+/// (for restoration after parsing).
+///
+/// "Moved" fragments get `collapse: true` with no boundary/SC overrides.
+/// Other reviewed fragments get their boundary and SC values as overrides.
+///
+/// # Arguments
+/// * `db_path` - Path to the fragments database
+/// * `cst_file` - The XML file name to extract overrides for
+///
+/// # Returns
+/// Tuple of:
+/// - `CorrectionFragmentOverrides` - HashMap of overrides keyed by (cst_file, frag_idx)
+/// - `HashMap<usize, String>` - Map of frag_idx to frag_review status for restoration
+pub fn extract_correction_overrides(
+    db_path: &Path,
+    cst_file: &str,
+) -> Result<(CorrectionFragmentOverrides, HashMap<usize, String>)> {
+    let mut conn = SqliteConnection::establish(db_path.to_str().unwrap())
+        .context("Failed to connect to fragments database")?;
+
+    #[derive(QueryableByName)]
+    struct CorrectionFragmentRow {
+        #[diesel(sql_type = diesel::sql_types::Integer)]
+        frag_idx: i32,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
+        end_line: Option<i32>,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
+        end_char: Option<i32>,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+        sc_code: Option<String>,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+        sc_sutta: Option<String>,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+        cst_code: Option<String>,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+        cst_vagga: Option<String>,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+        cst_sutta: Option<String>,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+        cst_paranum: Option<String>,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+        frag_review: Option<String>,
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        frag_type: String,
+    }
+
+    // Query fragments with frag_review status that indicates they've been reviewed
+    // Excludes: NULL, empty string, and 'unchecked'
+    let rows: Vec<CorrectionFragmentRow> = diesel::sql_query(
+        "SELECT frag_idx, end_line, end_char, sc_code, sc_sutta, cst_code, cst_vagga, cst_sutta, cst_paranum, frag_review, frag_type
+         FROM xml_fragments
+         WHERE cst_file = ?
+           AND frag_review IS NOT NULL
+           AND frag_review != ''
+           AND frag_review != 'unchecked'"
+    )
+    .bind::<diesel::sql_types::Text, _>(cst_file)
+    .load(&mut conn)
+    .context("Failed to query correction fragments")?;
+
+    let mut overrides = CorrectionFragmentOverrides::new();
+    let mut review_status = HashMap::new();
+
+    for row in rows {
+        let frag_idx = row.frag_idx as usize;
+        let frag_review = row.frag_review.as_deref().unwrap_or("");
+
+        // Parse frag_type from string to enum
+        let frag_type = match row.frag_type.as_str() {
+            "Header" => Some(crate::types::FragmentType::Header),
+            "Sutta" => Some(crate::types::FragmentType::Sutta),
+            _ => None,
+        };
+
+        // Build the override based on frag_review status
+        let override_data = match frag_review {
+            "moved" => CorrectionFragmentOverride {
+                collapse: true,
+                // Don't use stale boundary values from moved fragments
+                end_line: None,
+                end_char: None,
+                // Moved fragments have no SC data
+                sc_code: None,
+                sc_sutta: None,
+                // Moved fragments have no CST metadata
+                cst_code: None,
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                // frag_review status is handled separately via review_status map
+                frag_review: row.frag_review.clone(),
+                frag_type: frag_type.clone(),
+            },
+            _ => CorrectionFragmentOverride {
+                collapse: false,
+                end_line: row.end_line.map(|v| v as usize),
+                end_char: row.end_char.map(|v| v as usize),
+                sc_code: row.sc_code,
+                sc_sutta: row.sc_sutta,
+                cst_code: row.cst_code,
+                cst_vagga: row.cst_vagga,
+                cst_sutta: row.cst_sutta,
+                cst_paranum: row.cst_paranum,
+                frag_review: row.frag_review.clone(),
+                frag_type,
+            },
+        };
+
+        let key = FragmentKey {
+            cst_file: cst_file.to_string(),
+            frag_idx,
+        };
+
+        overrides.insert(key, override_data);
+
+        // Store the frag_review status for restoration
+        if let Some(status) = row.frag_review {
+            review_status.insert(frag_idx, status);
+        }
+    }
+
+    Ok((overrides, review_status))
+}
+
+/// Extract correction fragment overrides from the database for all files.
+///
+/// This variant queries ALL corrected fragments across all files, used during
+/// full database regeneration. "Moved" fragments get `collapse: true`.
+///
+/// # Arguments
+/// * `db_path` - Path to the fragments database
+///
+/// # Returns
+/// `CorrectionFragmentOverrides` - HashMap of overrides keyed by (cst_file, frag_idx)
+pub fn extract_all_correction_overrides(
+    db_path: &Path,
+) -> Result<CorrectionFragmentOverrides> {
+    let mut conn = SqliteConnection::establish(db_path.to_str().unwrap())
+        .context("Failed to connect to fragments database")?;
+
+    #[derive(QueryableByName)]
+    struct CorrectionFragmentRow {
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        cst_file: String,
+        #[diesel(sql_type = diesel::sql_types::Integer)]
+        frag_idx: i32,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
+        end_line: Option<i32>,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
+        end_char: Option<i32>,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+        sc_code: Option<String>,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+        sc_sutta: Option<String>,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+        cst_code: Option<String>,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+        cst_vagga: Option<String>,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+        cst_sutta: Option<String>,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+        cst_paranum: Option<String>,
+        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+        frag_review: Option<String>,
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        frag_type: String,
+    }
+
+    // Query ALL fragments with reviewed status across all files
+    let rows: Vec<CorrectionFragmentRow> = diesel::sql_query(
+        "SELECT cst_file, frag_idx, end_line, end_char, sc_code, sc_sutta, cst_code, cst_vagga, cst_sutta, cst_paranum, frag_review, frag_type
+         FROM xml_fragments
+         WHERE frag_review IS NOT NULL
+           AND frag_review != ''
+           AND frag_review != 'unchecked'"
+    )
+    .load(&mut conn)
+    .context("Failed to query all correction fragments")?;
+
+    let mut overrides = CorrectionFragmentOverrides::new();
+
+    for row in rows {
+        let frag_review = row.frag_review.as_deref().unwrap_or("");
+
+        // Parse frag_type from string to enum
+        let frag_type = match row.frag_type.as_str() {
+            "Header" => Some(crate::types::FragmentType::Header),
+            "Sutta" => Some(crate::types::FragmentType::Sutta),
+            _ => None,
+        };
+
+        let override_data = match frag_review {
+            "moved" => CorrectionFragmentOverride {
+                collapse: true,
+                end_line: None,
+                end_char: None,
+                sc_code: None,
+                sc_sutta: None,
+                cst_code: None,
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                frag_review: row.frag_review.clone(),
+                frag_type: frag_type.clone(),
+            },
+            _ => CorrectionFragmentOverride {
+                collapse: false,
+                end_line: row.end_line.map(|v| v as usize),
+                end_char: row.end_char.map(|v| v as usize),
+                sc_code: row.sc_code,
+                sc_sutta: row.sc_sutta,
+                cst_code: row.cst_code,
+                cst_vagga: row.cst_vagga,
+                cst_sutta: row.cst_sutta,
+                cst_paranum: row.cst_paranum,
+                frag_review: row.frag_review.clone(),
+                frag_type,
+            },
+        };
+
+        let key = FragmentKey {
+            cst_file: row.cst_file,
+            frag_idx: row.frag_idx as usize,
+        };
+
+        overrides.insert(key, override_data);
+    }
+
+    Ok(overrides)
+}
+
+/// Count fragments for a specific file in the database.
+///
+/// Used for row count validation during database regeneration.
+///
+/// # Arguments
+/// * `db_path` - Path to the fragments database
+/// * `cst_file` - The XML file name
+///
+/// # Returns
+/// Number of fragments for this file in the database
+pub fn count_fragments_in_db(db_path: &Path, cst_file: &str) -> Result<usize> {
+    let mut conn = SqliteConnection::establish(db_path.to_str().unwrap())
+        .context("Failed to connect to fragments database")?;
+
+    #[derive(QueryableByName)]
+    struct CountResult {
+        #[diesel(sql_type = diesel::sql_types::BigInt)]
+        count: i64,
+    }
+
+    let result: CountResult = diesel::sql_query(
+        "SELECT COUNT(*) as count FROM xml_fragments WHERE cst_file = ?"
+    )
+    .bind::<diesel::sql_types::Text, _>(cst_file)
+    .get_result(&mut conn)
+    .context("Failed to count fragments")?;
+
+    Ok(result.count as usize)
+}
+
+/// Restore frag_review status for fragments after parsing.
+///
+/// After reparsing a file, the new fragments lose their frag_review status.
+/// This function restores the status from a previously extracted map.
+///
+/// # Arguments
+/// * `db_path` - Path to the fragments database
+/// * `cst_file` - The XML file name
+/// * `review_status` - Map of frag_idx to frag_review status
+///
+/// # Returns
+/// Number of fragments updated
+pub fn restore_frag_review_status(
+    db_path: &Path,
+    cst_file: &str,
+    review_status: &HashMap<usize, String>,
+) -> Result<usize> {
+    if review_status.is_empty() {
+        return Ok(0);
+    }
+
+    let mut conn = SqliteConnection::establish(db_path.to_str().unwrap())
+        .context("Failed to connect to fragments database")?;
+
+    let mut updated = 0;
+
+    for (frag_idx, status) in review_status {
+        let result = diesel::sql_query(
+            "UPDATE xml_fragments SET frag_review = ? WHERE cst_file = ? AND frag_idx = ?"
+        )
+        .bind::<diesel::sql_types::Text, _>(status)
+        .bind::<diesel::sql_types::Text, _>(cst_file)
+        .bind::<diesel::sql_types::Integer, _>(*frag_idx as i32)
+        .execute(&mut conn)
+        .context("Failed to update frag_review status")?;
+
+        updated += result;
+    }
+
+    Ok(updated)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,6 +734,7 @@ mod tests {
         }
         
         #[derive(QueryableByName)]
+        #[allow(dead_code)]
         struct NikayaIdResult {
             #[diesel(sql_type = diesel::sql_types::BigInt)]
             _nikaya_id: i64,
@@ -545,5 +908,510 @@ mod tests {
         assert_eq!(stats.total_sutta_fragments, 4, "Should have 4 Sutta fragments");
         assert_eq!(stats.empty_cst_code, 2, "Should have 2 fragments with empty cst_code");
         assert_eq!(stats.empty_sc_code, 2, "Should have 2 fragments with empty sc_code");
+    }
+
+    #[test]
+    fn test_extract_correction_overrides() {
+        let temp_db = NamedTempFile::new().unwrap();
+        let db_path = temp_db.path();
+
+        // Create test data with various frag_review statuses
+        let structure = NikayaStructure {
+            nikaya: "samyutta".to_string(),
+            levels: vec![GroupType::Nikaya, GroupType::Samyutta, GroupType::Vagga, GroupType::Sutta],
+        };
+
+        let fragments = vec![
+            // Fragment with 'checked' status - should be extracted
+            XmlFragment {
+                nikaya: "samyutta".to_string(),
+                frag_type: FragmentType::Sutta,
+                content_xml: "<p>Checked fragment</p>".to_string(),
+                start_line: 1,
+                end_line: 10,
+                start_char: 0,
+                end_char: 50,
+                group_levels: vec![],
+                cst_file: "s0301m.mul.xml".to_string(),
+                frag_idx: 162,
+                frag_review: Some("checked".to_string()),
+                cst_code: Some("sn1.5.0.1".to_string()),
+                cst_vagga: None,
+                cst_sutta: Some("Āḷavikāsutta".to_string()),
+                cst_paranum: None,
+                sc_code: Some("sn5.1".to_string()),
+                sc_sutta: Some("Āḷavikāsutta".to_string()),
+            },
+            // Fragment with 'in-progress' status - should be extracted
+            XmlFragment {
+                nikaya: "samyutta".to_string(),
+                frag_type: FragmentType::Sutta,
+                content_xml: "<p>In-progress fragment</p>".to_string(),
+                start_line: 11,
+                end_line: 20,
+                start_char: 0,
+                end_char: 60,
+                group_levels: vec![],
+                cst_file: "s0301m.mul.xml".to_string(),
+                frag_idx: 163,
+                frag_review: Some("in-progress".to_string()),
+                cst_code: Some("sn1.5.0.2".to_string()),
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: None,
+                sc_sutta: None,
+            },
+            // Fragment with 'unchecked' status - should NOT be extracted
+            XmlFragment {
+                nikaya: "samyutta".to_string(),
+                frag_type: FragmentType::Sutta,
+                content_xml: "<p>Unchecked fragment</p>".to_string(),
+                start_line: 21,
+                end_line: 30,
+                start_char: 0,
+                end_char: 70,
+                group_levels: vec![],
+                cst_file: "s0301m.mul.xml".to_string(),
+                frag_idx: 164,
+                frag_review: Some("unchecked".to_string()),
+                cst_code: Some("sn1.5.0.3".to_string()),
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: None,
+                sc_sutta: None,
+            },
+            // Fragment with None status - should NOT be extracted
+            XmlFragment {
+                nikaya: "samyutta".to_string(),
+                frag_type: FragmentType::Sutta,
+                content_xml: "<p>No review fragment</p>".to_string(),
+                start_line: 31,
+                end_line: 40,
+                start_char: 0,
+                end_char: 80,
+                group_levels: vec![],
+                cst_file: "s0301m.mul.xml".to_string(),
+                frag_idx: 165,
+                frag_review: None,
+                cst_code: Some("sn1.5.0.4".to_string()),
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: None,
+                sc_sutta: None,
+            },
+        ];
+
+        // Export fragments
+        export_fragments_to_db(&fragments, &structure, db_path).unwrap();
+
+        // Extract checked overrides
+        let (overrides, review_status) = super::extract_correction_overrides(db_path, "s0301m.mul.xml").unwrap();
+
+        // Should have 2 overrides (checked and in-progress, not unchecked or None)
+        assert_eq!(overrides.len(), 2, "Should extract 2 correction overrides");
+        assert_eq!(review_status.len(), 2, "Should have 2 review statuses");
+
+        // Verify collapse is false for non-moved fragments
+        let key_162 = crate::types::FragmentKey {
+            cst_file: "s0301m.mul.xml".to_string(),
+            frag_idx: 162,
+        };
+        assert!(!overrides.get(&key_162).unwrap().collapse, "Checked fragment should not be collapsed");
+
+        // Check the checked fragment override
+        let override_162 = overrides.get(&key_162).expect("Should have override for frag_idx 162");
+        assert_eq!(override_162.sc_code, Some("sn5.1".to_string()));
+        assert_eq!(override_162.sc_sutta, Some("Āḷavikāsutta".to_string()));
+        assert_eq!(override_162.end_line, Some(10));
+        assert_eq!(override_162.end_char, Some(50));
+
+        // Check review status
+        assert_eq!(review_status.get(&162), Some(&"checked".to_string()));
+        assert_eq!(review_status.get(&163), Some(&"in-progress".to_string()));
+
+        // Verify unchecked fragment is not included
+        let key_164 = crate::types::FragmentKey {
+            cst_file: "s0301m.mul.xml".to_string(),
+            frag_idx: 164,
+        };
+        assert!(overrides.get(&key_164).is_none(), "Unchecked fragment should not be extracted");
+    }
+
+    #[test]
+    fn test_restore_frag_review_status() {
+        let temp_db = NamedTempFile::new().unwrap();
+        let db_path = temp_db.path();
+
+        // Create test data
+        let structure = NikayaStructure {
+            nikaya: "samyutta".to_string(),
+            levels: vec![GroupType::Nikaya, GroupType::Samyutta, GroupType::Vagga, GroupType::Sutta],
+        };
+
+        // Initially create fragments without review status
+        let fragments = vec![
+            XmlFragment {
+                nikaya: "samyutta".to_string(),
+                frag_type: FragmentType::Sutta,
+                content_xml: "<p>Fragment 1</p>".to_string(),
+                start_line: 1,
+                end_line: 10,
+                start_char: 0,
+                end_char: 50,
+                group_levels: vec![],
+                cst_file: "test.xml".to_string(),
+                frag_idx: 0,
+                frag_review: None,  // No review status initially
+                cst_code: None,
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: None,
+                sc_sutta: None,
+            },
+            XmlFragment {
+                nikaya: "samyutta".to_string(),
+                frag_type: FragmentType::Sutta,
+                content_xml: "<p>Fragment 2</p>".to_string(),
+                start_line: 11,
+                end_line: 20,
+                start_char: 0,
+                end_char: 60,
+                group_levels: vec![],
+                cst_file: "test.xml".to_string(),
+                frag_idx: 1,
+                frag_review: None,  // No review status initially
+                cst_code: None,
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: None,
+                sc_sutta: None,
+            },
+        ];
+
+        // Export fragments
+        export_fragments_to_db(&fragments, &structure, db_path).unwrap();
+
+        // Create review status map (simulating previously extracted statuses)
+        let mut review_status = std::collections::HashMap::new();
+        review_status.insert(0usize, "checked".to_string());
+        review_status.insert(1usize, "in-progress".to_string());
+
+        // Restore the statuses
+        let updated = super::restore_frag_review_status(db_path, "test.xml", &review_status).unwrap();
+        assert_eq!(updated, 2, "Should update 2 fragments");
+
+        // Verify the statuses were restored
+        let mut conn = SqliteConnection::establish(db_path.to_str().unwrap()).unwrap();
+
+        #[allow(dead_code)]
+        #[derive(QueryableByName)]
+        struct FragReviewResult {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            frag_idx: i32,
+            #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+            frag_review: Option<String>,
+        }
+
+        let results: Vec<FragReviewResult> = diesel::sql_query(
+            "SELECT frag_idx, frag_review FROM xml_fragments WHERE cst_file = 'test.xml' ORDER BY frag_idx"
+        )
+        .load(&mut conn)
+        .unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].frag_review, Some("checked".to_string()));
+        assert_eq!(results[1].frag_review, Some("in-progress".to_string()));
+    }
+
+    #[test]
+    fn test_extract_all_correction_overrides() {
+        let temp_db = NamedTempFile::new().unwrap();
+        let db_path = temp_db.path();
+
+        // Create test data with checked fragments in multiple files
+        let structure = NikayaStructure {
+            nikaya: "samyutta".to_string(),
+            levels: vec![GroupType::Nikaya, GroupType::Samyutta, GroupType::Vagga, GroupType::Sutta],
+        };
+
+        let fragments1 = vec![
+            XmlFragment {
+                nikaya: "samyutta".to_string(),
+                frag_type: FragmentType::Sutta,
+                content_xml: "<p>File 1 checked</p>".to_string(),
+                start_line: 1,
+                end_line: 10,
+                start_char: 0,
+                end_char: 50,
+                group_levels: vec![],
+                cst_file: "file1.xml".to_string(),
+                frag_idx: 0,
+                frag_review: Some("checked".to_string()),
+                cst_code: None,
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: Some("sn1.1".to_string()),
+                sc_sutta: None,
+            },
+        ];
+
+        let fragments2 = vec![
+            XmlFragment {
+                nikaya: "samyutta".to_string(),
+                frag_type: FragmentType::Sutta,
+                content_xml: "<p>File 2 checked</p>".to_string(),
+                start_line: 1,
+                end_line: 10,
+                start_char: 0,
+                end_char: 50,
+                group_levels: vec![],
+                cst_file: "file2.xml".to_string(),
+                frag_idx: 5,
+                frag_review: Some("checked".to_string()),
+                cst_code: None,
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: Some("sn2.1".to_string()),
+                sc_sutta: None,
+            },
+            XmlFragment {
+                nikaya: "samyutta".to_string(),
+                frag_type: FragmentType::Sutta,
+                content_xml: "<p>File 2 unchecked</p>".to_string(),
+                start_line: 11,
+                end_line: 20,
+                start_char: 0,
+                end_char: 60,
+                group_levels: vec![],
+                cst_file: "file2.xml".to_string(),
+                frag_idx: 6,
+                frag_review: Some("unchecked".to_string()),  // Should not be extracted
+                cst_code: None,
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: None,
+                sc_sutta: None,
+            },
+        ];
+
+        // Export both files
+        export_fragments_to_db(&fragments1, &structure, db_path).unwrap();
+        export_fragments_to_db(&fragments2, &structure, db_path).unwrap();
+
+        // Extract all checked overrides
+        let overrides = super::extract_all_correction_overrides(db_path).unwrap();
+
+        // Should have 2 overrides (one from each file, not the unchecked one)
+        assert_eq!(overrides.len(), 2, "Should extract 2 checked overrides from all files");
+
+        // Verify file1 override
+        let key1 = crate::types::FragmentKey {
+            cst_file: "file1.xml".to_string(),
+            frag_idx: 0,
+        };
+        assert!(overrides.get(&key1).is_some(), "Should have override from file1");
+        assert_eq!(overrides.get(&key1).unwrap().sc_code, Some("sn1.1".to_string()));
+
+        // Verify file2 override
+        let key2 = crate::types::FragmentKey {
+            cst_file: "file2.xml".to_string(),
+            frag_idx: 5,
+        };
+        assert!(overrides.get(&key2).is_some(), "Should have override from file2");
+        assert_eq!(overrides.get(&key2).unwrap().sc_code, Some("sn2.1".to_string()));
+    }
+
+    #[test]
+    fn test_validate_first_last_headers_success() {
+        // Valid case: first and last are Headers
+        let fragments = vec![
+            XmlFragment {
+                nikaya: "digha".to_string(),
+                frag_type: FragmentType::Header,
+                content_xml: "<header>Start</header>".to_string(),
+                start_line: 1,
+                end_line: 1,
+                start_char: 0,
+                end_char: 20,
+                group_levels: vec![],
+                cst_file: "test.xml".to_string(),
+                frag_idx: 0,
+                frag_review: None,
+                cst_code: None,
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: None,
+                sc_sutta: None,
+            },
+            XmlFragment {
+                nikaya: "digha".to_string(),
+                frag_type: FragmentType::Sutta,
+                content_xml: "<p>Content</p>".to_string(),
+                start_line: 2,
+                end_line: 2,
+                start_char: 0,
+                end_char: 15,
+                group_levels: vec![],
+                cst_file: "test.xml".to_string(),
+                frag_idx: 1,
+                frag_review: None,
+                cst_code: Some("dn1.1".to_string()),
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: Some("dn1".to_string()),
+                sc_sutta: None,
+            },
+            XmlFragment {
+                nikaya: "digha".to_string(),
+                frag_type: FragmentType::Header,
+                content_xml: "<header>End</header>".to_string(),
+                start_line: 3,
+                end_line: 3,
+                start_char: 0,
+                end_char: 18,
+                group_levels: vec![],
+                cst_file: "test.xml".to_string(),
+                frag_idx: 2,
+                frag_review: None,
+                cst_code: None,
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: None,
+                sc_sutta: None,
+            },
+        ];
+
+        let result = validate_first_last_headers(&fragments, "test.xml");
+        assert!(result.is_ok(), "Should pass validation when first and last are Headers");
+    }
+
+    #[test]
+    fn test_validate_first_last_headers_first_not_header() {
+        // Invalid case: first is not a Header
+        let fragments = vec![
+            XmlFragment {
+                nikaya: "digha".to_string(),
+                frag_type: FragmentType::Sutta,
+                content_xml: "<p>Content</p>".to_string(),
+                start_line: 1,
+                end_line: 1,
+                start_char: 0,
+                end_char: 15,
+                group_levels: vec![],
+                cst_file: "test.xml".to_string(),
+                frag_idx: 0,
+                frag_review: None,
+                cst_code: Some("dn1.1".to_string()),
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: Some("dn1".to_string()),
+                sc_sutta: None,
+            },
+            XmlFragment {
+                nikaya: "digha".to_string(),
+                frag_type: FragmentType::Header,
+                content_xml: "<header>End</header>".to_string(),
+                start_line: 2,
+                end_line: 2,
+                start_char: 0,
+                end_char: 18,
+                group_levels: vec![],
+                cst_file: "test.xml".to_string(),
+                frag_idx: 1,
+                frag_review: None,
+                cst_code: None,
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: None,
+                sc_sutta: None,
+            },
+        ];
+
+        let result = validate_first_last_headers(&fragments, "test.xml");
+        assert!(result.is_err(), "Should fail validation when first is not Header");
+
+        let err = result.unwrap_err();
+        let err_msg = err.to_string();
+        assert!(err_msg.contains("first fragment"), "Error should mention first fragment");
+        assert!(err_msg.contains("Sutta"), "Error should mention actual type");
+    }
+
+    #[test]
+    fn test_validate_first_last_headers_last_not_header() {
+        // Invalid case: last is not a Header
+        let fragments = vec![
+            XmlFragment {
+                nikaya: "digha".to_string(),
+                frag_type: FragmentType::Header,
+                content_xml: "<header>Start</header>".to_string(),
+                start_line: 1,
+                end_line: 1,
+                start_char: 0,
+                end_char: 20,
+                group_levels: vec![],
+                cst_file: "test.xml".to_string(),
+                frag_idx: 0,
+                frag_review: None,
+                cst_code: None,
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: None,
+                sc_sutta: None,
+            },
+            XmlFragment {
+                nikaya: "digha".to_string(),
+                frag_type: FragmentType::Sutta,
+                content_xml: "<p>Content</p>".to_string(),
+                start_line: 2,
+                end_line: 2,
+                start_char: 0,
+                end_char: 15,
+                group_levels: vec![],
+                cst_file: "test.xml".to_string(),
+                frag_idx: 1,
+                frag_review: None,
+                cst_code: Some("dn1.1".to_string()),
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                sc_code: Some("dn1".to_string()),
+                sc_sutta: None,
+            },
+        ];
+
+        let result = validate_first_last_headers(&fragments, "test.xml");
+        assert!(result.is_err(), "Should fail validation when last is not Header");
+
+        let err = result.unwrap_err();
+        let err_msg = err.to_string();
+        assert!(err_msg.contains("last fragment"), "Error should mention last fragment");
+        assert!(err_msg.contains("Sutta"), "Error should mention actual type");
+    }
+
+    #[test]
+    fn test_validate_first_last_headers_empty() {
+        // Invalid case: no fragments
+        let fragments = vec![];
+
+        let result = validate_first_last_headers(&fragments, "test.xml");
+        assert!(result.is_err(), "Should fail validation when no fragments");
+
+        let err = result.unwrap_err();
+        let err_msg = err.to_string();
+        assert!(err_msg.contains("no fragments found"), "Error should mention no fragments");
     }
 }

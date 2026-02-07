@@ -129,13 +129,14 @@ fn test_position_tracking_for_file(xml_path: &str, xml_filename: &str) {
     use tipitaka_xml_parser::nikaya_detector::detect_nikaya_structure;
     use tipitaka_xml_parser::parse_into_fragments;
     use tipitaka_xml_parser::encoding::read_xml_file;
+    use tipitaka_xml_parser::types::ParserOverrides;
     
     let path = PathBuf::from(xml_path);
     let xml_content = read_xml_file(&path).expect("Failed to read XML");
     
     let structure = detect_nikaya_structure(&xml_content).expect("Failed to detect nikaya");
     
-    let fragments = parse_into_fragments(&xml_content, &structure, xml_filename, None, false)
+    let fragments = parse_into_fragments(&xml_content, &structure, xml_filename, &ParserOverrides::default(), false)
         .expect("Failed to parse fragments");
     
     println!("\n=== Testing {} ===", xml_filename);

@@ -16,7 +16,7 @@ use std::fs;
 use tipitaka_xml_parser::{
     nikaya_detector::detect_nikaya_structure,
     parsers::samyutta_nikaya_mula::parse_into_fragments,
-    types::FragmentType,
+    types::{FragmentType, ParserOverrides},
 };
 
 #[test]
@@ -29,7 +29,7 @@ fn test_sn_samyutta_transition_sn1_3_to_sn1_4() {
     let structure = detect_nikaya_structure(&xml_content)
         .expect("Should detect SN structure");
     
-    let fragments = parse_into_fragments(&xml_content, &structure, "s0301m.mul.xml", None, false)
+    let fragments = parse_into_fragments(&xml_content, &structure, "s0301m.mul.xml", &ParserOverrides::default(), false)
         .expect("Should parse fragments");
     
     let sutta_fragments: Vec<_> = fragments.iter()
@@ -84,7 +84,7 @@ fn test_sn_samyutta_transition_sn1_4_to_sn1_5() {
     let structure = detect_nikaya_structure(&xml_content)
         .expect("Should detect SN structure");
     
-    let fragments = parse_into_fragments(&xml_content, &structure, "s0301m.mul.xml", None, false)
+    let fragments = parse_into_fragments(&xml_content, &structure, "s0301m.mul.xml", &ParserOverrides::default(), false)
         .expect("Should parse fragments");
     
     let sutta_fragments: Vec<_> = fragments.iter()
@@ -131,7 +131,7 @@ fn test_sn_samyutta_transition_sn1_6_to_sn1_7() {
     let structure = detect_nikaya_structure(&xml_content)
         .expect("Should detect SN structure");
     
-    let fragments = parse_into_fragments(&xml_content, &structure, "s0301m.mul.xml", None, false)
+    let fragments = parse_into_fragments(&xml_content, &structure, "s0301m.mul.xml", &ParserOverrides::default(), false)
         .expect("Should parse fragments");
     
     let sutta_fragments: Vec<_> = fragments.iter()

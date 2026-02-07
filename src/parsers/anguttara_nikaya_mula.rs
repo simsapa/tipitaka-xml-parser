@@ -4,7 +4,7 @@ use anyhow::{Result, Context};
 use quick_xml::events::Event;
 use std::collections::HashMap;
 
-use crate::types::{XmlFragment, FragmentType, GroupType, GroupLevel, FragmentAdjustments};
+use crate::types::{XmlFragment, FragmentType, GroupType, GroupLevel, ParserOverrides};
 use crate::nikaya_structure::NikayaStructure;
 use crate::xml_parser_trait::XmlParser;
 use crate::parsers::helpers::{
@@ -12,7 +12,7 @@ use crate::parsers::helpers::{
     extract_vagga_title_from_content,
     extract_first_paranum,
     apply_fragment_adjustment,
-    populate_sc_fields_from_tsv,
+    populate_sc_fields_from_tsv_conditional,
 };
 
 pub struct AnguttaraNikayaMula;
@@ -651,7 +651,7 @@ pub fn parse_into_fragments(
     xml_content: &str,
     nikaya_structure: &NikayaStructure,
     cst_file: &str,
-    adjustments: Option<&FragmentAdjustments>,
+    overrides: &ParserOverrides,
     populate_sc_fields: bool,
 ) -> Result<Vec<XmlFragment>> {
     let mut reader = LineTrackingReader::new(xml_content);
@@ -720,26 +720,40 @@ pub fn parse_into_fragments(
                     seen_body_tag = true;
                     
                     // Close the Header fragment right after the <body> tag
-                    if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) = 
+                    // Track the adjusted end position to use as the next fragment's start
+                    let mut next_frag_start_pos = current_pos;
+                    let mut next_frag_start_line = current_line;
+                    let mut next_frag_start_char = current_char;
+
+                    if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) =
                         (current_fragment_start, current_frag_type.as_ref()) {
-                        
+
                         // Apply adjustments if any
-                        let (end_pos, end_line, end_char) = apply_fragment_adjustment(
+                        let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                             xml_content,
                             current_pos,
                             current_line,
                             current_char,
                             cst_file,
                             fragments.len(),
-                            adjustments,
-                        );
-                        
+                            frag_start_pos,
+                            frag_start_line,
+                            frag_start_char,
+                            overrides.correction_overrides.as_ref(),
+                            overrides.adjustments.as_ref(),
+                        )?;
+
+                        // Use adjusted end position as next fragment's start to ensure continuous boundaries
+                        next_frag_start_pos = end_pos;
+                        next_frag_start_line = end_line;
+                        next_frag_start_char = end_char;
+
                         let content_xml = xml_content[frag_start_pos..end_pos].to_string();
-                        if !content_xml.trim().is_empty() {
+                        if collapsed || !content_xml.trim().is_empty() {
                             fragments.push(XmlFragment {
                                 nikaya: nikaya_structure.nikaya.clone(),
                                 frag_type: frag_type.clone(),
-                                content_xml: content_xml,
+                                content_xml,
                                 start_line: frag_start_line,
                                 end_line,
                                 start_char: frag_start_char,
@@ -757,10 +771,10 @@ pub fn parse_into_fragments(
                             });
                         }
                     }
-                    
-                    // Start a Sutta fragment immediately after <body>
-                    // Content between <body> and the first sutta marker will be included
-                    current_fragment_start = Some((current_pos, current_line, current_char));
+
+                    // Start a Sutta fragment at the adjusted end position of the Header fragment
+                    // This ensures no gaps or overlaps when checked overrides are used
+                    current_fragment_start = Some((next_frag_start_pos, next_frag_start_line, next_frag_start_char));
                     current_frag_type = Some(FragmentType::Sutta);
                     current_fragment_group_levels = hierarchy.get_current_levels();
                     in_sutta_content = true;
@@ -788,31 +802,42 @@ pub fn parse_into_fragments(
                                 
                                 // Only close if this is a Sutta fragment and has actual sutta content
                                 if matches!(frag_type, FragmentType::Sutta) {
-                                    let tentative_content = xml_content[frag_start_pos..event_start_pos].to_string();
-                                    let has_sutta_content = tentative_content.contains("rend=\"subhead\"") || 
-                                                           tentative_content.contains("rend=\"chapter\"") ||
-                                                           tentative_content.contains("rend=\"bodytext\"");
-                                    
-                                    if has_sutta_content {
+                                    // When overrides have pushed the fragment start to or past this
+                                    // boundary, always close the fragment to maintain frag_idx alignment
+                                    // with correction overrides (e.g., collapsed/moved fragments).
+                                    let should_close = if frag_start_pos >= event_start_pos {
+                                        true
+                                    } else {
+                                        let tentative_content = xml_content[frag_start_pos..event_start_pos].to_string();
+                                        tentative_content.contains("rend=\"subhead\"") ||
+                                        tentative_content.contains("rend=\"chapter\"") ||
+                                        tentative_content.contains("rend=\"bodytext\"")
+                                    };
+
+                                    if should_close {
                                         // Close at the current position (before the new vagga/sutta div)
-                                        let (end_pos, end_line, end_char) = apply_fragment_adjustment(
+                                        let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                                             xml_content,
                                             event_start_pos,
                                             event_start_line,
                                             event_start_char,
                                             cst_file,
                                             fragments.len(),
-                                            adjustments,
-                                        );
-                                        
+                                            frag_start_pos,
+                                            frag_start_line,
+                                            frag_start_char,
+                                            overrides.correction_overrides.as_ref(),
+                                            overrides.adjustments.as_ref(),
+                                        )?;
+
                                         // Create content with adjusted end position
                                         let content_xml = xml_content[frag_start_pos..end_pos].to_string();
-                                        
-                                if !content_xml.trim().is_empty() {
+
+                                if collapsed || !content_xml.trim().is_empty() {
                                     fragments.push(XmlFragment {
                                         nikaya: nikaya_structure.nikaya.clone(),
                                         frag_type: frag_type.clone(),
-                                        content_xml: content_xml,
+                                        content_xml,
                                         start_line: frag_start_line,
                                         end_line,
                                         start_char: frag_start_char,
@@ -877,30 +902,41 @@ pub fn parse_into_fragments(
                                     (current_fragment_start, current_frag_type.as_ref()) {
                                     
                                     if matches!(frag_type, FragmentType::Sutta) {
-                                        let tentative_content = xml_content[frag_start_pos..event_start_pos].to_string();
-                                        let has_sutta_content = tentative_content.contains("rend=\"subhead\"") || 
-                                                               tentative_content.contains("rend=\"chapter\"") ||
-                                                               tentative_content.contains("rend=\"bodytext\"");
-                                        
-                                        if has_sutta_content {
+                                        // When overrides have pushed the fragment start to or past this
+                                        // boundary, always close the fragment to maintain frag_idx alignment
+                                        // with correction overrides (e.g., collapsed/moved fragments).
+                                        let should_close = if frag_start_pos >= event_start_pos {
+                                            true
+                                        } else {
+                                            let tentative_content = xml_content[frag_start_pos..event_start_pos].to_string();
+                                            tentative_content.contains("rend=\"subhead\"") ||
+                                            tentative_content.contains("rend=\"chapter\"") ||
+                                            tentative_content.contains("rend=\"bodytext\"")
+                                        };
+
+                                        if should_close {
                                             // Close at the current position (before the new vagga chapter)
-                                            let (end_pos, end_line, end_char) = apply_fragment_adjustment(
+                                            let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                                                 xml_content,
                                                 event_start_pos,
                                                 event_start_line,
                                                 event_start_char,
                                                 cst_file,
                                                 fragments.len(),
-                                                adjustments,
-                                            );
-                                            
+                                                frag_start_pos,
+                                                frag_start_line,
+                                                frag_start_char,
+                                                overrides.correction_overrides.as_ref(),
+                                                overrides.adjustments.as_ref(),
+                                            )?;
+
                                             let content_xml = xml_content[frag_start_pos..end_pos].to_string();
-                                            
-                                            if !content_xml.trim().is_empty() {
+
+                                            if collapsed || !content_xml.trim().is_empty() {
                                                 fragments.push(XmlFragment {
                                                     nikaya: nikaya_structure.nikaya.clone(),
                                                     frag_type: frag_type.clone(),
-                                                    content_xml: content_xml,
+                                                    content_xml,
                                                     start_line: frag_start_line,
                                                     end_line,
                                                     start_char: frag_start_char,
@@ -1003,22 +1039,26 @@ pub fn parse_into_fragments(
                             (current_fragment_start, current_frag_type.as_ref()) {
                             
                             // Apply adjustments if any
-                            let (end_pos, end_line, end_char) = apply_fragment_adjustment(
+                            let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                                 xml_content,
                                 close_pos,
                                 close_line,
                                 close_char,
                                 cst_file,
                                 fragments.len(),
-                                adjustments,
-                            );
-                            
+                                frag_start_pos,
+                                frag_start_line,
+                                frag_start_char,
+                                overrides.correction_overrides.as_ref(),
+                                overrides.adjustments.as_ref(),
+                            )?;
+
                             let content_xml = xml_content[frag_start_pos..end_pos].to_string();
-                                 if !content_xml.trim().is_empty() {
+                                 if collapsed || !content_xml.trim().is_empty() {
                                     fragments.push(XmlFragment {
                                         nikaya: nikaya_structure.nikaya.clone(),
                                         frag_type: frag_type.clone(),
-                                        content_xml: content_xml,
+                                        content_xml,
                                         start_line: frag_start_line,
                                         end_line,
                                         start_char: frag_start_char,
@@ -1119,22 +1159,26 @@ pub fn parse_into_fragments(
                                 (current_fragment_start, current_frag_type.as_ref()) {
                                 
                                 // Apply adjustments if any
-                                let (end_pos, end_line, end_char) = apply_fragment_adjustment(
+                                let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                                     xml_content,
                                     close_pos,
                                     close_line,
                                     close_char,
                                     cst_file,
                                     fragments.len(),
-                                    adjustments,
-                                );
-                                
+                                    frag_start_pos,
+                                    frag_start_line,
+                                    frag_start_char,
+                                    overrides.correction_overrides.as_ref(),
+                                    overrides.adjustments.as_ref(),
+                                )?;
+
                                 let content_xml = xml_content[frag_start_pos..end_pos].to_string();
-                                if !content_xml.trim().is_empty() {
+                                if collapsed || !content_xml.trim().is_empty() {
                                     fragments.push(XmlFragment {
                                         nikaya: nikaya_structure.nikaya.clone(),
                                         frag_type: frag_type.clone(),
-                                        content_xml: content_xml,
+                                        content_xml,
                                         start_line: frag_start_line,
                                         end_line,
                                         start_char: frag_start_char,
@@ -1214,30 +1258,34 @@ pub fn parse_into_fragments(
                 if tag_name == "body" && seen_body_tag {
                     // Close any pending sutta fragment first
                     // The sutta fragment should include ALL content up to (but not including) </body>
-                    if let (Some((start_pos, start_line, start_char)), Some(frag_type)) = 
+                    if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) = 
                         (current_fragment_start, current_frag_type.as_ref()) {
                         
                         // Apply adjustments if any
-                        let (end_pos, end_line, end_char) = apply_fragment_adjustment(
+                        let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                             xml_content,
                             event_start_pos,
                             event_start_line,
                             event_start_char,
                             cst_file,
                             fragments.len(),
-                            adjustments,
-                        );
-                        
+                            frag_start_pos,
+                            frag_start_line,
+                            frag_start_char,
+                            overrides.correction_overrides.as_ref(),
+                            overrides.adjustments.as_ref(),
+                        )?;
+
                         // Include everything from start up to the adjusted end position
-        let content_xml = xml_content[start_pos..end_pos].to_string();
-        if !content_xml.trim().is_empty() {
+        let content_xml = xml_content[frag_start_pos..end_pos].to_string();
+        if collapsed || !content_xml.trim().is_empty() {
             fragments.push(XmlFragment {
                 nikaya: nikaya_structure.nikaya.clone(),
                 frag_type: frag_type.clone(),
-                content_xml: content_xml,
-                start_line,
+                content_xml,
+                start_line: frag_start_line,
                 end_line,
-                start_char,
+                start_char: frag_start_char,
                 end_char,
                 group_levels: current_fragment_group_levels.clone(),
                 cst_file: cst_file.to_string(),
@@ -1276,29 +1324,33 @@ pub fn parse_into_fragments(
     }
     
     // Close any remaining fragment (usually the final Header fragment)
-    if let (Some((start_pos, start_line, start_char)), Some(frag_type)) = 
+    if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) = 
         (current_fragment_start, current_frag_type) {
         
         // Apply adjustments if any
-        let (end_pos, end_line, end_char) = apply_fragment_adjustment(
+        let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
             xml_content,
             xml_content.len(),
             reader.current_line(),
             reader.current_char(),
             cst_file,
             fragments.len(),
-            adjustments,
-        );
-        
-        let content_xml = xml_content[start_pos..end_pos].to_string();
-        if !content_xml.trim().is_empty() {
+            frag_start_pos,
+            frag_start_line,
+            frag_start_char,
+            overrides.correction_overrides.as_ref(),
+            overrides.adjustments.as_ref(),
+        )?;
+
+        let content_xml = xml_content[frag_start_pos..end_pos].to_string();
+        if collapsed || !content_xml.trim().is_empty() {
                             fragments.push(XmlFragment {
                                 nikaya: nikaya_structure.nikaya.clone(),
                                 frag_type: frag_type.clone(),
-                                content_xml: content_xml,
-                                start_line,
+                                content_xml,
+                                start_line: frag_start_line,
                                 end_line,
-                                start_char,
+                                start_char: frag_start_char,
                                 end_char,
                                 group_levels: current_fragment_group_levels.clone(),
                                 cst_file: cst_file.to_string(),
@@ -1328,7 +1380,7 @@ pub fn parse_into_fragments(
     
     // Populate SC fields from embedded TSV if requested
     if populate_sc_fields {
-        populate_sc_fields_from_tsv(&mut fragments)?;
+        populate_sc_fields_from_tsv_conditional(&mut fragments)?;
     }
     
     Ok(fragments)
@@ -1340,11 +1392,11 @@ impl XmlParser for AnguttaraNikayaMula {
         xml_content: &str,
         nikaya_structure: &NikayaStructure,
         cst_file: &str,
-        adjustments: Option<&FragmentAdjustments>,
+        overrides: &ParserOverrides,
         populate_sc_fields: bool,
     ) -> Result<Vec<XmlFragment>> {
         // Delegate to the public function
-        parse_into_fragments(xml_content, nikaya_structure, cst_file, adjustments, populate_sc_fields)
+        parse_into_fragments(xml_content, nikaya_structure, cst_file, overrides, populate_sc_fields)
     }
 }
 
@@ -1406,7 +1458,7 @@ mod tests {
         
         assert_eq!(structure.nikaya, "digha");
         
-        let fragments = parse_into_fragments(&xml, &structure, "test.xml", None, false).expect("Should parse fragments");
+        let fragments = parse_into_fragments(&xml, &structure, "test.xml", &ParserOverrides::default(), false).expect("Should parse fragments");
         
         // Should have at least one fragment
         assert!(!fragments.is_empty(), "Should have at least one fragment");
@@ -1416,7 +1468,7 @@ mod tests {
     fn test_parse_dn_fragment_count() {
         let xml = create_dn_sample_xml();
         let structure = detect_nikaya_structure(&xml).unwrap();
-        let fragments = parse_into_fragments(&xml, &structure, "test.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(&xml, &structure, "test.xml", &ParserOverrides::default(), false).unwrap();
         
         // Count sutta fragments
         let sutta_fragments: Vec<_> = fragments.iter()
@@ -1431,7 +1483,7 @@ mod tests {
     fn test_parse_dn_line_tracking() {
         let xml = create_dn_sample_xml();
         let structure = detect_nikaya_structure(&xml).unwrap();
-        let fragments = parse_into_fragments(&xml, &structure, "test.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(&xml, &structure, "test.xml", &ParserOverrides::default(), false).unwrap();
         
         for fragment in &fragments {
             // Line numbers should be valid (start > 0, end >= start)
@@ -1448,7 +1500,7 @@ mod tests {
         
         assert_eq!(structure.nikaya, "majjhima");
         
-        let fragments = parse_into_fragments(&xml, &structure, "test.xml", None, false).expect("Should parse fragments");
+        let fragments = parse_into_fragments(&xml, &structure, "test.xml", &ParserOverrides::default(), false).expect("Should parse fragments");
         
         assert!(!fragments.is_empty(), "Should have at least one fragment");
     }
@@ -1457,7 +1509,7 @@ mod tests {
     fn test_fragment_content_not_empty() {
         let xml = create_dn_sample_xml();
         let structure = detect_nikaya_structure(&xml).unwrap();
-        let fragments = parse_into_fragments(&xml, &structure, "test.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(&xml, &structure, "test.xml", &ParserOverrides::default(), false).unwrap();
         
         for fragment in &fragments {
             // Each fragment should have non-empty content
@@ -1470,7 +1522,7 @@ mod tests {
     fn test_character_position_tracking() {
         let xml = create_dn_sample_xml();
         let structure = detect_nikaya_structure(&xml).unwrap();
-        let fragments = parse_into_fragments(&xml, &structure, "test.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(&xml, &structure, "test.xml", &ParserOverrides::default(), false).unwrap();
         
         for fragment in &fragments {
             // Character positions should be valid
@@ -1494,7 +1546,7 @@ mod tests {
 <text><body><p rend="nikaya">Dīghanikāyo</p><div type="book"><head rend="book">Book1</head><div type="sutta"><head rend="chapter">Sutta1</head><p n="1">Text1</p></div></div></body></text>"#;
         
         let structure = detect_nikaya_structure(xml).unwrap();
-        let fragments = parse_into_fragments(xml, &structure, "test.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(xml, &structure, "test.xml", &ParserOverrides::default(), false).unwrap();
         
         // Check that we can distinguish elements on the same line
         // by their character positions
@@ -1543,7 +1595,7 @@ mod tests {
 </TEI.2>"#;
         
         let structure = detect_nikaya_structure(xml).unwrap();
-        let fragments = parse_into_fragments(xml, &structure, "s0101m.mul.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(xml, &structure, "s0101m.mul.xml", &ParserOverrides::default(), false).unwrap();
         
         // Find the sutta fragment
         let sutta_frag = fragments.iter()
@@ -1579,7 +1631,7 @@ mod tests {
 </TEI.2>"#;
         
         let structure = detect_nikaya_structure(xml).unwrap();
-        let fragments = parse_into_fragments(xml, &structure, "s0201m.mul.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(xml, &structure, "s0201m.mul.xml", &ParserOverrides::default(), false).unwrap();
         
         // Find the sutta fragment
         let sutta_frag = fragments.iter()
@@ -1616,7 +1668,7 @@ mod tests {
 </TEI.2>"#;
         
         let structure = detect_nikaya_structure(xml).unwrap();
-        let fragments = parse_into_fragments(xml, &structure, "s0301m.mul.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(xml, &structure, "s0301m.mul.xml", &ParserOverrides::default(), false).unwrap();
         
         // Find the sutta fragment
         let sutta_frag = fragments.iter()
@@ -1671,7 +1723,7 @@ mod tests {
 </TEI.2>"#;
         
         let structure = detect_nikaya_structure(xml).unwrap();
-        let fragments = parse_into_fragments(xml, &structure, "s0301m.mul.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(xml, &structure, "s0301m.mul.xml", &ParserOverrides::default(), false).unwrap();
         
         let sutta_fragments: Vec<_> = fragments.iter()
             .filter(|f| matches!(f.frag_type, FragmentType::Sutta))
@@ -1727,7 +1779,7 @@ mod tests {
 </TEI.2>"#;
         
         let structure = detect_nikaya_structure(xml).unwrap();
-        let fragments = parse_into_fragments(xml, &structure, "s0402m2.mul.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(xml, &structure, "s0402m2.mul.xml", &ParserOverrides::default(), false).unwrap();
         
         // Find the sutta fragment
         let sutta_frag = fragments.iter()
@@ -1765,7 +1817,7 @@ mod tests {
 </TEI.2>"#;
         
         let structure = detect_nikaya_structure(xml).unwrap();
-        let fragments = parse_into_fragments(xml, &structure, "s0402t.tik.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(xml, &structure, "s0402t.tik.xml", &ParserOverrides::default(), false).unwrap();
         
         let sutta_fragments: Vec<_> = fragments.iter()
             .filter(|f| matches!(f.frag_type, FragmentType::Sutta))
@@ -1820,7 +1872,7 @@ mod tests {
 </TEI.2>"#;
         
         let structure = detect_nikaya_structure(xml).unwrap();
-        let fragments = parse_into_fragments(xml, &structure, "s0402t.tik.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(xml, &structure, "s0402t.tik.xml", &ParserOverrides::default(), false).unwrap();
         
         let sutta_fragments: Vec<_> = fragments.iter()
             .filter(|f| matches!(f.frag_type, FragmentType::Sutta))

@@ -132,6 +132,39 @@ body, html {
     border-bottom: none;
 }
 
+/* File item with reparse button */
+.panel-item.file-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.panel-item.file-item .file-text {
+    flex-grow: 1;
+    cursor: pointer;
+}
+
+/* Reparse button styling */
+.reparse-btn {
+    opacity: 0.6;
+    transition: opacity 0.2s;
+    font-size: 1rem;
+    padding: 0.25rem 0.5rem;
+}
+
+.panel-item:hover .reparse-btn {
+    opacity: 1;
+}
+
+.reparse-btn:hover {
+    opacity: 1 !important;
+}
+
+.panel-item.is-active .reparse-btn {
+    background-color: white;
+    color: #3273dc;
+}
+
 /* Visual distinction for moved fragments */
 .panel-item[data-frag-review="moved"] {
     background-color: #d0d0d0;

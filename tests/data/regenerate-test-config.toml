@@ -1,0 +1,30 @@
+## Test config for regeneration integration test.
+## Adapted from web-ui-config.toml with paths pointing to tests/data/.
+
+db_path = "./tests/data/fragments-for-testing.sqlite3"
+port = 8000
+color_theme = "system"
+xml_dir = "/home/gambhiro/prods/apps/simsapa-ng-project/bootstrap-assets-resources/tipitaka-org-vri-cst/tipitaka-xml/romn"
+xml_filenames = [
+# Dīgha Nikāya
+"s0101m.mul.xml",
+"s0101a.att.xml",
+"s0101t.tik.xml",
+
+"s0102m.mul.xml",
+"s0102a.att.xml",
+"s0102t.tik.xml",
+
+# Majjhima Nikāya
+"s0201m.mul.xml",
+"s0201a.att.xml",
+"s0201t.tik.xml",
+
+# Saṁyutta Nikāya
+"s0301m.mul.xml",
+
+# Aṅguttara Nikāya
+"s0401m.mul.xml",
+"s0402m1.mul.xml",
+"s0401t.tik.xml",
+]

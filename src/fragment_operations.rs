@@ -161,12 +161,14 @@ pub fn move_fragment_content(
             .execute(conn)
             .context("Failed to update target fragment")?;
         
-        // Empty current fragment content and clear metadata
+        // Empty current fragment content, clear metadata, and null out boundary fields.
+        // Boundary fields are set to 0 (sentinel for "no valid boundary" since lines are 1-indexed)
+        // to prevent stale boundaries from being picked up as overrides during reparse.
         let current_content_update = UpdateFragmentBoundary {
-            start_line: current_fragment.start_line,
-            start_char: current_fragment.start_char,
-            end_line: current_fragment.end_line,
-            end_char: current_fragment.end_char,
+            start_line: 0,
+            start_char: 0,
+            end_line: 0,
+            end_char: 0,
             content_xml: String::new(),
         };
         

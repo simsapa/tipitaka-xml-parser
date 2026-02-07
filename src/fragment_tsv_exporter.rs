@@ -126,6 +126,7 @@ mod tests {
     use super::*;
     use tempfile::NamedTempFile;
     use crate::{detect_nikaya_structure, parse_into_fragments, export_fragments_to_db};
+    use crate::types::ParserOverrides;
 
     #[test]
     fn test_export_fragments_to_tsv() {
@@ -155,7 +156,7 @@ mod tests {
         
         // Parse and export to DB
         let structure = detect_nikaya_structure(original_xml).unwrap();
-        let fragments = parse_into_fragments(original_xml, &structure, "test.xml", None, false).unwrap();
+        let fragments = parse_into_fragments(original_xml, &structure, "test.xml", &ParserOverrides::default(), false).unwrap();
         export_fragments_to_db(&fragments, &structure, db_path).unwrap();
         
         // Export to TSV

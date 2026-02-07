@@ -3,7 +3,7 @@
 //! This module provides the high-level API for processing XML files
 //! and directories with the fragment-based parser.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use super::encoding::read_xml_file;
@@ -11,7 +11,7 @@ use super::{
     detect_nikaya_structure,
     parse_into_fragments,
 };
-use super::types::FragmentAdjustments;
+use super::types::{FragmentAdjustments, ParserOverrides, CorrectionFragmentOverrides, ParserError};
 
 /// Statistics for a single file import
 #[derive(Debug, Clone, Default)]
@@ -37,7 +37,8 @@ pub struct ProcessingStats {
 
 /// Complete import process for Tipitaka XML files using fragment-based parser
 pub struct TipitakaImporter {
-    adjustments: Option<FragmentAdjustments>,
+    overrides: ParserOverrides,
+    reference_db_path: Option<PathBuf>,
 }
 
 impl TipitakaImporter {
@@ -47,13 +48,32 @@ impl TipitakaImporter {
     /// New TipitakaImporter instance
     pub fn new() -> Result<Self> {
         Ok(Self {
-            adjustments: None,
+            overrides: ParserOverrides::default(),
+            reference_db_path: None,
         })
     }
 
-    /// Set fragment adjustments for the importer
+    /// Set fragment adjustments for the importer (legacy TSV-based adjustments)
     pub fn with_adjustments(mut self, adjustments: FragmentAdjustments) -> Self {
-        self.adjustments = Some(adjustments);
+        self.overrides.adjustments = Some(adjustments);
+        self
+    }
+
+    /// Set correction fragment overrides for the importer (database-based overrides)
+    pub fn with_correction_overrides(mut self, correction_overrides: CorrectionFragmentOverrides) -> Self {
+        self.overrides.correction_overrides = Some(correction_overrides);
+        self
+    }
+
+    /// Set full parser overrides for the importer
+    pub fn with_overrides(mut self, overrides: ParserOverrides) -> Self {
+        self.overrides = overrides;
+        self
+    }
+
+    /// Set reference database path for row count validation
+    pub fn with_reference_db(mut self, path: PathBuf) -> Self {
+        self.reference_db_path = Some(path);
         self
     }
 
@@ -71,9 +91,9 @@ impl TipitakaImporter {
     /// 3. Compares byte-by-byte with the original XML
     /// 4. Returns an error if any mismatch is detected
     ///
-    /// If reconstruction fails, the error message will contain
-    /// "Reconstruction verification failed" which main.rs uses to detect
-    /// critical failures that should exit the program immediately.
+    /// If reconstruction fails, the error will be a typed
+    /// `ParserError::ReconstructionVerificationFailed` which main.rs uses
+    /// (via downcast) to detect critical failures that should exit immediately.
     ///
     /// # Arguments
     /// * `xml_path` - Path to the XML file to process
@@ -92,6 +112,7 @@ impl TipitakaImporter {
     pub fn export_fragments(&self, xml_path: &Path, fragments_db_path: &Path) -> Result<usize> {
         use super::export_fragments_to_db;
         use super::reconstruct_xml_from_db;
+        use super::fragment_exporter::count_fragments_in_db;
         use crate::logger;
 
         let filename = xml_path
@@ -109,9 +130,28 @@ impl TipitakaImporter {
             &xml_content,
             &nikaya_structure,
             &filename,
-            self.adjustments.as_ref(),
+            &self.overrides,
             true
         )?;
+
+        // Validate that first and last fragments are Headers
+        super::fragment_exporter::validate_first_last_headers(&fragments, &filename)?;
+
+        // Verify fragment count matches reference DB if available
+        if let Some(ref_db_path) = &self.reference_db_path {
+            let ref_count = count_fragments_in_db(ref_db_path, &filename)?;
+            let new_count = fragments.len();
+
+            if new_count != ref_count {
+                return Err(ParserError::RowCountMismatch {
+                    filename: filename.clone(),
+                    new_count,
+                    ref_count,
+                }.into());
+            }
+
+            logger::info(&format!("Fragment count verified for {} ({} fragments)", filename, new_count));
+        }
 
         // Export to fragments database
         let count = export_fragments_to_db(&fragments, &nikaya_structure, fragments_db_path)?;
@@ -127,10 +167,11 @@ impl TipitakaImporter {
             let reconstructed_len = reconstructed_xml.len();
             
             if original_len != reconstructed_len {
-                return Err(anyhow::anyhow!(
-                    "Reconstruction verification failed for {}: length mismatch (original: {} bytes, reconstructed: {} bytes)",
-                    filename, original_len, reconstructed_len
-                ));
+                return Err(ParserError::ReconstructionVerificationFailed {
+                    filename: filename.clone(),
+                    details: format!("length mismatch (original: {} bytes, reconstructed: {} bytes)",
+                        original_len, reconstructed_len),
+                }.into());
             }
             
             // Find first difference
@@ -139,17 +180,18 @@ impl TipitakaImporter {
                     let context_start = idx.saturating_sub(50);
                     let context_end = (idx + 50).min(xml_content.len());
                     let context = &xml_content[context_start..context_end];
-                    return Err(anyhow::anyhow!(
-                        "Reconstruction verification failed for {} at position {}: expected '{}', got '{}'\nContext: {}",
-                        filename, idx, orig_char, recon_char, context
-                    ));
+                    return Err(ParserError::ReconstructionVerificationFailed {
+                        filename: filename.clone(),
+                        details: format!("at position {}: expected '{}', got '{}'\nContext: {}",
+                            idx, orig_char, recon_char, context),
+                    }.into());
                 }
             }
             
-            return Err(anyhow::anyhow!(
-                "Reconstruction verification failed for {}: content mismatch (details unknown)",
-                filename
-            ));
+            return Err(ParserError::ReconstructionVerificationFailed {
+                filename: filename.clone(),
+                details: "content mismatch (details unknown)".to_string(),
+            }.into());
         }
         
         logger::info(&format!("Reconstruction verified for {}", filename));
@@ -227,15 +269,25 @@ mod tests {
     }
     
     #[test]
-    fn test_reconstruction_verification_error_message() {
-        // Test that reconstruction verification errors contain the expected message
-        // We can't easily create a real reconstruction failure, but we can verify
-        // that the error message format is correct by checking the code paths
-        
-        // This test verifies the error message contains "Reconstruction verification failed"
-        // which is used by main.rs to detect reconstruction failures
-        let error_msg = "Reconstruction verification failed for test.xml: length mismatch (original: 100 bytes, reconstructed: 90 bytes)";
-        assert!(error_msg.contains("Reconstruction verification failed"),
-            "Error message should contain 'Reconstruction verification failed'");
+    fn test_reconstruction_verification_error_is_typed() {
+        // Test that reconstruction verification errors use the typed ParserError
+        // and can be identified via downcast from anyhow::Error
+        let err: anyhow::Error = ParserError::ReconstructionVerificationFailed {
+            filename: "test.xml".to_string(),
+            details: "length mismatch (original: 100 bytes, reconstructed: 90 bytes)".to_string(),
+        }.into();
+
+        // Should be dowcastable to ParserError
+        let parser_err = err.downcast_ref::<ParserError>()
+            .expect("Error should downcast to ParserError");
+
+        // Should be critical
+        assert!(parser_err.is_critical(),
+            "ReconstructionVerificationFailed should be critical");
+
+        // Display should contain structured info
+        let display = format!("{}", err);
+        assert!(display.contains("test.xml"), "Display should contain filename");
+        assert!(display.contains("length mismatch"), "Display should contain details");
     }
 }

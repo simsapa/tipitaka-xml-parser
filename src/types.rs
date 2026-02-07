@@ -106,6 +106,149 @@ pub struct FragmentKey {
 /// Container for fragment adjustments loaded from TSV
 pub type FragmentAdjustments = HashMap<FragmentKey, FragmentAdjustment>;
 
+/// Override data from a corrected fragment in the database.
+///
+/// This type supersedes `FragmentAdjustment` by including SC field overrides
+/// in addition to boundary overrides. Covers both "checked" fragments (with
+/// user-verified corrections) and "moved" fragments (collapsed to zero-width).
+///
+/// During parsing:
+/// - If `collapse` is true, the fragment is made zero-width (end = start)
+/// - Boundary overrides (`end_line`, `end_char`) are applied during fragment finalization
+///   (ignored when `collapse` is true)
+/// - SC field overrides (`sc_code`, `sc_sutta`) are applied in post-processing
+/// - User-corrected metadata (`cst_code`, `cst_vagga`, `cst_sutta`, `cst_paranum`) are applied in post-processing
+/// - Review status (`frag_review`) is applied in post-processing
+///
+/// `CorrectionFragmentOverrides` take precedence over `FragmentAdjustments`.
+#[derive(Debug, Clone, Default)]
+pub struct CorrectionFragmentOverride {
+    /// If true, collapse this fragment to zero-width (for "moved" fragments).
+    /// The parser will set end = start, producing an empty fragment.
+    pub collapse: bool,
+    /// Override end line (1-indexed). Applied during fragment finalization.
+    /// Ignored when `collapse` is true.
+    pub end_line: Option<usize>,
+    /// Override end character position (0-indexed). Applied during fragment finalization.
+    /// Ignored when `collapse` is true.
+    pub end_char: Option<usize>,
+    /// Override SC reference code (e.g., "sn5.1"). Applied in post-processing.
+    pub sc_code: Option<String>,
+    /// Override SC sutta name (e.g., "Āḷavikāsutta"). Applied in post-processing.
+    pub sc_sutta: Option<String>,
+    /// Override CST code (e.g., "dn1.1.0.1"). Applied in post-processing.
+    pub cst_code: Option<String>,
+    /// Override CST vagga name. Applied in post-processing.
+    pub cst_vagga: Option<String>,
+    /// Override CST sutta name. Applied in post-processing.
+    pub cst_sutta: Option<String>,
+    /// Override CST paragraph number. Applied in post-processing.
+    pub cst_paranum: Option<String>,
+    /// Review status to restore (e.g., "checked", "moved"). Applied in post-processing.
+    pub frag_review: Option<String>,
+    /// Override fragment type (Header or Sutta). Applied in post-processing.
+    pub frag_type: Option<FragmentType>,
+}
+
+/// Container for correction fragment overrides extracted from the database.
+/// Key is `(cst_file, frag_idx)` matching the `FragmentKey` type.
+pub type CorrectionFragmentOverrides = HashMap<FragmentKey, CorrectionFragmentOverride>;
+
+/// Combined override configuration for parsing.
+///
+/// This struct bundles all override types to simplify function signatures.
+/// During parsing, overrides are applied in this priority order:
+/// 1. `correction_overrides` - User corrections from the database (highest priority)
+/// 2. `adjustments` - Legacy TSV-based boundary adjustments (fallback)
+///
+/// When both exist for the same `(cst_file, frag_idx)`:
+/// - Check `correction_overrides` first; if found, use it
+/// - Only fall back to `adjustments` if no correction override exists
+#[derive(Debug, Clone, Default)]
+pub struct ParserOverrides {
+    /// Legacy fragment adjustments loaded from embedded TSV.
+    /// Contains boundary overrides (`end_line`, `end_char`) only.
+    pub adjustments: Option<FragmentAdjustments>,
+    /// Correction fragment overrides extracted from the database.
+    /// Contains both boundary and SC field overrides, plus collapse flag for moved fragments.
+    pub correction_overrides: Option<CorrectionFragmentOverrides>,
+    /// Pali titles cache from ArangoDB for populating sc_sutta fields.
+    /// Maps SC code (e.g., "sn5.2") to Pali title (e.g., "Somāsutta").
+    /// Used during SC code propagation to automatically fill in sc_sutta titles.
+    pub pali_titles: Option<HashMap<String, String>>,
+}
+
+/// Parsed components from an SC code for context propagation.
+///
+/// When applying SC overrides, the `sc_code` is parsed to extract group numbers
+/// that can be used to derive `sc_code` values for subsequent fragments.
+///
+/// # Examples
+/// - `sn5.1` → `ScCodeComponents { prefix: "sn", samyutta: Some(5), sutta: Some(1), .. }`
+/// - `an3.1` → `ScCodeComponents { prefix: "an", nipata: Some(3), sutta: Some(1), .. }`
+/// - `dn1` → `ScCodeComponents { prefix: "dn", sutta: Some(1), .. }`
+/// - `mn41` → `ScCodeComponents { prefix: "mn", sutta: Some(41), .. }`
+#[derive(Debug, Clone, Default)]
+pub struct ScCodeComponents {
+    /// Nikaya prefix (e.g., "sn", "an", "dn", "mn")
+    pub prefix: String,
+    /// Samyutta number for SN (e.g., sn5.1 → 5)
+    pub samyutta: Option<i32>,
+    /// Nipata (book) number for AN (e.g., an3.1 → 3)
+    pub nipata: Option<i32>,
+    /// Sutta number (last number in the code)
+    pub sutta: Option<i32>,
+}
+
+/// Typed parser errors for critical error handling.
+///
+/// Use these variants at error origin sites and downcast from `anyhow::Error`
+/// in callers to distinguish critical errors (must exit) from non-critical ones
+/// (log and continue).
+#[derive(Debug, thiserror::Error)]
+pub enum ParserError {
+    /// Critical: fragment boundaries from DB overrides point to wrong positions.
+    /// Must exit immediately — override data is stale/corrupt.
+    #[error("Invalid boundary override: {details}")]
+    InvalidBoundaryOverride { details: String },
+
+    /// Critical: reconstructed XML from DB doesn't match original.
+    /// Must exit immediately — parser is losing data.
+    #[error("Reconstruction verification failed for {filename}: {details}")]
+    ReconstructionVerificationFailed { filename: String, details: String },
+
+    /// Critical: fragment count differs from reference DB.
+    /// Override data may be stale — frag_idx values no longer align.
+    #[error("Row count mismatch for {filename}: new parser produced {new_count} fragments, reference db has {ref_count}")]
+    RowCountMismatch {
+        filename: String,
+        new_count: usize,
+        ref_count: usize,
+    },
+
+    /// Critical: first or last fragment is not a Header type.
+    /// This violates the structural invariant that XML files must start and end with Headers.
+    #[error("Header validation failed for {filename}: {details}")]
+    HeaderValidationFailed { filename: String, details: String },
+
+    /// Non-critical: a recoverable issue for a single file.
+    /// Log the error and continue with remaining files.
+    #[error("{message}")]
+    GeneralError { message: String },
+}
+
+impl ParserError {
+    /// Returns true if the error is critical and requires immediate exit.
+    pub fn is_critical(&self) -> bool {
+        matches!(self,
+            ParserError::InvalidBoundaryOverride { .. } |
+            ParserError::ReconstructionVerificationFailed { .. } |
+            ParserError::RowCountMismatch { .. } |
+            ParserError::HeaderValidationFailed { .. }
+        )
+    }
+}
+
 use anyhow::{Context, Result};
 
 // NOTE: Should remain private to limit relying on the data. Provide public

@@ -4,7 +4,7 @@
 //! must follow, ensuring consistent API across different nikaya-specific parsers.
 
 use anyhow::Result;
-use crate::types::{XmlFragment, FragmentAdjustments};
+use crate::types::{XmlFragment, ParserOverrides};
 use crate::nikaya_structure::NikayaStructure;
 
 /// Common interface for all XML parser implementations
@@ -18,7 +18,7 @@ pub trait XmlParser {
     /// * `xml_content` - The complete XML file content
     /// * `nikaya_structure` - The structure configuration for this nikaya
     /// * `cst_file` - Name of the XML file being parsed
-    /// * `adjustments` - Optional fragment adjustments to apply
+    /// * `overrides` - Parser overrides including adjustments and checked fragment overrides
     /// * `populate_sc_fields` - Whether to populate SC fields from embedded TSV
     ///
     /// # Returns
@@ -28,7 +28,7 @@ pub trait XmlParser {
         xml_content: &str,
         nikaya_structure: &NikayaStructure,
         cst_file: &str,
-        adjustments: Option<&FragmentAdjustments>,
+        overrides: &ParserOverrides,
         populate_sc_fields: bool,
     ) -> Result<Vec<XmlFragment>>;
 }
