@@ -1,6 +1,6 @@
 # Plan 02: Extract extract_sutta_title_from_content to helpers.rs
 
-Status: **TODO**
+Status: **DONE**
 
 ## Implementation Overview
 
@@ -246,22 +246,22 @@ cargo test
 
 ## Task List
 
-- [ ] Add `extract_sutta_title_from_content` function to `src/parsers/helpers.rs`
-- [ ] Remove function from `src/parsers/digha_nikaya_mula.rs`
-- [ ] Remove function from `src/parsers/digha_nikaya_atthakatha.rs`
-- [ ] Remove function from `src/parsers/digha_nikaya_tika.rs`
-- [ ] Remove function from `src/parsers/majjhima_nikaya_mula.rs`
-- [ ] Remove function from `src/parsers/majjhima_nikaya_atthakatha.rs`
-- [ ] Remove function from `src/parsers/majjhima_nikaya_tika.rs`
-- [ ] Remove function from `src/parsers/samyutta_nikaya_mula.rs`
-- [ ] Remove function from `src/parsers/samyutta_nikaya_atthakatha.rs`
-- [ ] Remove function from `src/parsers/samyutta_nikaya_tika.rs`
-- [ ] Remove function from `src/parsers/anguttara_nikaya_mula.rs`
-- [ ] Remove function from `src/parsers/anguttara_nikaya_atthakatha.rs`
-- [ ] Remove function from `src/parsers/anguttara_nikaya_tika.rs`
-- [ ] Remove function from `src/parsers/general.rs`
-- [ ] Run `cargo check` to verify compilation
-- [ ] Run `cargo test` to verify all tests pass
+- [x] Add `extract_sutta_title_from_content` function to `src/parsers/helpers.rs`
+- [x] Remove function from `src/parsers/digha_nikaya_mula.rs`
+- [x] Remove function from `src/parsers/digha_nikaya_atthakatha.rs`
+- [x] Remove function from `src/parsers/digha_nikaya_tika.rs`
+- [x] Remove function from `src/parsers/majjhima_nikaya_mula.rs`
+- [x] Remove function from `src/parsers/majjhima_nikaya_atthakatha.rs`
+- [x] Remove function from `src/parsers/majjhima_nikaya_tika.rs`
+- [x] Remove function from `src/parsers/samyutta_nikaya_mula.rs`
+- [x] Remove function from `src/parsers/samyutta_nikaya_atthakatha.rs`
+- [x] Remove function from `src/parsers/samyutta_nikaya_tika.rs`
+- [x] Remove function from `src/parsers/anguttara_nikaya_mula.rs`
+- [x] Remove function from `src/parsers/anguttara_nikaya_atthakatha.rs`
+- [x] Remove function from `src/parsers/anguttara_nikaya_tika.rs`
+- [x] Remove function from `src/parsers/general.rs`
+- [x] Run `cargo check` to verify compilation
+- [x] Run `cargo test` to verify all tests pass
 
 ## Rollback Plan
 
@@ -271,10 +271,10 @@ If issues are encountered:
 
 ## Verification Checklist
 
-- [ ] All 13 parser files compile successfully
-- [ ] All tests pass
-- [ ] Function behavior is identical to before refactoring
-- [ ] No duplicate function definitions remain in parser files
+- [x] All 13 parser files compile successfully
+- [x] All tests pass
+- [x] Function behavior is identical to before refactoring
+- [x] No duplicate function definitions remain in parser files
 
 ## Notes
 

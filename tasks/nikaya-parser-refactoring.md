@@ -46,7 +46,7 @@ Instead of blindly extracting everything, we need a **nuanced approach** that:
 
 ## Detailed Refactoring Cases
 
-### Case 1: HierarchyTracker Struct (SAFE TO EXTRACT)
+### **DONE** Case 1: HierarchyTracker Struct (SAFE TO EXTRACT)
 
 **Status**: ✅ **100% identical across all files**
 
@@ -121,7 +121,7 @@ impl HierarchyTracker {
 
 ---
 
-### Case 2: FragmentBoundaryDetector Struct (PARTIALLY EXTRACTABLE)
+### **TODO** Case 2: FragmentBoundaryDetector Struct (PARTIALLY EXTRACTABLE)
 
 **Status**: ⚠️ **95% identical with one SN-specific variation**
 
@@ -176,7 +176,7 @@ impl HierarchyTracker {
 
 ---
 
-### Case 3: extract_sutta_title_from_content Function (SAFE TO EXTRACT)
+### **DONE** Case 3: extract_sutta_title_from_content Function (SAFE TO EXTRACT)
 
 **Status**: ✅ **100% identical across all files**
 
@@ -409,7 +409,7 @@ if has_sutta_content {
 
 ---
 
-### Case 7: XmlParser Trait Implementations (CAN BE GENERATED)
+### **TODO** Case 7: XmlParser Trait Implementations (CAN BE GENERATED)
 
 **Status**: ✅ **100% identical pattern across all files**
 
