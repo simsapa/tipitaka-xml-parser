@@ -3,7 +3,7 @@
 //! This module provides the high-level API for processing XML files
 //! and directories with the fragment-based parser.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use super::encoding::read_xml_file;
@@ -38,6 +38,7 @@ pub struct ProcessingStats {
 /// Complete import process for Tipitaka XML files using fragment-based parser
 pub struct TipitakaImporter {
     overrides: ParserOverrides,
+    reference_db_path: Option<PathBuf>,
 }
 
 impl TipitakaImporter {
@@ -48,6 +49,7 @@ impl TipitakaImporter {
     pub fn new() -> Result<Self> {
         Ok(Self {
             overrides: ParserOverrides::default(),
+            reference_db_path: None,
         })
     }
 
@@ -66,6 +68,12 @@ impl TipitakaImporter {
     /// Set full parser overrides for the importer
     pub fn with_overrides(mut self, overrides: ParserOverrides) -> Self {
         self.overrides = overrides;
+        self
+    }
+
+    /// Set reference database path for row count validation
+    pub fn with_reference_db(mut self, path: PathBuf) -> Self {
+        self.reference_db_path = Some(path);
         self
     }
 
@@ -104,6 +112,7 @@ impl TipitakaImporter {
     pub fn export_fragments(&self, xml_path: &Path, fragments_db_path: &Path) -> Result<usize> {
         use super::export_fragments_to_db;
         use super::reconstruct_xml_from_db;
+        use super::fragment_exporter::count_fragments_in_db;
         use crate::logger;
 
         let filename = xml_path
@@ -124,6 +133,25 @@ impl TipitakaImporter {
             &self.overrides,
             true
         )?;
+
+        // Validate that first and last fragments are Headers
+        super::fragment_exporter::validate_first_last_headers(&fragments, &filename)?;
+
+        // Verify fragment count matches reference DB if available
+        if let Some(ref_db_path) = &self.reference_db_path {
+            let ref_count = count_fragments_in_db(ref_db_path, &filename)?;
+            let new_count = fragments.len();
+
+            if new_count != ref_count {
+                return Err(ParserError::RowCountMismatch {
+                    filename: filename.clone(),
+                    new_count,
+                    ref_count,
+                }.into());
+            }
+
+            logger::info(&format!("Fragment count verified for {} ({} fragments)", filename, new_count));
+        }
 
         // Export to fragments database
         let count = export_fragments_to_db(&fragments, &nikaya_structure, fragments_db_path)?;

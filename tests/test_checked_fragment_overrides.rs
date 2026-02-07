@@ -58,12 +58,19 @@ fn test_correction_overrides_precedence() {
             end_char: None,
             sc_code: Some("dn1.override".to_string()),
             sc_sutta: Some("Override Sutta Title".to_string()),
+            cst_code: None,
+            cst_vagga: None,
+            cst_sutta: None,
+            cst_paranum: None,
+            frag_review: None,
+            frag_type: None,
         },
     );
 
     let overrides = ParserOverrides {
         adjustments: None,
         correction_overrides: Some(correction_overrides),
+        pali_titles: None,
     };
 
     let fragments_with_override =
@@ -292,12 +299,19 @@ fn test_boundary_override_from_checked_fragment() {
             end_char: Some(0),
             sc_code: None,
             sc_sutta: None,
+            cst_code: None,
+            cst_vagga: None,
+            cst_sutta: None,
+            cst_paranum: None,
+            frag_review: None,
+            frag_type: None,
         },
     );
 
     let overrides = ParserOverrides {
         adjustments: None,
         correction_overrides: Some(correction_overrides),
+        pali_titles: None,
     };
 
     let fragments_with_override =
@@ -404,12 +418,19 @@ fn test_boundary_override_precedence() {
             end_char: Some(0),
             sc_code: None,
             sc_sutta: None,
+            cst_code: None,
+            cst_vagga: None,
+            cst_sutta: None,
+            cst_paranum: None,
+            frag_review: None,
+            frag_type: None,
         },
     );
 
     let overrides = ParserOverrides {
         adjustments: Some(adjustments),
         correction_overrides: Some(correction_overrides),
+        pali_titles: None,
     };
 
     let fragments_with_both =
@@ -506,12 +527,19 @@ fn test_header_fragment_boundary_continuity_with_override() {
             end_char: Some(extended_end_char),
             sc_code: None,
             sc_sutta: None,
+            cst_code: None,
+            cst_vagga: None,
+            cst_sutta: None,
+            cst_paranum: None,
+            frag_review: None,
+            frag_type: None,
         },
     );
 
     let overrides = ParserOverrides {
         adjustments: None,
         correction_overrides: Some(correction_overrides),
+        pali_titles: None,
     };
 
     let fragments_with_override =
@@ -631,12 +659,19 @@ fn test_boundary_override_content_extraction() {
             end_char: Some(0), // At start of BBBB line
             sc_code: None,
             sc_sutta: None,
+            cst_code: None,
+            cst_vagga: None,
+            cst_sutta: None,
+            cst_paranum: None,
+            frag_review: None,
+            frag_type: None,
         },
     );
 
     let overrides = ParserOverrides {
         adjustments: None,
         correction_overrides: Some(correction_overrides),
+        pali_titles: None,
     };
 
     let fragments_with_override =

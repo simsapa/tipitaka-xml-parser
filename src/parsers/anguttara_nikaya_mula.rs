@@ -802,12 +802,19 @@ pub fn parse_into_fragments(
                                 
                                 // Only close if this is a Sutta fragment and has actual sutta content
                                 if matches!(frag_type, FragmentType::Sutta) {
-                                    let tentative_content = xml_content[frag_start_pos..event_start_pos].to_string();
-                                    let has_sutta_content = tentative_content.contains("rend=\"subhead\"") || 
-                                                           tentative_content.contains("rend=\"chapter\"") ||
-                                                           tentative_content.contains("rend=\"bodytext\"");
-                                    
-                                    if has_sutta_content {
+                                    // When overrides have pushed the fragment start to or past this
+                                    // boundary, always close the fragment to maintain frag_idx alignment
+                                    // with correction overrides (e.g., collapsed/moved fragments).
+                                    let should_close = if frag_start_pos >= event_start_pos {
+                                        true
+                                    } else {
+                                        let tentative_content = xml_content[frag_start_pos..event_start_pos].to_string();
+                                        tentative_content.contains("rend=\"subhead\"") ||
+                                        tentative_content.contains("rend=\"chapter\"") ||
+                                        tentative_content.contains("rend=\"bodytext\"")
+                                    };
+
+                                    if should_close {
                                         // Close at the current position (before the new vagga/sutta div)
                                         let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                                             xml_content,
@@ -895,12 +902,19 @@ pub fn parse_into_fragments(
                                     (current_fragment_start, current_frag_type.as_ref()) {
                                     
                                     if matches!(frag_type, FragmentType::Sutta) {
-                                        let tentative_content = xml_content[frag_start_pos..event_start_pos].to_string();
-                                        let has_sutta_content = tentative_content.contains("rend=\"subhead\"") || 
-                                                               tentative_content.contains("rend=\"chapter\"") ||
-                                                               tentative_content.contains("rend=\"bodytext\"");
-                                        
-                                        if has_sutta_content {
+                                        // When overrides have pushed the fragment start to or past this
+                                        // boundary, always close the fragment to maintain frag_idx alignment
+                                        // with correction overrides (e.g., collapsed/moved fragments).
+                                        let should_close = if frag_start_pos >= event_start_pos {
+                                            true
+                                        } else {
+                                            let tentative_content = xml_content[frag_start_pos..event_start_pos].to_string();
+                                            tentative_content.contains("rend=\"subhead\"") ||
+                                            tentative_content.contains("rend=\"chapter\"") ||
+                                            tentative_content.contains("rend=\"bodytext\"")
+                                        };
+
+                                        if should_close {
                                             // Close at the current position (before the new vagga chapter)
                                             let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                                                 xml_content,

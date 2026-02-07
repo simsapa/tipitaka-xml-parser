@@ -1036,16 +1036,16 @@ fn regenerate(request: Json<RegenerateRequest>) -> Json<RegenerateResponse> {
     // Clean up temp file
     let _ = fs::remove_file(&temp_xml_list);
     
-    // Step 4: Replace current database with new one (if requested and parse was successful)
+    // Step 4: Replace current database with new one (if parse was successful)
     let mut db_replaced = false;
-    if !use_reference_db && parse_success {
+    if parse_success {
         output.push_str("=== Replacing Current Database ===\n");
         let current_db_path = Path::new(&settings.db_path);
         let new_db_file = Path::new(new_db_path);
-        
+
         if new_db_file.exists() {
             output.push_str(&format!("Copying {:?} to {:?}\n", new_db_file, current_db_path));
-            
+
             match fs::copy(new_db_file, current_db_path) {
                 Ok(bytes) => {
                     output.push_str(&format!("Replaced {} bytes successfully\n", bytes));
@@ -1075,7 +1075,7 @@ fn regenerate(request: Json<RegenerateRequest>) -> Json<RegenerateResponse> {
 /// This endpoint reparses a single file while preserving checked fragment overrides
 /// and frag_review status from the current database.
 #[post("/api/reparse-file", data = "<request>")]
-fn reparse_file(
+async fn reparse_file(
     request: Json<ReparseFileRequest>,
     db_state: &State<DbState>
 ) -> Json<ReparseFileResponse> {
@@ -1083,7 +1083,7 @@ fn reparse_file(
     use crate::encoding::read_xml_file;
     use crate::nikaya_detector::detect_nikaya_structure;
     use crate::xml_parser::parse_into_fragments;
-    use crate::fragment_exporter::{export_fragments_to_db, extract_correction_overrides, restore_frag_review_status};
+    use crate::fragment_exporter::{export_fragments_to_db, extract_correction_overrides};
     use crate::types::{load_fragment_adjustments, ParserOverrides};
 
     let cst_file = &request.cst_file;
@@ -1157,10 +1157,12 @@ fn reparse_file(
         output.push_str(&format!("  Found {} existing fragments\n\n", file_exists));
     }
 
-    // Step 2: Extract correction overrides and frag_review status from current DB
+    // Step 2: Extract correction overrides from current DB
+    // Note: frag_review status is now included in correction_overrides and will be applied
+    // during parsing via apply_sc_overrides(), no need for separate restoration step
     output.push_str("Step 2: Extracting correction overrides from current database...\n");
     let db_path = Path::new(&settings.db_path);
-    let (correction_overrides, review_status) = match extract_correction_overrides(db_path, cst_file) {
+    let (correction_overrides, _review_status) = match extract_correction_overrides(db_path, cst_file) {
         Ok(result) => result,
         Err(e) => {
             return Json(ReparseFileResponse {
@@ -1171,8 +1173,7 @@ fn reparse_file(
             });
         }
     };
-    output.push_str(&format!("  Extracted {} correction overrides\n", correction_overrides.len()));
-    output.push_str(&format!("  Extracted {} frag_review statuses to restore\n\n", review_status.len()));
+    output.push_str(&format!("  Extracted {} correction overrides (includes frag_review status)\n\n", correction_overrides.len()));
 
     // Step 3: Load FragmentAdjustments from embedded TSV
     output.push_str("Step 3: Loading fragment adjustments from embedded TSV...\n");
@@ -1187,16 +1188,31 @@ fn reparse_file(
         }
     };
 
-    // Step 4: Construct ParserOverrides
-    output.push_str("Step 4: Constructing parser overrides...\n");
+    // Step 4: Fetch Pali titles from ArangoDB (for sc_sutta population)
+    output.push_str("Step 4: Fetching Pali titles from ArangoDB...\n");
+    let pali_titles = match arangodb::get_pali_titles().await {
+        Ok(titles) => {
+            output.push_str(&format!("  Loaded {} Pali titles from ArangoDB\n\n", titles.len()));
+            Some(titles)
+        }
+        Err(e) => {
+            output.push_str(&format!("  Warning: Could not fetch Pali titles: {}\n", e));
+            output.push_str("  Note: sc_sutta titles will not be populated for propagated sc_codes\n\n");
+            None
+        }
+    };
+
+    // Step 5: Construct ParserOverrides
+    output.push_str("Step 5: Constructing parser overrides...\n");
     let overrides = ParserOverrides {
         adjustments,
         correction_overrides: if correction_overrides.is_empty() { None } else { Some(correction_overrides) },
+        pali_titles,
     };
     output.push_str("  ParserOverrides constructed\n\n");
 
-    // Step 5: Read and parse the XML file
-    output.push_str("Step 5: Reading and parsing XML file...\n");
+    // Step 6: Read and parse the XML file
+    output.push_str("Step 6: Reading and parsing XML file...\n");
     let xml_path = Path::new(&settings.xml_dir).join(cst_file);
 
     if !xml_path.exists() {
@@ -1254,10 +1270,12 @@ fn reparse_file(
     };
 
     // Step 6: Export fragments to DB (replaces existing)
+    // Note: frag_review status is already set on fragments during parsing and will be
+    // exported along with all other fragment fields
     output.push_str("Step 6: Exporting fragments to database...\n");
     let fragments_count = match export_fragments_to_db(&fragments, &nikaya_structure, db_path) {
         Ok(count) => {
-            output.push_str(&format!("  Exported {} fragments (replaced existing)\n\n", count));
+            output.push_str(&format!("  Exported {} fragments (replaced existing, frag_review status preserved)\n\n", count));
             count
         }
         Err(e) => {
@@ -1270,26 +1288,16 @@ fn reparse_file(
         }
     };
 
-    // Step 7: Restore frag_review status
-    output.push_str("Step 7: Restoring frag_review status...\n");
-    let review_status_restored = match restore_frag_review_status(db_path, cst_file, &review_status) {
-        Ok(count) => {
-            output.push_str(&format!("  Restored {} frag_review statuses\n\n", count));
-            count
-        }
-        Err(e) => {
-            output.push_str(&format!("  Warning: Failed to restore frag_review status: {}\n\n", e));
-            0
-        }
-    };
-
     output.push_str("=== Reparse completed successfully ===\n");
+
+    // Count how many fragments have review status for reporting
+    let review_status_count = fragments.iter().filter(|f| f.frag_review.is_some()).count();
 
     Json(ReparseFileResponse {
         success: true,
         output,
         fragments_count,
-        review_status_restored,
+        review_status_restored: review_status_count,
     })
 }
 

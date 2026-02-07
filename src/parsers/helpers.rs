@@ -479,19 +479,33 @@ pub fn apply_boundary_override(
 /// 2. Parse the SC code to extract context (samyutta/nipata number)
 /// 3. Propagate context to subsequent fragments with null sc_code
 /// 4. Stop propagation when hitting a fragment with non-null sc_code
+/// 5. Look up and populate sc_sutta titles from pali_titles cache when available
 ///
 /// # Arguments
 /// * `fragments` - Mutable vector of fragments
 /// * `correction_overrides` - Correction fragment overrides from database
 /// * `cst_file` - The XML file name (for key lookup)
+/// * `pali_titles` - Optional cache of Pali titles from ArangoDB (sc_code -> title)
 pub fn apply_sc_overrides(
     fragments: &mut Vec<XmlFragment>,
     correction_overrides: &CorrectionFragmentOverrides,
     cst_file: &str,
+    pali_titles: Option<&std::collections::HashMap<String, String>>,
 ) {
     // Collect direct overrides and parseable overrides for propagation
     let mut direct_overrides: Vec<(usize, String, Option<String>)> = Vec::new();
     let mut propagation_points: Vec<(usize, ScCodeComponents)> = Vec::new();
+
+    // Collect metadata field overrides
+    let mut metadata_overrides: Vec<(
+        usize,
+        Option<String>, // cst_code
+        Option<String>, // cst_vagga
+        Option<String>, // cst_sutta
+        Option<String>, // cst_paranum
+        Option<String>, // frag_review
+        Option<crate::types::FragmentType>, // frag_type
+    )> = Vec::new();
 
     for (idx, fragment) in fragments.iter().enumerate() {
         let key = FragmentKey {
@@ -500,6 +514,7 @@ pub fn apply_sc_overrides(
         };
 
         if let Some(override_data) = correction_overrides.get(&key) {
+            // Collect SC field overrides
             if let Some(ref sc_code) = override_data.sc_code {
                 // Always apply the sc_code directly
                 direct_overrides.push((idx, sc_code.clone(), override_data.sc_sutta.clone()));
@@ -512,16 +527,49 @@ pub fn apply_sc_overrides(
                 // Override has sc_sutta but no sc_code - just apply sc_sutta
                 direct_overrides.push((idx, String::new(), override_data.sc_sutta.clone()));
             }
+
+            // Collect CST metadata field overrides (no propagation needed)
+            metadata_overrides.push((
+                idx,
+                override_data.cst_code.clone(),
+                override_data.cst_vagga.clone(),
+                override_data.cst_sutta.clone(),
+                override_data.cst_paranum.clone(),
+                override_data.frag_review.clone(),
+                override_data.frag_type.clone(),
+            ));
         }
     }
 
-    // Apply direct overrides
+    // Apply direct SC overrides
     for (idx, sc_code, sc_sutta) in direct_overrides {
         if !sc_code.is_empty() {
             fragments[idx].sc_code = Some(sc_code);
         }
         if sc_sutta.is_some() {
             fragments[idx].sc_sutta = sc_sutta;
+        }
+    }
+
+    // Apply metadata field overrides
+    for (idx, cst_code, cst_vagga, cst_sutta, cst_paranum, frag_review, frag_type) in metadata_overrides {
+        if let Some(code) = cst_code {
+            fragments[idx].cst_code = Some(code);
+        }
+        if let Some(vagga) = cst_vagga {
+            fragments[idx].cst_vagga = Some(vagga);
+        }
+        if let Some(sutta) = cst_sutta {
+            fragments[idx].cst_sutta = Some(sutta);
+        }
+        if let Some(paranum) = cst_paranum {
+            fragments[idx].cst_paranum = Some(paranum);
+        }
+        if let Some(review) = frag_review {
+            fragments[idx].frag_review = Some(review);
+        }
+        if let Some(ftype) = frag_type {
+            fragments[idx].frag_type = ftype;
         }
     }
 
@@ -539,7 +587,14 @@ pub fn apply_sc_overrides(
             // Derive sc_code from cst_code using propagated context
             if let Some(ref cst_code) = subsequent.cst_code {
                 if let Some(derived_sc) = derive_sc_code_from_context(cst_code, &components) {
-                    fragments[subsequent_idx].sc_code = Some(derived_sc);
+                    fragments[subsequent_idx].sc_code = Some(derived_sc.clone());
+
+                    // Look up and populate sc_sutta title from cache if available
+                    if let Some(titles_cache) = pali_titles {
+                        if let Some(title) = titles_cache.get(&derived_sc) {
+                            fragments[subsequent_idx].sc_sutta = Some(title.clone());
+                        }
+                    }
                 }
             }
         }
@@ -787,6 +842,12 @@ mod tests {
                 end_char: Some(50),
                 sc_code: None,
                 sc_sutta: None,
+                cst_code: None,
+                cst_vagga: None,
+                cst_sutta: None,
+                cst_paranum: None,
+                frag_review: None,
+                frag_type: None,
             }
         );
 

@@ -111,7 +111,12 @@ pub fn parse_into_fragments(
     // and propagates context to subsequent null fragments
     if let Some(ref correction_overrides) = overrides.correction_overrides {
         if !correction_overrides.is_empty() {
-            crate::parsers::helpers::apply_sc_overrides(&mut fragments, correction_overrides, cst_file);
+            crate::parsers::helpers::apply_sc_overrides(
+                &mut fragments,
+                correction_overrides,
+                cst_file,
+                overrides.pali_titles.as_ref()
+            );
         }
     }
 

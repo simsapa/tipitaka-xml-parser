@@ -123,6 +123,7 @@ fn test_reparse_preserves_correction_overrides() {
     let overrides = ParserOverrides {
         adjustments: None,
         correction_overrides: Some(correction_overrides),
+        pali_titles: None,
     };
 
     let reparsed_fragments =
@@ -248,6 +249,7 @@ fn test_reparse_restores_all_review_statuses() {
     let overrides = ParserOverrides {
         adjustments: None,
         correction_overrides: Some(correction_overrides),
+        pali_titles: None,
     };
 
     let reparsed_fragments =

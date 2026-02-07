@@ -58,9 +58,11 @@ fn parse_tipitaka_xml(
     };
 
     // Build ParserOverrides combining adjustments and correction overrides
+    // Note: pali_titles is None in CLI mode; could be enhanced to fetch from ArangoDB
     let overrides = ParserOverrides {
         adjustments,
         correction_overrides,
+        pali_titles: None,
     };
 
     // Collect XML files to process
@@ -145,6 +147,11 @@ fn parse_tipitaka_xml(
     // Add parser overrides (includes adjustments and checked overrides from reference DB)
     importer = importer.with_overrides(overrides);
 
+    // Set reference database path for row count validation
+    if let Some(ref_db_path) = reference_fragments_db {
+        importer = importer.with_reference_db(ref_db_path.to_path_buf());
+    }
+
     // Process each XML file
     let mut errors = 0;
 
@@ -160,27 +167,6 @@ fn parse_tipitaka_xml(
                 match importer.export_fragments(xml_file, frag_db_path) {
                     Ok(count) => {
                         logger::info(&format!("Exported {} fragments to {:?}", count, frag_db_path));
-                        
-                        // If reference database is provided, copy reviewed fragments
-                        if let Some(ref_db_path) = reference_fragments_db {
-                            let cst_file = xml_file.file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("unknown");
-                            
-                            match copy_reviewed_fragments_from_reference(frag_db_path, ref_db_path, cst_file) {
-                                Ok(copied) => {
-                                    if copied > 0 {
-                                        logger::info(&format!("Copied {} reviewed fragments from reference database", copied));
-                                        println!("  → Copied {} reviewed fragments from reference", copied);
-                                    }
-                                }
-                                Err(e) => {
-                                    // This is not a critical error, just log it
-                                    logger::error(&format!("Failed to copy reviewed fragments: {}", e));
-                                    eprintln!("  ⚠ {}", e);
-                                }
-                            }
-                        }
                     }
                     Err(e) => {
                         let error_msg = format!("Error exporting fragments from {:?}: {}", 
@@ -247,116 +233,6 @@ fn parse_tipitaka_xml(
     }
 
     Ok(())
-}
-
-/// Copy reviewed fragments from reference database to new database
-fn copy_reviewed_fragments_from_reference(
-    new_db_path: &Path,
-    reference_db_path: &Path,
-    cst_file: &str,
-) -> Result<usize, String> {
-    use diesel::prelude::*;
-    use diesel::sqlite::SqliteConnection;
-    use tipitaka_xml_parser::fragments_schema::xml_fragments;
-    use tipitaka_xml_parser::fragments_models::XmlFragmentRecord;
-    use tipitaka_xml_parser::logger;
-
-    // Connect to both databases
-    let mut new_conn = SqliteConnection::establish(new_db_path.to_str().unwrap())
-        .map_err(|e| format!("Failed to connect to new database: {}", e))?;
-    
-    let mut ref_conn = SqliteConnection::establish(reference_db_path.to_str().unwrap())
-        .map_err(|e| format!("Failed to connect to reference database: {}", e))?;
-
-    // Get row counts for this cst_file in both databases
-    let new_count: i64 = xml_fragments::table
-        .filter(xml_fragments::cst_file.eq(cst_file))
-        .count()
-        .get_result(&mut new_conn)
-        .map_err(|e| format!("Failed to count rows in new database: {}", e))?;
-    
-    let ref_count: i64 = xml_fragments::table
-        .filter(xml_fragments::cst_file.eq(cst_file))
-        .count()
-        .get_result(&mut ref_conn)
-        .map_err(|e| format!("Failed to count rows in reference database: {}", e))?;
-    
-    // Check if row counts match
-    if new_count != ref_count {
-        return Err(format!(
-            "Row count mismatch for {}: new db has {} rows, reference db has {} rows. Skipping reviewed fragment copy.",
-            cst_file, new_count, ref_count
-        ));
-    }
-    
-    // Get reviewed fragments from reference database (those with non-empty frag_review)
-    // This includes fragments with frag_review="checked" and frag_review="moved"
-    // Moved fragments are preserved to maintain the review history and structure
-    let reviewed_fragments: Vec<XmlFragmentRecord> = xml_fragments::table
-        .filter(xml_fragments::cst_file.eq(cst_file))
-        .filter(xml_fragments::frag_review.is_not_null())
-        .filter(xml_fragments::frag_review.ne(""))
-        .filter(xml_fragments::frag_review.ne("unchecked"))
-        .load(&mut ref_conn)
-        .map_err(|e| format!("Failed to load reviewed fragments from reference database: {}", e))?;
-    
-    if reviewed_fragments.is_empty() {
-        logger::info(&format!("No reviewed fragments found in reference database for {}", cst_file));
-        return Ok(0);
-    }
-    
-    logger::info(&format!("Found {} reviewed fragments in reference database for {}", reviewed_fragments.len(), cst_file));
-    
-    // For each reviewed fragment, replace the corresponding row in the new database
-    let mut copied_count = 0;
-    for ref_fragment in reviewed_fragments {
-        // Find the corresponding fragment in new database by cst_file and frag_idx
-        let new_fragment_id: Option<i32> = xml_fragments::table
-            .filter(xml_fragments::cst_file.eq(&ref_fragment.cst_file))
-            .filter(xml_fragments::frag_idx.eq(ref_fragment.frag_idx))
-            .select(xml_fragments::id)
-            .first(&mut new_conn)
-            .optional()
-            .map_err(|e| format!("Failed to find fragment in new database: {}", e))?;
-        
-        if let Some(new_id) = new_fragment_id {
-            // Use diesel to update all fields from reference fragment
-            use tipitaka_xml_parser::fragments_models::UpdateFragmentFromReference;
-            
-            let update = UpdateFragmentFromReference {
-                frag_type: ref_fragment.frag_type,
-                frag_review: ref_fragment.frag_review,
-                cst_code: ref_fragment.cst_code,
-                sc_code: ref_fragment.sc_code,
-                cst_vagga: ref_fragment.cst_vagga,
-                cst_sutta: ref_fragment.cst_sutta,
-                cst_paranum: ref_fragment.cst_paranum,
-                sc_sutta: ref_fragment.sc_sutta,
-                content_xml: ref_fragment.content_xml,
-                content_html: ref_fragment.content_html,
-                start_line: ref_fragment.start_line,
-                start_char: ref_fragment.start_char,
-                end_line: ref_fragment.end_line,
-                end_char: ref_fragment.end_char,
-                group_levels: ref_fragment.group_levels,
-            };
-            
-            diesel::update(xml_fragments::table.find(new_id))
-                .set(&update)
-                .execute(&mut new_conn)
-                .map_err(|e| format!("Failed to update fragment in new database: {}", e))?;
-            
-            copied_count += 1;
-        } else {
-            logger::error(&format!(
-                "Warning: Could not find matching fragment in new database for cst_file={}, frag_idx={}",
-                ref_fragment.cst_file, ref_fragment.frag_idx
-            ));
-        }
-    }
-    
-    logger::info(&format!("Copied {} reviewed fragments from reference database for {}", copied_count, cst_file));
-    Ok(copied_count)
 }
 
 /// Reconstruct XML file from fragments database
