@@ -1343,7 +1343,7 @@ async fn run_validation(db_state: &State<DbState>) -> Result<Json<ValidationRunR
         Err(_) => (false, None),
     };
 
-    let checks = validation::run_all_validations(&mut conn, pali_titles.as_ref());
+    let checks = validation::run_all_validations(&mut conn, &db_state.db_path, pali_titles.as_ref());
 
     Ok(Json(ValidationRunResponse {
         checks,

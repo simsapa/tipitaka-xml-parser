@@ -1,3 +1,6 @@
+web-ui:
+	cargo run -- web-ui
+
 db-remove-and-restore:
 	rm ./data/ -r; cp -r ../tipitaka-xml-data/data-2026-02-03/ ./data
 
