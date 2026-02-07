@@ -1,5 +1,7 @@
 # Plan 04: Extract FragmentBoundaryDetector to helpers.rs
 
+Status: **TODO**
+
 ## Implementation Overview
 
 **Risk Level**: 🟢 **Low** - 95% identical, SN version is a superset that handles all cases

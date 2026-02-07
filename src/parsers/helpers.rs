@@ -739,6 +739,145 @@ pub fn populate_sc_fields_from_tsv_conditional(
     Ok(())
 }
 
+// ============== HierarchyTracker ==============
+// NOTE: This was moved here from the individual nikaya parser files as part of
+// refactoring Plan 01. See tasks/01-hierarchy-tracker.md for details.
+
+use crate::types::{GroupType, GroupLevel};
+use crate::nikaya_structure::NikayaStructure;
+
+/// Hierarchy tracker for maintaining group level context
+///
+/// Tracks the current position in the nikaya hierarchy and manages
+/// entering/exiting levels according to the nikaya structure.
+#[derive(Debug, Clone)]
+pub struct HierarchyTracker {
+    current_levels: Vec<GroupLevel>,
+    nikaya_structure: NikayaStructure,
+}
+
+impl HierarchyTracker {
+    /// Create a new hierarchy tracker
+    pub fn new(nikaya_structure: NikayaStructure) -> Self {
+        Self {
+            current_levels: Vec::new(),
+            nikaya_structure,
+        }
+    }
+
+    /// Enter a new hierarchy level
+    ///
+    /// Determines the depth of the level type in the nikaya structure,
+    /// truncates current_levels to the appropriate depth, and adds the new level.
+    /// If a level of the same type exists at that depth, it updates the title but preserves the ID.
+    pub fn enter_level(
+        &mut self,
+        level_type: GroupType,
+        title: String,
+        id: Option<String>,
+        number: Option<i32>,
+    ) {
+
+        // Find the depth of this level type in the nikaya structure
+        let depth = self.nikaya_structure.levels
+            .iter()
+            .position(|t| matches!((t, &level_type),
+                (GroupType::Nikaya, GroupType::Nikaya) |
+                (GroupType::Book, GroupType::Book) |
+                (GroupType::Pannasaka, GroupType::Pannasaka) |
+                (GroupType::Vagga, GroupType::Vagga) |
+                (GroupType::Samyutta, GroupType::Samyutta) |
+                (GroupType::Sutta, GroupType::Sutta)
+            ));
+
+        if let Some(depth) = depth {
+            // Special case: If we're entering a Nikaya level (depth 0) and we already have
+            // levels (like Book), this means the XML has the nikaya tag INSIDE the book div.
+            // In this case, we should insert the Nikaya at the beginning rather than truncating.
+            if depth == 0 && matches!(level_type, GroupType::Nikaya) && !self.current_levels.is_empty() {
+                // Check if we already have a Nikaya level
+                if self.current_levels.first().map(|l| matches!(l.group_type, GroupType::Nikaya)).unwrap_or(false) {
+                    // Update existing Nikaya level
+                    self.current_levels[0] = GroupLevel {
+                        group_type: level_type,
+                        group_number: number,
+                        title,
+                        id,
+                    };
+                } else {
+                    // Insert Nikaya at the beginning
+                    self.current_levels.insert(0, GroupLevel {
+                        group_type: level_type,
+                        group_number: number,
+                        title,
+                        id,
+                    });
+                }
+                return;
+            }
+
+            // Check if we already have a level at this depth with the same type
+            if self.current_levels.len() > depth {
+                let existing = &self.current_levels[depth];
+                // Check if same type
+                let same_type = match (&existing.group_type, &level_type) {
+                    (GroupType::Nikaya, GroupType::Nikaya) |
+                    (GroupType::Book, GroupType::Book) |
+                    (GroupType::Pannasaka, GroupType::Pannasaka) |
+                    (GroupType::Vagga, GroupType::Vagga) |
+                    (GroupType::Samyutta, GroupType::Samyutta) |
+                    (GroupType::Sutta, GroupType::Sutta) => true,
+                    _ => false,
+                };
+
+                if same_type {
+                    // Update the existing level, but preserve ID if new ID is None
+                    let preserved_id = if id.is_none() {
+                        existing.id.clone()
+                    } else {
+                        id.clone()
+                    };
+
+                    // Only truncate child levels if we're providing a new ID OR if the title is changing
+                    // If id is None AND title is the same, we're just re-entering the same level
+                    // Otherwise, we're entering a NEW level (with a new title) and should truncate child levels
+                    let title_changed = existing.title != title;
+                    let should_truncate = id.is_some() || title_changed;
+
+                    if should_truncate {
+                        // Truncate levels after this one before updating
+                        self.current_levels.truncate(depth + 1);
+                    }
+
+                    self.current_levels[depth] = GroupLevel {
+                        group_type: level_type,
+                        group_number: number,
+                        title,
+                        id: preserved_id,
+                    };
+                    return;
+                }
+            }
+
+            // Truncate to the appropriate depth (remove levels at this depth and below)
+            self.current_levels.truncate(depth);
+
+            // Add the new level
+            self.current_levels.push(GroupLevel {
+                group_type: level_type,
+                group_number: number,
+                title,
+                id,
+            });
+        }
+    }
+
+    /// Get a clone of the current hierarchy levels
+    pub fn get_current_levels(&self) -> Vec<GroupLevel> {
+        self.current_levels.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,5 +1,7 @@
 # Plan 02: Extract extract_sutta_title_from_content to helpers.rs
 
+Status: **TODO**
+
 ## Implementation Overview
 
 **Risk Level**: 🟢 **Very Low** - 100% identical across all files

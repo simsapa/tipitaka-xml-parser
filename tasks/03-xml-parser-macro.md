@@ -1,5 +1,7 @@
 # Plan 03: Create Macro for XmlParser Trait Implementations
 
+Status: **TODO**
+
 ## Implementation Overview
 
 **Risk Level**: 🟢 **Very Low** - Identical pattern across all files
