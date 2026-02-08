@@ -121,7 +121,7 @@ impl HierarchyTracker {
 
 ---
 
-### **TODO** Case 2: FragmentBoundaryDetector Struct (PARTIALLY EXTRACTABLE)
+### **DONE** Case 2: FragmentBoundaryDetector Struct (PARTIALLY EXTRACTABLE)
 
 **Status**: ⚠️ **95% identical with one SN-specific variation**
 

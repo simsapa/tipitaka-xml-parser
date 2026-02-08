@@ -1,6 +1,6 @@
 # Plan 04: Extract FragmentBoundaryDetector to helpers.rs
 
-Status: **TODO**
+Status: **DONE**
 
 ## Implementation Overview
 
@@ -14,9 +14,14 @@ Status: **TODO**
 - `is_sutta_start()` method is 100% identical across all files
 - The struct is self-contained with no external dependencies
 
+**Verified 2026-02-07**: All 13 files were manually compared line-by-line. The only
+code difference is the `<head rend="chapter">` handler in `check_boundary()`. All other
+match arms, the struct definition, `new()`, and `is_sutta_start()` are byte-for-byte
+identical across all files.
+
 **Difference Analysis**:
 
-**DN/MN/AN version** (lines 220-228):
+**DN/MN/AN + general.rs version** (10 files):
 ```rust
 "head" if attributes.get("rend") == Some(&"chapter".to_string()) => {
     // In DN, chapter = Sutta
@@ -29,7 +34,7 @@ Status: **TODO**
 },
 ```
 
-**SN version** (lines 220-231):
+**SN version** (3 files: SN mula/att/tika):
 ```rust
 "head" if attributes.get("rend") == Some(&"chapter".to_string()) => {
     // In DN, chapter = Sutta
@@ -49,14 +54,15 @@ The SN version adds an `else if` branch that only executes when `nikaya_structur
 
 **Estimated Impact**:
 - Lines removed: ~1,794 lines (138 lines × 13 files)
-- Lines added: ~141 lines (in helpers.rs)
-- Net reduction: ~1,653 lines
+- Lines added: ~145 lines (in helpers.rs)
+- Net reduction: ~1,649 lines
 
 ## Current State
 
-The `FragmentBoundaryDetector` struct appears in every parser file at:
-- Lines 157-294 in DN/MN/AN
-- Lines 157-297 in SN (3 extra lines)
+The `FragmentBoundaryDetector` struct appears in every parser file. The struct starts
+at different line numbers depending on the file (e.g., line 33 in DN mula, line 35 in
+SN mula, line 43 in general.rs). Each implementation is ~138 lines (DN/MN/AN/general)
+or ~141 lines (SN).
 
 ```rust
 /// Fragment boundary detector
@@ -110,14 +116,25 @@ impl<'a> FragmentBoundaryDetector<'a> {
 
 **File**: `src/parsers/helpers.rs`
 
-Add after the `HierarchyTracker` definition:
+Add after the `HierarchyTracker` definition (after the `extract_sutta_title_from_content`
+function and before the `impl_xml_parser` macro). Place it in the section where
+`GroupType`, `NikayaStructure`, and `HashMap` are already available.
+
+**Required import**: Add `use std::collections::HashMap;` near the new section, since
+`HashMap` is not imported at the top of helpers.rs. (`GroupType` and `NikayaStructure`
+are already imported at line 746-747 for `HierarchyTracker`.)
 
 ```rust
+use std::collections::HashMap;
+
+// ============== FragmentBoundaryDetector ==============
+// NOTE: This was moved here from the individual nikaya parser files as part of
+// refactoring Plan 04. See tasks/04-boundary-detector.md for details.
+
 /// Fragment boundary detector
 ///
 /// Detects boundaries between fragments based on nikaya-specific rules
 /// and extracts relevant metadata.
-#[derive(Debug)]
 pub struct FragmentBoundaryDetector<'a> {
     nikaya_structure: &'a NikayaStructure,
     cst_file: &'a str,
@@ -128,7 +145,7 @@ impl<'a> FragmentBoundaryDetector<'a> {
     pub fn new(nikaya_structure: &'a NikayaStructure, cst_file: &'a str) -> Self {
         Self { nikaya_structure, cst_file }
     }
-    
+
     /// Check if an element marks a level boundary and extract metadata
     ///
     /// Returns Some((GroupType, title, id, number)) if this is a boundary element
@@ -258,25 +275,49 @@ impl<'a> FragmentBoundaryDetector<'a> {
 }
 ```
 
-**Note**: Changed visibility from `fn` to `pub fn` for all methods.
+**Notes**:
+- Changed visibility from `fn` to `pub fn` for all methods (required for cross-module access).
+- Removed `#[derive(Debug)]` since the original implementations don't have it. No code
+  currently prints/debugs the detector.
 
 ### Step 2: Update imports in each parser file
 
-**Add to imports in all 13 parser files**:
+**Add `FragmentBoundaryDetector` to the existing helpers import block in all 13 parser files**.
+
+The current import block looks like this (same in all files):
 ```rust
 use crate::parsers::helpers::{
     LineTrackingReader,
     extract_vagga_title_from_content,
+    extract_sutta_title_from_content,
     extract_first_paranum,
     apply_fragment_adjustment,
     populate_sc_fields_from_tsv_conditional,
+    HierarchyTracker,
+    impl_xml_parser,
+};
+```
+
+Add `FragmentBoundaryDetector` to this block:
+```rust
+use crate::parsers::helpers::{
+    LineTrackingReader,
+    extract_vagga_title_from_content,
+    extract_sutta_title_from_content,
+    extract_first_paranum,
+    apply_fragment_adjustment,
+    populate_sc_fields_from_tsv_conditional,
+    HierarchyTracker,
+    impl_xml_parser,
     FragmentBoundaryDetector,  // <-- ADD THIS
 };
 ```
 
 ### Step 3: Remove duplicate definitions
 
-**Remove lines 157-294** (or 157-297 in SN) from each of these files:
+**Remove the entire `FragmentBoundaryDetector` struct and impl block** from each of these files.
+The block to remove starts with `/// Fragment boundary detector` and ends with the closing
+`}` of the `impl` block (just before `/// Extract CST fields from fragment content`):
 - `src/parsers/digha_nikaya_mula.rs`
 - `src/parsers/digha_nikaya_atthakatha.rs`
 - `src/parsers/digha_nikaya_tika.rs`
@@ -316,36 +357,24 @@ cargo test --test test_anguttara_parsing
 
 ## Task List
 
-- [ ] Add `FragmentBoundaryDetector` struct to `src/parsers/helpers.rs`
-- [ ] Add `FragmentBoundaryDetector` to imports in `src/parsers/digha_nikaya_mula.rs`
-- [ ] Remove `FragmentBoundaryDetector` from `src/parsers/digha_nikaya_mula.rs`
-- [ ] Add `FragmentBoundaryDetector` to imports in `src/parsers/digha_nikaya_atthakatha.rs`
-- [ ] Remove `FragmentBoundaryDetector` from `src/parsers/digha_nikaya_atthakatha.rs`
-- [ ] Add `FragmentBoundaryDetector` to imports in `src/parsers/digha_nikaya_tika.rs`
-- [ ] Remove `FragmentBoundaryDetector` from `src/parsers/digha_nikaya_tika.rs`
-- [ ] Add `FragmentBoundaryDetector` to imports in `src/parsers/majjhima_nikaya_mula.rs`
-- [ ] Remove `FragmentBoundaryDetector` from `src/parsers/majjhima_nikaya_mula.rs`
-- [ ] Add `FragmentBoundaryDetector` to imports in `src/parsers/majjhima_nikaya_atthakatha.rs`
-- [ ] Remove `FragmentBoundaryDetector` from `src/parsers/majjhima_nikaya_atthakatha.rs`
-- [ ] Add `FragmentBoundaryDetector` to imports in `src/parsers/majjhima_nikaya_tika.rs`
-- [ ] Remove `FragmentBoundaryDetector` from `src/parsers/majjhima_nikaya_tika.rs`
-- [ ] Add `FragmentBoundaryDetector` to imports in `src/parsers/samyutta_nikaya_mula.rs`
-- [ ] Remove `FragmentBoundaryDetector` from `src/parsers/samyutta_nikaya_mula.rs`
-- [ ] Add `FragmentBoundaryDetector` to imports in `src/parsers/samyutta_nikaya_atthakatha.rs`
-- [ ] Remove `FragmentBoundaryDetector` from `src/parsers/samyutta_nikaya_atthakatha.rs`
-- [ ] Add `FragmentBoundaryDetector` to imports in `src/parsers/samyutta_nikaya_tika.rs`
-- [ ] Remove `FragmentBoundaryDetector` from `src/parsers/samyutta_nikaya_tika.rs`
-- [ ] Add `FragmentBoundaryDetector` to imports in `src/parsers/anguttara_nikaya_mula.rs`
-- [ ] Remove `FragmentBoundaryDetector` from `src/parsers/anguttara_nikaya_mula.rs`
-- [ ] Add `FragmentBoundaryDetector` to imports in `src/parsers/anguttara_nikaya_atthakatha.rs`
-- [ ] Remove `FragmentBoundaryDetector` from `src/parsers/anguttara_nikaya_atthakatha.rs`
-- [ ] Add `FragmentBoundaryDetector` to imports in `src/parsers/anguttara_nikaya_tika.rs`
-- [ ] Remove `FragmentBoundaryDetector` from `src/parsers/anguttara_nikaya_tika.rs`
-- [ ] Add `FragmentBoundaryDetector` to imports in `src/parsers/general.rs`
-- [ ] Remove `FragmentBoundaryDetector` from `src/parsers/general.rs`
+- [ ] Add `use std::collections::HashMap;` import to helpers.rs (near the new section)
+- [ ] Add `FragmentBoundaryDetector` struct + impl to `src/parsers/helpers.rs` (SN version)
+- [ ] For each of the 13 parser files: add `FragmentBoundaryDetector` to import block, remove local definition
+  - [ ] `src/parsers/digha_nikaya_mula.rs`
+  - [ ] `src/parsers/digha_nikaya_atthakatha.rs`
+  - [ ] `src/parsers/digha_nikaya_tika.rs`
+  - [ ] `src/parsers/majjhima_nikaya_mula.rs`
+  - [ ] `src/parsers/majjhima_nikaya_atthakatha.rs`
+  - [ ] `src/parsers/majjhima_nikaya_tika.rs`
+  - [ ] `src/parsers/samyutta_nikaya_mula.rs`
+  - [ ] `src/parsers/samyutta_nikaya_atthakatha.rs`
+  - [ ] `src/parsers/samyutta_nikaya_tika.rs`
+  - [ ] `src/parsers/anguttara_nikaya_mula.rs`
+  - [ ] `src/parsers/anguttara_nikaya_atthakatha.rs`
+  - [ ] `src/parsers/anguttara_nikaya_tika.rs`
+  - [ ] `src/parsers/general.rs`
 - [ ] Run `cargo check` to verify compilation
 - [ ] Run `cargo test` to verify all tests pass
-- [ ] Run nikaya-specific tests to verify boundary detection behavior
 
 ## Rollback Plan
 
