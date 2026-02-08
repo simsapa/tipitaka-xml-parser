@@ -367,6 +367,21 @@ enum Commands {
         #[arg(long)]
         port: Option<u16>,
     },
+
+    /// Regenerate fragments database from XML files
+    ///
+    /// Reads configuration from web-ui-config.toml (or specified config file) and regenerates
+    /// the fragments database. By default, uses the current database as a reference to preserve
+    /// correction overrides and review status.
+    Regenerate {
+        /// Optional path to config file (defaults to web-ui-config.toml in current directory)
+        #[arg(long, value_name = "CONFIG_PATH")]
+        config: Option<PathBuf>,
+
+        /// Don't use reference database - regenerate completely fresh without preserving corrections
+        #[arg(long, default_value_t = false)]
+        fresh: bool,
+    },
 }
 
 fn main() {
@@ -523,12 +538,12 @@ fn main() {
 
                 // Port from command line overrides config file
                 let actual_port = port.unwrap_or(settings.port);
-                
+
                 // Validate that db_path is configured
                 if settings.db_path.is_empty() {
                     return Err("Database path not configured. Please configure web-ui-config.toml or run with --config flag.".to_string());
                 }
-                
+
                 let db_path = PathBuf::from(&settings.db_path);
                 if !db_path.exists() {
                     return Err(format!("Fragments database does not exist: {:?}", db_path));
@@ -536,11 +551,11 @@ fn main() {
                 if !db_path.is_file() {
                     return Err(format!("Fragments database path is not a file: {:?}", db_path));
                 }
-                
+
                 logger::info(&format!("Starting web UI server on port {}", actual_port));
                 logger::info(&format!("Database: {:?}", db_path));
                 println!("Starting web UI on http://localhost:{}", actual_port);
-                
+
                 // This will block until the server is shut down
                 match web::start_server(&db_path, actual_port) {
                     Ok(_) => {
@@ -554,8 +569,92 @@ fn main() {
                     }
                 }
             };
-            
+
             run_webui()
+        }
+
+        Commands::Regenerate { config, fresh } => {
+            use tipitaka_xml_parser::web;
+            use tipitaka_xml_parser::regenerate::{RegenerateConfig, regenerate_fragments_db};
+
+            // use_reference_db is true by default, unless --fresh is specified
+            let use_reference_db = !fresh;
+
+            // Helper function to avoid early return issues
+            let run_regenerate = || -> Result<(), String> {
+                // Load settings from config file
+                let mut settings = if let Some(config_path) = &config {
+                    // Load from custom config path
+                    web::load_settings_from_path(config_path)
+                        .map_err(|e| format!("Failed to load config from {:?}: {}", config_path, e))?
+                } else {
+                    // Load from default path or create default settings
+                    web::load_or_create_default_settings()
+                        .map_err(|e| format!("Failed to load settings: {}", e))?
+                };
+
+                // Generate default paths
+                web::generate_default_paths(&mut settings);
+
+                // Validate required settings
+                if settings.db_path.is_empty() {
+                    return Err("Database path not configured. Please configure web-ui-config.toml or run with --config flag.".to_string());
+                }
+                if settings.xml_dir.is_empty() {
+                    return Err("XML directory not configured. Please configure settings first.".to_string());
+                }
+                if settings.xml_filenames.is_empty() {
+                    return Err("No XML filenames configured. Please configure settings first.".to_string());
+                }
+
+                let new_db_path = settings.new_fragments_db_path.as_ref()
+                    .ok_or_else(|| "New fragments DB path not configured".to_string())?;
+                let ref_db_path = settings.reference_fragments_db_path.as_ref()
+                    .ok_or_else(|| "Reference fragments DB path not configured".to_string())?;
+                let new_tsv_path = settings.new_fragments_tsv_path.as_ref()
+                    .ok_or_else(|| "New fragments TSV path not configured".to_string())?;
+                let ref_tsv_path = settings.reference_fragments_tsv_path.as_ref()
+                    .ok_or_else(|| "Reference fragments TSV path not configured".to_string())?;
+
+                // Build regeneration config from settings
+                let regen_config = RegenerateConfig {
+                    db_path: PathBuf::from(&settings.db_path),
+                    new_db_path: PathBuf::from(new_db_path),
+                    reference_db_path: PathBuf::from(ref_db_path),
+                    new_tsv_path: PathBuf::from(new_tsv_path),
+                    reference_tsv_path: PathBuf::from(ref_tsv_path),
+                    xml_dir: PathBuf::from(&settings.xml_dir),
+                    xml_filenames: settings.xml_filenames.clone(),
+                    use_reference_db,
+                };
+
+                logger::info(&format!("Regenerating fragments database (use_reference_db: {})", use_reference_db));
+                println!("Regenerating fragments database...");
+                println!("  Database: {}", settings.db_path);
+                println!("  XML directory: {}", settings.xml_dir);
+                println!("  XML files: {} files", settings.xml_filenames.len());
+                println!("  Use reference DB: {}", use_reference_db);
+                println!();
+
+                // Run regeneration
+                let result = regenerate_fragments_db(&regen_config);
+
+                // Print output
+                println!("{}", result.output);
+
+                if result.success {
+                    if result.db_replaced {
+                        println!("Regeneration completed successfully. Database has been replaced.");
+                    } else {
+                        println!("Regeneration completed successfully.");
+                    }
+                    Ok(())
+                } else {
+                    Err("Regeneration failed. See output above for details.".to_string())
+                }
+            };
+
+            run_regenerate()
         }
     };
 

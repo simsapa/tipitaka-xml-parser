@@ -791,10 +791,8 @@ struct ReparseFileResponse {
 /// POST /api/regenerate - Run regeneration process
 #[post("/api/regenerate", data = "<request>")]
 fn regenerate(request: Json<RegenerateRequest>) -> Json<RegenerateResponse> {
-    use std::process::Command;
-    use std::fs;
-    use std::path::Path;
-    
+    use crate::regenerate::{RegenerateConfig, regenerate_fragments_db};
+
     // Load settings
     let mut settings = match settings::load_settings() {
         Ok(s) => s,
@@ -806,39 +804,28 @@ fn regenerate(request: Json<RegenerateRequest>) -> Json<RegenerateResponse> {
             });
         }
     };
-    
+
     // Generate default paths
     settings::generate_default_paths(&mut settings);
-    
+
     // Validate required settings
     if settings.xml_dir.is_empty() {
         return Json(RegenerateResponse {
             success: false,
             output: "ERROR: XML directory not configured. Please configure settings first.".to_string(),
-                db_replaced: false,
-            });
+            db_replaced: false,
+        });
     }
     if settings.xml_filenames.is_empty() {
         return Json(RegenerateResponse {
             success: false,
             output: "ERROR: No XML filenames configured. Please configure settings first.".to_string(),
-                db_replaced: false,
-            });
+            db_replaced: false,
+        });
     }
-    
-    let xml_parser_path = match settings.xml_parser_binary_path.as_ref() {
-        Some(p) => p,
-        None => {
-            return Json(RegenerateResponse {
-                success: false,
-                output: "ERROR: XML parser binary path not configured".to_string(),
-                db_replaced: false,
-            });
-        }
-    };
-    
+
     let new_db_path = match settings.new_fragments_db_path.as_ref() {
-        Some(p) => p,
+        Some(p) => p.clone(),
         None => {
             return Json(RegenerateResponse {
                 success: false,
@@ -847,9 +834,9 @@ fn regenerate(request: Json<RegenerateRequest>) -> Json<RegenerateResponse> {
             });
         }
     };
-    
+
     let ref_db_path = match settings.reference_fragments_db_path.as_ref() {
-        Some(p) => p,
+        Some(p) => p.clone(),
         None => {
             return Json(RegenerateResponse {
                 success: false,
@@ -858,9 +845,9 @@ fn regenerate(request: Json<RegenerateRequest>) -> Json<RegenerateResponse> {
             });
         }
     };
-    
+
     let new_tsv_path = match settings.new_fragments_tsv_path.as_ref() {
-        Some(p) => p,
+        Some(p) => p.clone(),
         None => {
             return Json(RegenerateResponse {
                 success: false,
@@ -869,9 +856,9 @@ fn regenerate(request: Json<RegenerateRequest>) -> Json<RegenerateResponse> {
             });
         }
     };
-    
+
     let ref_tsv_path = match settings.reference_fragments_tsv_path.as_ref() {
-        Some(p) => p,
+        Some(p) => p.clone(),
         None => {
             return Json(RegenerateResponse {
                 success: false,
@@ -880,193 +867,26 @@ fn regenerate(request: Json<RegenerateRequest>) -> Json<RegenerateResponse> {
             });
         }
     };
-    
-    let mut output = String::new();
-    let use_reference_db = request.use_reference_db;
-    
-    // Step 0: Copy current database to reference database (only if using reference)
-    if use_reference_db {
-        output.push_str("=== Preparing Reference Database ===\n");
-        let current_db_path = Path::new(&settings.db_path);
-        let ref_db_file = Path::new(ref_db_path);
-        
-        if current_db_path.exists() {
-            output.push_str(&format!("Copying {:?} to {:?}\n", current_db_path, ref_db_file));
-            
-            match fs::copy(current_db_path, ref_db_file) {
-                Ok(bytes) => {
-                    output.push_str(&format!("Copied {} bytes successfully\n\n", bytes));
-                }
-                Err(e) => {
-                    return Json(RegenerateResponse {
-                        success: false,
-                        output: format!("{}ERROR: Failed to copy database to reference: {}\n", output, e),
-                        db_replaced: false,
-                    });
-                }
-            }
-        } else {
-            return Json(RegenerateResponse {
-                success: false,
-                output: format!("{}ERROR: Current database does not exist: {:?}\n", output, current_db_path),
-                db_replaced: false,
-            });
-        }
-    } else {
-        output.push_str("=== Generating Fresh Database ===\n");
-        output.push_str("Not using reference database - generating completely new fragments\n\n");
-    }
-    
-    // Create temporary XML list file
-    let temp_xml_list = std::env::temp_dir().join("tipitaka_xml_list.txt");
-    let xml_list_content = settings.xml_filenames
-        .iter()
-        .map(|filename| {
-            Path::new(&settings.xml_dir)
-                .join(filename)
-                .to_string_lossy()
-                .to_string()
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    
-    if let Err(e) = fs::write(&temp_xml_list, &xml_list_content) {
-        return Json(RegenerateResponse {
-            success: false,
-            output: format!("{}ERROR: Failed to write temp XML list: {}", output, e),
-            db_replaced: false,
-        });
-    }
-    
-    output.push_str(&format!("Created temporary XML list with {} files\n\n", settings.xml_filenames.len()));
-    
-    // Command 1: Parse Tipitaka XML
-    output.push_str("=== Parsing Tipitaka XML ===\n");
-    
-    let mut cmd = Command::new(xml_parser_path);
-    cmd.arg("parse-tipitaka-xml")
-        .arg("--xml-list")
-        .arg(&temp_xml_list)
-        .arg("--new-fragments-db")
-        .arg(new_db_path)
-        .env("ENABLE_PRINT_LOG", "false");
-    
-    if use_reference_db {
-        output.push_str(&format!("Command: {} parse-tipitaka-xml --xml-list {:?} --new-fragments-db {:?} --reference-fragments-db {:?}\n\n",
-            xml_parser_path, temp_xml_list, new_db_path, ref_db_path));
-        cmd.arg("--reference-fragments-db").arg(ref_db_path);
-    } else {
-        output.push_str(&format!("Command: {} parse-tipitaka-xml --xml-list {:?} --new-fragments-db {:?}\n\n",
-            xml_parser_path, temp_xml_list, new_db_path));
-    }
-    
-    let cmd1 = match cmd.output() {
-        Ok(output) => output,
-        Err(e) => {
-            let _ = fs::remove_file(&temp_xml_list);
-            return Json(RegenerateResponse {
-                success: false,
-                output: format!("{}ERROR: Failed to run parse command: {}\nMake sure the parser binary exists at: {}", 
-                    output, e, xml_parser_path),
-                db_replaced: false,
-            });
-        }
+
+    // Build regeneration config from settings
+    let config = RegenerateConfig {
+        db_path: PathBuf::from(&settings.db_path),
+        new_db_path: PathBuf::from(&new_db_path),
+        reference_db_path: PathBuf::from(&ref_db_path),
+        new_tsv_path: PathBuf::from(&new_tsv_path),
+        reference_tsv_path: PathBuf::from(&ref_tsv_path),
+        xml_dir: PathBuf::from(&settings.xml_dir),
+        xml_filenames: settings.xml_filenames.clone(),
+        use_reference_db: request.use_reference_db,
     };
-    
-    output.push_str(&format!("Exit code: {}\n", cmd1.status.code().unwrap_or(-1)));
-    output.push_str(&String::from_utf8_lossy(&cmd1.stdout));
-    output.push_str(&String::from_utf8_lossy(&cmd1.stderr));
-    output.push_str("\n");
-    
-    let parse_success = cmd1.status.success();
-    
-    // Command 2: Export fragments to TSV
-    if parse_success {
-        output.push_str("=== Exporting Fragments to TSV ===\n");
-        output.push_str(&format!("Command: {} export-fragments-to-tsv {:?} {:?}\n\n",
-            xml_parser_path, new_db_path, new_tsv_path));
-        
-        match Command::new(xml_parser_path)
-            .arg("export-fragments-to-tsv")
-            .arg(new_db_path)
-            .arg(new_tsv_path)
-            .env("ENABLE_PRINT_LOG", "false")
-            .output()
-        {
-            Ok(cmd2) => {
-                output.push_str(&format!("Exit code: {}\n", cmd2.status.code().unwrap_or(-1)));
-                output.push_str(&String::from_utf8_lossy(&cmd2.stdout));
-                output.push_str(&String::from_utf8_lossy(&cmd2.stderr));
-                output.push_str("\n");
-            }
-            Err(e) => {
-                output.push_str(&format!("ERROR: Failed to run export command: {}\n\n", e));
-            }
-        }
-    }
-    
-    // Command 3: Check TSV regressions
-    if parse_success && Path::new(ref_tsv_path).exists() {
-        output.push_str("=== Checking TSV Regressions ===\n");
-        output.push_str(&format!("Command: {} check-tsv-regressions {:?} {:?}\n\n",
-            xml_parser_path, ref_tsv_path, new_tsv_path));
-        
-        match Command::new(xml_parser_path)
-            .arg("check-tsv-regressions")
-            .arg(ref_tsv_path)
-            .arg(new_tsv_path)
-            .env("ENABLE_PRINT_LOG", "false")
-            .output()
-        {
-            Ok(cmd3) => {
-                output.push_str(&format!("Exit code: {}\n", cmd3.status.code().unwrap_or(-1)));
-                output.push_str(&String::from_utf8_lossy(&cmd3.stdout));
-                output.push_str(&String::from_utf8_lossy(&cmd3.stderr));
-                output.push_str("\n");
-            }
-            Err(e) => {
-                output.push_str(&format!("ERROR: Failed to run regression check command: {}\n\n", e));
-            }
-        }
-    } else if !Path::new(ref_tsv_path).exists() {
-        output.push_str("=== Skipping TSV Regression Check ===\n");
-        output.push_str("Reference TSV file does not exist\n\n");
-    }
-    
-    // Clean up temp file
-    let _ = fs::remove_file(&temp_xml_list);
-    
-    // Step 4: Replace current database with new one (if parse was successful)
-    let mut db_replaced = false;
-    if parse_success {
-        output.push_str("=== Replacing Current Database ===\n");
-        let current_db_path = Path::new(&settings.db_path);
-        let new_db_file = Path::new(new_db_path);
 
-        if new_db_file.exists() {
-            output.push_str(&format!("Copying {:?} to {:?}\n", new_db_file, current_db_path));
+    // Run regeneration using the helper function
+    let result = regenerate_fragments_db(&config);
 
-            match fs::copy(new_db_file, current_db_path) {
-                Ok(bytes) => {
-                    output.push_str(&format!("Replaced {} bytes successfully\n", bytes));
-                    output.push_str("Current database has been replaced with the new one.\n");
-                    output.push_str("The UI will reload to use the new database.\n\n");
-                    db_replaced = true;
-                }
-                Err(e) => {
-                    output.push_str(&format!("WARNING: Failed to replace database: {}\n", e));
-                    output.push_str("The new database is available at the new-fragments-db path.\n\n");
-                }
-            }
-        } else {
-            output.push_str("WARNING: New database file not found, cannot replace current database.\n\n");
-        }
-    }
-    
     Json(RegenerateResponse {
-        success: parse_success,
-        output,
-        db_replaced,
+        success: result.success,
+        output: result.output,
+        db_replaced: result.db_replaced,
     })
 }
 
