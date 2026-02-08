@@ -7,6 +7,7 @@
 //!
 //! - `check_missing_sc_code`: Finds Sutta fragments without sc_code
 //! - `check_missing_sc_sutta`: Finds fragments with sc_code but no sc_sutta title
+//! - `check_sc_code_sequence`: Validates that sc_code values increase gradually
 //!
 //! ## Auto-Fix Support
 //!
@@ -273,6 +274,209 @@ pub fn check_xml_reconstruction(
     }
 }
 
+/// Parsed sc_code components
+///
+/// sc_code format examples:
+/// - `sn2.12` = nikaya 'sn', group Some(2), sutta 12
+/// - `dn10` = nikaya 'dn', group None, sutta 10
+/// - `mn5:1.2` = nikaya 'mn', group None, sutta 5 (colon part ignored)
+#[derive(Debug, Clone, PartialEq)]
+struct ParsedScCode {
+    nikaya: String,
+    group: Option<u32>,
+    sutta: u32,
+}
+
+/// Parse an sc_code string into its components
+///
+/// Returns None if the sc_code cannot be parsed
+fn parse_sc_code(sc_code: &str) -> Option<ParsedScCode> {
+    // Remove any colon suffix (e.g., "dn1:1.2" -> "dn1")
+    let base_code = sc_code.split(':').next().unwrap_or(sc_code);
+
+    // Find where the nikaya prefix ends (first digit)
+    let digit_start = base_code.find(|c: char| c.is_ascii_digit())?;
+
+    // Nikaya prefix must not be empty
+    if digit_start == 0 {
+        return None;
+    }
+
+    let nikaya = base_code[..digit_start].to_string();
+    let number_part = &base_code[digit_start..];
+
+    // Check if there's a group number (format: "2.12")
+    if let Some(dot_pos) = number_part.find('.') {
+        let group: u32 = number_part[..dot_pos].parse().ok()?;
+        let sutta: u32 = number_part[dot_pos + 1..].parse().ok()?;
+        Some(ParsedScCode { nikaya, group: Some(group), sutta })
+    } else {
+        // No group, just sutta number (format: "10")
+        let sutta: u32 = number_part.parse().ok()?;
+        Some(ParsedScCode { nikaya, group: None, sutta })
+    }
+}
+
+/// Check that sc_code values increase gradually within each file
+///
+/// For each file, retrieves Sutta fragments ordered by frag_idx and validates:
+/// - Sutta numbers increase by 1 within the same group
+/// - When group changes, it must increase by 1
+/// - When group changes, sutta number must restart at 1
+///
+/// Only Sutta type fragments are checked. Null/empty sc_code values are skipped
+/// (checked by check_missing_sc_code).
+pub fn check_sc_code_sequence(conn: &mut SqliteConnection) -> ValidationCheckResult {
+    // Get distinct cst_file values
+    let cst_files: Vec<String> = xml_fragments::table
+        .select(xml_fragments::cst_file)
+        .distinct()
+        .order_by(xml_fragments::cst_file)
+        .load(conn)
+        .unwrap_or_default();
+
+    let mut errors = Vec::new();
+
+    for cst_file in cst_files {
+        // Get Sutta fragments for this file, ordered by frag_idx
+        let fragments: Vec<(i32, i32, Option<String>)> = xml_fragments::table
+            .select((
+                xml_fragments::id,
+                xml_fragments::frag_idx,
+                xml_fragments::sc_code,
+            ))
+            .filter(xml_fragments::cst_file.eq(&cst_file))
+            .filter(xml_fragments::frag_type.eq("Sutta"))
+            .order_by(xml_fragments::frag_idx)
+            .load(conn)
+            .unwrap_or_default();
+
+        let mut prev_parsed: Option<ParsedScCode> = None;
+
+        for (id, frag_idx, sc_code_opt) in fragments {
+            // Skip null/empty sc_code values
+            let sc_code = match &sc_code_opt {
+                Some(code) if !code.is_empty() => code,
+                _ => continue,
+            };
+
+            // Try to parse the sc_code
+            let parsed = match parse_sc_code(sc_code) {
+                Some(p) => p,
+                None => {
+                    errors.push(ValidationError {
+                        cst_file: cst_file.clone(),
+                        frag_idx,
+                        fragment_id: id,
+                        message: format!("Cannot parse sc_code '{}' format", sc_code),
+                    });
+                    continue;
+                }
+            };
+
+            // Compare with previous sc_code
+            if let Some(prev) = &prev_parsed {
+                // Check nikaya matches
+                if parsed.nikaya != prev.nikaya {
+                    errors.push(ValidationError {
+                        cst_file: cst_file.clone(),
+                        frag_idx,
+                        fragment_id: id,
+                        message: format!(
+                            "Nikaya changed from '{}' to '{}' - expected same nikaya within file",
+                            prev.nikaya, parsed.nikaya
+                        ),
+                    });
+                    prev_parsed = Some(parsed);
+                    continue;
+                }
+
+                // Check group and sutta progression
+                match (&prev.group, &parsed.group) {
+                    // Both have groups (e.g., sn1.1 -> sn1.2 or sn1.3 -> sn2.1)
+                    (Some(prev_group), Some(curr_group)) => {
+                        if curr_group == prev_group {
+                            // Same group: sutta should increase by 1
+                            if parsed.sutta != prev.sutta + 1 {
+                                errors.push(ValidationError {
+                                    cst_file: cst_file.clone(),
+                                    frag_idx,
+                                    fragment_id: id,
+                                    message: format!(
+                                        "Sutta number jump from {}{}.{} to {}{}.{} - expected step of 1",
+                                        prev.nikaya, prev_group, prev.sutta,
+                                        parsed.nikaya, curr_group, parsed.sutta
+                                    ),
+                                });
+                            }
+                        } else if *curr_group == prev_group + 1 {
+                            // Group increased by 1: sutta should start at 1
+                            if parsed.sutta != 1 {
+                                errors.push(ValidationError {
+                                    cst_file: cst_file.clone(),
+                                    frag_idx,
+                                    fragment_id: id,
+                                    message: format!(
+                                        "Group changed from {} to {} but sutta starts at {} instead of 1",
+                                        prev_group, curr_group, parsed.sutta
+                                    ),
+                                });
+                            }
+                        } else {
+                            // Group jump is not by 1
+                            errors.push(ValidationError {
+                                cst_file: cst_file.clone(),
+                                frag_idx,
+                                fragment_id: id,
+                                message: format!(
+                                    "Group jump from {} to {} - expected step of 1",
+                                    prev_group, curr_group
+                                ),
+                            });
+                        }
+                    }
+                    // Neither has groups (e.g., dn1 -> dn2)
+                    (None, None) => {
+                        if parsed.sutta != prev.sutta + 1 {
+                            errors.push(ValidationError {
+                                cst_file: cst_file.clone(),
+                                frag_idx,
+                                fragment_id: id,
+                                message: format!(
+                                    "Sutta number jump from {}{} to {}{} - expected step of 1",
+                                    prev.nikaya, prev.sutta,
+                                    parsed.nikaya, parsed.sutta
+                                ),
+                            });
+                        }
+                    }
+                    // Mixing grouped and non-grouped formats
+                    _ => {
+                        errors.push(ValidationError {
+                            cst_file: cst_file.clone(),
+                            frag_idx,
+                            fragment_id: id,
+                            message: format!(
+                                "Inconsistent sc_code format: mixing grouped and non-grouped formats"
+                            ),
+                        });
+                    }
+                }
+            }
+
+            prev_parsed = Some(parsed);
+        }
+    }
+
+    ValidationCheckResult {
+        name: "sc_code Sequence".to_string(),
+        description: "Validates that sc_code values increase gradually (step of 1) within each file".to_string(),
+        auto_fixable: false,
+        errors,
+        auto_fixes: vec![],
+    }
+}
+
 /// Run all validation checks and return results
 ///
 /// Returns a HashMap where keys are check identifiers and values are the results.
@@ -301,6 +505,11 @@ pub fn run_all_validations(
     results.insert(
         "xml_reconstruction".to_string(),
         check_xml_reconstruction(conn, db_path),
+    );
+
+    results.insert(
+        "sc_code_sequence".to_string(),
+        check_sc_code_sequence(conn),
     );
 
     results
@@ -784,5 +993,317 @@ mod tests {
         // as the content_xml itself contains the complete XML content
         // For now, just check that validation runs
         assert!(true, "Validation completed without panic");
+    }
+
+    // =========================================================================
+    // Tests for parse_sc_code
+    // =========================================================================
+
+    #[test]
+    fn test_parse_sc_code_with_group() {
+        // sn2.12 = nikaya 'sn', group 2, sutta 12
+        let parsed = parse_sc_code("sn2.12").unwrap();
+        assert_eq!(parsed.nikaya, "sn");
+        assert_eq!(parsed.group, Some(2));
+        assert_eq!(parsed.sutta, 12);
+    }
+
+    #[test]
+    fn test_parse_sc_code_without_group() {
+        // dn10 = nikaya 'dn', no group, sutta 10
+        let parsed = parse_sc_code("dn10").unwrap();
+        assert_eq!(parsed.nikaya, "dn");
+        assert_eq!(parsed.group, None);
+        assert_eq!(parsed.sutta, 10);
+    }
+
+    #[test]
+    fn test_parse_sc_code_with_colon_suffix() {
+        // mn5:1.2 = nikaya 'mn', no group, sutta 5 (colon part ignored)
+        let parsed = parse_sc_code("mn5:1.2").unwrap();
+        assert_eq!(parsed.nikaya, "mn");
+        assert_eq!(parsed.group, None);
+        assert_eq!(parsed.sutta, 5);
+    }
+
+    #[test]
+    fn test_parse_sc_code_with_group_and_colon() {
+        // sn1.1:0.1 = nikaya 'sn', group 1, sutta 1 (colon part ignored)
+        let parsed = parse_sc_code("sn1.1:0.1").unwrap();
+        assert_eq!(parsed.nikaya, "sn");
+        assert_eq!(parsed.group, Some(1));
+        assert_eq!(parsed.sutta, 1);
+    }
+
+    #[test]
+    fn test_parse_sc_code_invalid() {
+        // Invalid formats
+        assert!(parse_sc_code("").is_none());
+        assert!(parse_sc_code("abc").is_none());
+        assert!(parse_sc_code("123").is_none()); // No nikaya prefix
+    }
+
+    // =========================================================================
+    // Tests for check_sc_code_sequence
+    // =========================================================================
+
+    #[test]
+    fn test_sc_code_sequence_valid_with_groups() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // Valid sequence: sn1.1 -> sn1.2 -> sn1.3 -> sn2.1 -> sn2.2
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.1"),
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.2"),
+                content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 2, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.3"),
+                content_xml: "<p>3</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 3, start_char: 0, end_line: 3, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 3, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some("sn2.1"),
+                content_xml: "<p>4</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 4, start_char: 0, end_line: 4, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 4, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some("sn2.2"),
+                content_xml: "<p>5</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 5, start_char: 0, end_line: 5, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_sc_code_sequence(&mut conn);
+        assert_eq!(result.errors.len(), 0, "Valid sequence should have no errors");
+    }
+
+    #[test]
+    fn test_sc_code_sequence_sutta_jump() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // Invalid: sn1.1 -> sn1.2 -> sn1.6 (jump from 2 to 6)
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.1"),
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.2"),
+                content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 2, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.6"),
+                content_xml: "<p>3</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 3, start_char: 0, end_line: 3, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_sc_code_sequence(&mut conn);
+        assert_eq!(result.errors.len(), 1, "Should detect sutta number jump");
+        assert!(result.errors[0].message.contains("jump"), "Error should mention jump");
+    }
+
+    #[test]
+    fn test_sc_code_sequence_group_not_starting_at_1() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // Invalid: sn1.3 -> sn2.2 (group change but sutta doesn't start at 1)
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.3"),
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some("sn2.2"),
+                content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_sc_code_sequence(&mut conn);
+        assert_eq!(result.errors.len(), 1, "Should detect group not starting at 1");
+        assert!(result.errors[0].message.contains("starts at 2 instead of 1"),
+            "Error should mention sutta not starting at 1");
+    }
+
+    #[test]
+    fn test_sc_code_sequence_group_jump() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // Invalid: sn1.1 -> sn5.1 (group jump from 1 to 5)
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.1"),
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some("sn5.1"),
+                content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_sc_code_sequence(&mut conn);
+        assert_eq!(result.errors.len(), 1, "Should detect group jump");
+        assert!(result.errors[0].message.contains("Group jump"),
+            "Error should mention group jump");
+    }
+
+    #[test]
+    fn test_sc_code_sequence_skips_null() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // Valid sequence with null/empty sc_code values skipped: sn1.1 -> null -> "" -> sn1.2
+        // Also tests that Header fragments are ignored (only Sutta fragments are checked)
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.1"),
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: None, // null sc_code
+                content_xml: "<p>H</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 2, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some(""), // empty sc_code
+                content_xml: "<p>H2</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 3, start_char: 0, end_line: 3, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 3, frag_type: "Header", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some("sn99.99"), // Header ignored
+                content_xml: "<h>H</h>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 4, start_char: 0, end_line: 4, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 4, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.2"),
+                content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 5, start_char: 0, end_line: 5, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_sc_code_sequence(&mut conn);
+        assert_eq!(result.errors.len(), 0, "Null values and non-Sutta fragments should be skipped");
+    }
+
+    #[test]
+    fn test_sc_code_sequence_without_groups() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // Valid sequence without groups: dn1 -> dn2 -> dn3
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: None, sc_code: Some("dn1"),
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: None, sc_code: Some("dn2"),
+                content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 2, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: None, sc_code: Some("dn3"),
+                content_xml: "<p>3</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 3, start_char: 0, end_line: 3, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_sc_code_sequence(&mut conn);
+        assert_eq!(result.errors.len(), 0, "Valid sequence without groups should have no errors");
     }
 }
