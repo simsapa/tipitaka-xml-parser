@@ -10,7 +10,7 @@ db-remove-and-restore-only-db:
 
 # Diff with the results of the previously known db's tsv after its regeneration (before a new one), with the tsv result after the current regeneration.
 make diff-after:
-	diff ../tipitaka-xml-data/data-2026-02-07/fragments.before.tsv after.tsv
+	diff ../tipitaka-xml-data/data-2026-02-08/fragments.before.tsv after.tsv
 
 tsv-before:
 	cargo run -- export-fragments-to-tsv ./data/fragments.sqlite3 before.tsv
