@@ -221,7 +221,7 @@ fn extract_sutta_title_from_content(content: &str) -> Option<String> {
 
 ---
 
-### Case 4: derive_cst_fields Function (REQUIRES CONFIGURATION)
+### **DONE** Case 4: derive_cst_fields Function (REQUIRES CONFIGURATION)
 
 **Status**: ⚠️ **70% identical with SN-specific differences**
 

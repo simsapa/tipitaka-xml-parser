@@ -9,14 +9,12 @@ use crate::nikaya_structure::NikayaStructure;
 use crate::xml_parser_trait::XmlParser;
 use crate::parsers::helpers::{
     LineTrackingReader,
-    extract_vagga_title_from_content,
-    extract_sutta_title_from_content,
-    extract_first_paranum,
     apply_fragment_adjustment,
     populate_sc_fields_from_tsv_conditional,
     HierarchyTracker,
     impl_xml_parser,
     FragmentBoundaryDetector,
+    derive_cst_fields as derive_cst_fields_shared,
 };
 
 pub struct MajjhimaNikayaAtthakatha;
@@ -25,76 +23,6 @@ impl MajjhimaNikayaAtthakatha {
     pub fn new() -> Self {
         MajjhimaNikayaAtthakatha
     }
-}
-
-/// Extract CST fields from fragment content
-///
-/// Derives cst_file, cst_code, cst_vagga, cst_sutta, and cst_paranum from the fragment.
-///
-/// # Arguments
-/// * `fragment` - The fragment to process
-/// * `nikaya_structure` - The nikaya structure for context
-///
-/// # Returns
-/// Tuple of (cst_file, cst_code, cst_vagga, cst_sutta, cst_paranum)
-fn derive_cst_fields(
-    fragment: &XmlFragment,
-    nikaya_structure: &NikayaStructure,
-) -> (String, Option<String>, Option<String>, Option<String>, Option<String>) {
-    let cst_file = fragment.cst_file.clone();
-    
-    // Only process Sutta fragments
-    if !matches!(fragment.frag_type, crate::types::FragmentType::Sutta) {
-        return (cst_file, None, None, None, None);
-    }
-    
-    // Extract vagga from group_levels
-    // Only extract vagga for nikayas that have vaggas in their structure
-    let has_vagga_level = nikaya_structure.levels.iter()
-        .any(|t| matches!(t, crate::types::GroupType::Vagga));
-    
-    let cst_vagga = if has_vagga_level {
-        fragment.group_levels.iter()
-            .find(|level| matches!(level.group_type, crate::types::GroupType::Vagga))
-            .and_then(|level| {
-                if level.title.trim().is_empty() {
-                    None
-                } else {
-                    Some(level.title.clone())
-                }
-            })
-            .or_else(|| {
-                // Fallback: Extract vagga title from <head rend="chapter"> tag in fragment content
-                // This is used for MN where <head rend="chapter"> is the vagga title
-                extract_vagga_title_from_content(&fragment.content_xml)
-            })
-    } else {
-        None
-    };
-    
-    // Extract sutta title from group_levels (filter out empty titles)
-    let cst_sutta = fragment.group_levels.iter()
-        .find(|level| matches!(level.group_type, crate::types::GroupType::Sutta))
-        .and_then(|level| {
-            if level.title.trim().is_empty() {
-                None
-            } else {
-                Some(level.title.clone())
-            }
-        })
-        .or_else(|| {
-            // Fallback: Extract title from <head> or <p rend="subhead"> tag in fragment content
-            extract_sutta_title_from_content(&fragment.content_xml)
-        });
-    
-    // Extract cst_paranum from first <p rend="bodytext" n="...">
-    let cst_paranum = extract_first_paranum(&fragment.content_xml);
-    
-    // Derive cst_code from div id attributes and sutta number
-    // Pass the cst_sutta as a parameter so it can be used for deriving the code
-    let cst_code = derive_cst_code(fragment, nikaya_structure, cst_sutta.as_deref());
-    
-    (cst_file, cst_code, cst_vagga, cst_sutta, cst_paranum)
 }
 
 /// Derive CST code from fragment metadata
@@ -1007,9 +935,9 @@ pub fn parse_into_fragments(
     
     // Post-process fragments to derive CST fields
     for fragment in &mut fragments {
-        let (cst_file, cst_code, cst_vagga, cst_sutta, cst_paranum) = 
-            derive_cst_fields(fragment, nikaya_structure);
-        
+        let (cst_file, cst_code, cst_vagga, cst_sutta, cst_paranum) =
+            derive_cst_fields_shared(fragment, nikaya_structure, derive_cst_code);
+
         fragment.cst_file = cst_file;
         fragment.cst_code = cst_code;
         fragment.cst_vagga = cst_vagga;

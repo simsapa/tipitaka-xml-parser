@@ -2,7 +2,7 @@ use anyhow::{Result, Context};
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
-use crate::types::{XmlFragment, FragmentAdjustments, FragmentKey, CorrectionFragmentOverrides, ScCodeComponents, ParserError};
+use crate::types::{XmlFragment, FragmentAdjustments, FragmentKey, CorrectionFragmentOverrides, ScCodeComponents, ParserError, FragmentType};
 use crate::sutta_builder::cst_code_to_sc_code_map;
 use regex::Regex;
 
@@ -1390,4 +1390,137 @@ mod tests {
         // but we've demonstrated the function exists and runs
         assert!(fragments[0].sc_code.is_some() || original_sc.is_some());
     }
+}
+
+// ============== CST Fields Derivation ==============
+// NOTE: This was moved here from the individual nikaya parser files as part of
+// refactoring Plan 05. See tasks/05-derive-cst-fields-unification.md for details.
+
+/// Extract CST fields from fragment content
+///
+/// Derives cst_file, cst_code, cst_vagga, cst_sutta, and cst_paranum
+/// from the fragment.
+///
+/// Handles nikaya-specific variations:
+/// - SN mula: uses reverse iteration for vagga/sutta extraction and
+///   conditional vagga title fallback
+/// - All others: uses forward iteration and unconditional vagga title fallback
+///
+/// # Arguments
+/// * `fragment` - The fragment to process
+/// * `nikaya_structure` - The nikaya structure for context
+/// * `derive_cst_code_fn` - Function to derive CST code (parser-specific until unified)
+///
+/// # Returns
+/// Tuple of (cst_file, cst_code, cst_vagga, cst_sutta, cst_paranum)
+pub fn derive_cst_fields<F>(
+    fragment: &XmlFragment,
+    nikaya_structure: &NikayaStructure,
+    derive_cst_code_fn: F,
+) -> (String, Option<String>, Option<String>, Option<String>, Option<String>)
+where
+    F: Fn(&XmlFragment, &NikayaStructure, Option<&str>) -> Option<String>,
+{
+    let cst_file = fragment.cst_file.clone();
+
+    // Only process Sutta fragments
+    if !matches!(fragment.frag_type, FragmentType::Sutta) {
+        return (cst_file, None, None, None, None);
+    }
+
+    // SN mula uses reverse iteration for vagga/sutta because
+    // group_levels may contain stale entries from previous samyuttas
+    let use_rev = nikaya_structure.nikaya == "samyutta"
+        && fragment.cst_file.ends_with(".mul.xml");
+
+    // --- cst_vagga ---
+    let cst_vagga = if use_rev {
+        // SN mula: no has_vagga_level guard, reverse iteration
+        // Check if THIS FRAGMENT actually has a Vagga level (not just if the nikaya supports vaggas)
+        // This is important for SN where some samyuttas have vaggas and some don't
+        // Use .rev() to get the LAST (most recent) Vagga level, not the first
+        fragment.group_levels.iter()
+            .rev()
+            .find(|level| matches!(level.group_type, GroupType::Vagga))
+            .and_then(|level| {
+                if level.title.trim().is_empty() {
+                    None
+                } else {
+                    Some(level.title.clone())
+                }
+            })
+            .or_else(|| {
+                // SN mula: only use vagga fallback for MN (never for SN itself)
+                // Fallback: Extract vagga title from <head rend="chapter"> tag in fragment content
+                // This is used for MN where <head rend="chapter"> is the vagga title
+                // NOTE: Do NOT use this fallback for SN because in SN, <head rend="chapter"> is a Samyutta marker,
+                // not a Vagga marker. We already have the Samyutta info in group_levels.
+                // Only apply fallback for MN (majjhima)
+                if nikaya_structure.nikaya == "majjhima" {
+                    extract_vagga_title_from_content(&fragment.content_xml)
+                } else {
+                    None
+                }
+            })
+    } else {
+        // Standard: check if nikaya structure has vaggas, forward iteration
+        let has_vagga_level = nikaya_structure.levels.iter()
+            .any(|t| matches!(t, GroupType::Vagga));
+
+        if has_vagga_level {
+            fragment.group_levels.iter()
+                .find(|level| matches!(level.group_type, GroupType::Vagga))
+                .and_then(|level| {
+                    if level.title.trim().is_empty() {
+                        None
+                    } else {
+                        Some(level.title.clone())
+                    }
+                })
+                .or_else(|| {
+                    // Fallback: Extract vagga title from <head rend="chapter"> tag
+                    // This is used for MN where <head rend="chapter"> is the vagga title
+                    extract_vagga_title_from_content(&fragment.content_xml)
+                })
+        } else {
+            None
+        }
+    };
+
+    // --- cst_sutta ---
+    // Extract sutta title from group_levels (filter out empty titles)
+    let cst_sutta = if use_rev {
+        // Used for SN mula:
+        // Use .rev() to get the LAST (most recent) Sutta level, not the first
+        // This is important because group_levels may contain multiple Sutta levels
+        // when a new sutta starts (the old one hasn't been removed yet)
+        fragment.group_levels.iter()
+            .rev()
+            .find(|level| matches!(level.group_type, GroupType::Sutta))
+    } else {
+        fragment.group_levels.iter()
+            .find(|level| matches!(level.group_type, GroupType::Sutta))
+    }
+    .and_then(|level| {
+        if level.title.trim().is_empty() {
+            None
+        } else {
+            Some(level.title.clone())
+        }
+    })
+    .or_else(|| {
+        // Fallback: Extract title from <head> or <p rend="subhead"> tag in fragment content
+        extract_sutta_title_from_content(&fragment.content_xml)
+    });
+
+    // --- cst_paranum ---
+    // Extract cst_paranum from first <p rend="bodytext" n="...">
+    let cst_paranum = extract_first_paranum(&fragment.content_xml);
+
+    // --- cst_code ---
+    // Derive cst_code from div id attributes and sutta number
+    // Pass the cst_sutta as a parameter so it can be used for deriving the code
+    let cst_code = derive_cst_code_fn(fragment, nikaya_structure, cst_sutta.as_deref());
+
+    (cst_file, cst_code, cst_vagga, cst_sutta, cst_paranum)
 }

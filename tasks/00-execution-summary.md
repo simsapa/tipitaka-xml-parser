@@ -166,7 +166,7 @@ When reviewing each plan's implementation:
 After completing these 4 safe plans, consider the remaining opportunities from the main analysis:
 
 ### Medium Risk (Next Phase)
-- **derive_cst_fields**: Requires configuration for SN's `.rev()` iteration
+- **DONE** **derive_cst_fields**: Requires configuration for SN's `.rev()` iteration
 - **derive_cst_code**: Requires configuration for SN-specific logic
 
 ### High Risk (Careful Analysis Required)
