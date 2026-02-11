@@ -290,7 +290,7 @@ pub fn derive_cst_fields(
 
 ---
 
-### Case 5: derive_cst_code Function (REQUIRES CONFIGURATION)
+### **DONE** Case 5: derive_cst_code Function (REQUIRES CONFIGURATION)
 
 **Status**: ⚠️ **60% identical with significant SN-specific logic**
 

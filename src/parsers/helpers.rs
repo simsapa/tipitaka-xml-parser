@@ -1396,6 +1396,270 @@ mod tests {
 // NOTE: This was moved here from the individual nikaya parser files as part of
 // refactoring Plan 05. See tasks/05-derive-cst-fields-unification.md for details.
 
+/// Derive CST code from fragment metadata
+///
+/// For DN: code is like "dn1.1" from div id="dn1_1" or div id="dn1" + sutta number "1."
+/// For MN: code is like "mn1.5.1" from div id="mn1_5_1" or div id="mn1_5" + sutta number "1."
+/// For SN: code is like "sn1.1.1.1" from div id="sn1" + div id="sn1_1" + vagga number "1." + sutta number "1."
+///
+/// Handles nikaya-specific variations:
+/// - SN mula: uses reverse iteration for vagga/sutta extraction (group_levels may contain stale entries)
+/// - All others: uses forward iteration
+///
+/// # Arguments
+/// * `fragment` - The fragment containing group_levels with IDs and titles
+/// * `nikaya_structure` - The nikaya structure for determining code format
+/// * `cst_sutta_title` - Optional sutta title from fragment content (fallback)
+///
+/// # Returns
+/// The derived CST code (e.g., "dn1.1", "mn1.5.1", "sn1.1.1.1"), or None if insufficient metadata
+pub fn derive_cst_code(
+    fragment: &XmlFragment,
+    nikaya_structure: &NikayaStructure,
+    cst_sutta_title: Option<&str>,
+) -> Option<String> {
+    // First check if the Sutta level itself has an ID (like "dn1_12")
+    // This is the most direct and reliable source
+    if let Some(sutta_id) = fragment.group_levels.iter()
+        .find_map(|level| {
+            if matches!(level.group_type, GroupType::Sutta) {
+                level.id.as_ref()
+            } else {
+                None
+            }
+        }) {
+        // Convert id format: "dn1_12" or "mn1_5_3" -> "dn1.12" or "mn1.5.3"
+        let code = sutta_id.replace('_', ".");
+        return Some(code);
+    }
+
+    // Fallback: Try to construct from components based on nikaya structure
+    // Get book number from ID (e.g., "dn1" -> "1", "mn1" -> "1", "sn1" -> "1")
+    let book_id = fragment.group_levels.iter()
+        .find_map(|level| {
+            if matches!(level.group_type, GroupType::Book) {
+                level.id.as_ref()
+            } else {
+                None
+            }
+        });
+
+    // For Samyutta Nikaya: extract samyutta number from ID like "sn1_1"
+    let samyutta_number = if nikaya_structure.nikaya == "samyutta" {
+        fragment.group_levels.iter()
+            .find_map(|level| {
+                if matches!(level.group_type, GroupType::Samyutta) {
+                    // Extract number from samyutta title like "1. Devatāsaṃyuttaṃ"
+                    level.title.split_whitespace()
+                        .next()
+                        .and_then(|first| first.strip_suffix('.'))
+                        .filter(|num| num.chars().all(|c| c.is_numeric()))
+                        .or_else(|| {
+                            // Fallback: Extract from ID like "sn1_1" -> "1"
+                            level.id.as_ref().and_then(|id| {
+                                id.rsplit('_')
+                                    .next()
+                                    .filter(|num| num.chars().all(|c| c.is_numeric()))
+                            })
+                        })
+                } else {
+                    None
+                }
+            })
+    } else {
+        None
+    };
+
+    // For Anguttara Nikaya: extract pannasaka number from ID like "an3_1"
+    let pannasaka_number = if nikaya_structure.nikaya == "anguttara" {
+        fragment.group_levels.iter()
+            .find_map(|level| {
+                if matches!(level.group_type, GroupType::Pannasaka) {
+                    // Extract number from pannasaka title like "1. Paṭhamapaṇṇāsakaṃ"
+                    level.title.split_whitespace()
+                        .next()
+                        .and_then(|first| first.strip_suffix('.'))
+                        .filter(|num| num.chars().all(|c| c.is_numeric()))
+                        .or_else(|| {
+                            // Fallback: Extract from ID like "an3_1" -> "1"
+                            level.id.as_ref().and_then(|id| {
+                                id.rsplit('_')
+                                    .next()
+                                    .filter(|num| num.chars().all(|c| c.is_numeric()))
+                            })
+                        })
+                } else {
+                    None
+                }
+            })
+    } else {
+        None
+    };
+
+    // SN mula uses reverse iteration for vagga/sutta because
+    // group_levels may contain stale entries from previous samyuttas
+    let use_rev = nikaya_structure.nikaya == "samyutta"
+        && fragment.cst_file.ends_with(".mul.xml");
+
+    // Get vagga number from title (e.g., "1" from "1. Mūlapariyāyavaggo" or "1. Naḷavaggo")
+    // This is more reliable than using the vagga ID since the ID may be inherited from the next vagga
+    // However, for vagga 0 (introduction/preamble) in commentary files, the title is often empty,
+    // so we fallback to extracting from the ID (e.g., "mn1_0" -> "0")
+    let vagga_number = if use_rev {
+        // SN mula: use reverse iteration to get the LAST (most recent) Vagga level
+        fragment.group_levels.iter()
+            .rev()
+            .find_map(|level| {
+                if matches!(level.group_type, GroupType::Vagga) {
+                    // First try: Extract number from title like "1. Vagga Name"
+                    level.title.split_whitespace()
+                        .next()
+                        .and_then(|first| first.strip_suffix('.'))
+                        .filter(|num| num.chars().all(|c| c.is_numeric()))
+                        .or_else(|| {
+                            // Fallback: Extract from ID like "mn1_0" or "mn1_1"
+                            // Split by underscore and take the last part
+                            level.id.as_ref().and_then(|id| {
+                                id.rsplit('_')
+                                    .next()
+                                    .filter(|num| num.chars().all(|c| c.is_numeric()))
+                            })
+                        })
+                } else {
+                    None
+                }
+            })
+    } else {
+        // Standard: forward iteration
+        fragment.group_levels.iter()
+            .find_map(|level| {
+                if matches!(level.group_type, GroupType::Vagga) {
+                    // First try: Extract number from title like "1. Vagga Name"
+                    level.title.split_whitespace()
+                        .next()
+                        .and_then(|first| first.strip_suffix('.'))
+                        .filter(|num| num.chars().all(|c| c.is_numeric()))
+                        .or_else(|| {
+                            // Fallback: Extract from ID like "mn1_0" or "mn1_1"
+                            // Split by underscore and take the last part
+                            level.id.as_ref().and_then(|id| {
+                                id.rsplit('_')
+                                    .next()
+                                    .filter(|num| num.chars().all(|c| c.is_numeric()))
+                            })
+                        })
+                } else {
+                    None
+                }
+            })
+    };
+
+    // Extract sutta number from title (e.g., "1. Brahmajālasuttaṃ" or "1. Oghataraṇasuttaṃ" -> "1")
+    // First try from Sutta GroupLevel
+    let sutta_number = if use_rev {
+        // SN mula: use reverse iteration to get the LAST (most recent) Sutta level
+        // This is important because group_levels may contain multiple Sutta levels
+        fragment.group_levels.iter()
+            .rev()
+            .find_map(|level| {
+                if matches!(level.group_type, GroupType::Sutta) {
+                    // Extract number from title like "1. Title" or "10. Title"
+                    level.title.split_whitespace()
+                        .next()
+                        .and_then(|first| first.strip_suffix('.'))
+                        .filter(|num| num.chars().all(|c| c.is_numeric()))
+                } else {
+                    None
+                }
+            })
+    } else {
+        // Standard: forward iteration
+        fragment.group_levels.iter()
+            .find_map(|level| {
+                if matches!(level.group_type, GroupType::Sutta) {
+                    // Extract number from title like "1. Title" or "10. Title"
+                    level.title.split_whitespace()
+                        .next()
+                        .and_then(|first| first.strip_suffix('.'))
+                        .filter(|num| num.chars().all(|c| c.is_numeric()))
+                } else {
+                    None
+                }
+            })
+    }
+    .or_else(|| {
+        // Fallback: Extract from cst_sutta_title parameter (from fragment content)
+        cst_sutta_title.and_then(|title| {
+            title.split_whitespace()
+                .next()
+                .and_then(|first| first.strip_suffix('.'))
+                .filter(|num| num.chars().all(|c| c.is_numeric()))
+        })
+    });
+
+    // Build the code based on nikaya structure
+    match nikaya_structure.nikaya.as_str() {
+        "digha" => {
+            // DN style: dn{book}.{sutta}
+            match (book_id, sutta_number) {
+                (Some(book), Some(sutta)) => Some(format!("{}.{}", book, sutta)),
+                _ => None,
+            }
+        }
+        "majjhima" => {
+            // MN style: mn{book}.{vagga}.{sutta}
+            match (book_id, vagga_number, sutta_number) {
+                (Some(book), Some(vagga), Some(sutta)) => {
+                    Some(format!("{}.{}.{}", book, vagga, sutta))
+                }
+                (Some(book), Some(vagga), None) => {
+                    // MN vagga 0 (introduction/preamble) in commentary files: mn1.0.0
+                    Some(format!("{}.{}.0", book, vagga))
+                }
+                _ => None,
+            }
+        }
+        "samyutta" => {
+            // SN style: sn{book}.{samyutta}.{vagga}.{sutta}
+            // Some samyuttas (like Bhikkhunīsaṃyuttaṃ) don't have vaggas, so use 1 as the vagga number
+            match (book_id, samyutta_number, vagga_number, sutta_number) {
+                (Some(book), Some(samyutta), Some(vagga), Some(sutta)) => {
+                    Some(format!("{}.{}.{}.{}", book, samyutta, vagga, sutta))
+                }
+                (Some(book), Some(samyutta), Some(vagga), None) => {
+                    // SN vagga 0 (introduction/preamble) in commentary files: sn1.1.0.0
+                    Some(format!("{}.{}.{}.0", book, samyutta, vagga))
+                }
+                (Some(book), Some(samyutta), None, Some(sutta)) => {
+                    // SN without vaggas (like Bhikkhunīsaṃyuttaṃ): use 1 as vagga number
+                    Some(format!("{}.{}.1.{}", book, samyutta, sutta))
+                }
+                _ => None,
+            }
+        }
+        "anguttara" => {
+            // AN style: an{book}.{pannasaka}.{vagga}.{sutta}
+            match (book_id, pannasaka_number, vagga_number, sutta_number) {
+                (Some(book), Some(pannasaka), Some(vagga), Some(sutta)) => {
+                    Some(format!("{}.{}.{}.{}", book, pannasaka, vagga, sutta))
+                }
+                (Some(book), Some(pannasaka), Some(vagga), None) => {
+                    // AN vagga 0 (introduction/preamble) in commentary files: an3.1.0.0
+                    Some(format!("{}.{}.{}.0", book, pannasaka, vagga))
+                }
+                _ => None,
+            }
+        }
+        _ => {
+            // Default fallback for other nikayas
+            match (book_id, sutta_number) {
+                (Some(book), Some(sutta)) => Some(format!("{}.{}", book, sutta)),
+                _ => None,
+            }
+        }
+    }
+}
+
 /// Extract CST fields from fragment content
 ///
 /// Derives cst_file, cst_code, cst_vagga, cst_sutta, and cst_paranum
@@ -1409,18 +1673,13 @@ mod tests {
 /// # Arguments
 /// * `fragment` - The fragment to process
 /// * `nikaya_structure` - The nikaya structure for context
-/// * `derive_cst_code_fn` - Function to derive CST code (parser-specific until unified)
 ///
 /// # Returns
 /// Tuple of (cst_file, cst_code, cst_vagga, cst_sutta, cst_paranum)
-pub fn derive_cst_fields<F>(
+pub fn derive_cst_fields(
     fragment: &XmlFragment,
     nikaya_structure: &NikayaStructure,
-    derive_cst_code_fn: F,
-) -> (String, Option<String>, Option<String>, Option<String>, Option<String>)
-where
-    F: Fn(&XmlFragment, &NikayaStructure, Option<&str>) -> Option<String>,
-{
+) -> (String, Option<String>, Option<String>, Option<String>, Option<String>) {
     let cst_file = fragment.cst_file.clone();
 
     // Only process Sutta fragments
@@ -1520,7 +1779,7 @@ where
     // --- cst_code ---
     // Derive cst_code from div id attributes and sutta number
     // Pass the cst_sutta as a parameter so it can be used for deriving the code
-    let cst_code = derive_cst_code_fn(fragment, nikaya_structure, cst_sutta.as_deref());
+    let cst_code = derive_cst_code(fragment, nikaya_structure, cst_sutta.as_deref());
 
     (cst_file, cst_code, cst_vagga, cst_sutta, cst_paranum)
 }

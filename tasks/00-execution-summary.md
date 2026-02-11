@@ -167,7 +167,7 @@ After completing these 4 safe plans, consider the remaining opportunities from t
 
 ### Medium Risk (Next Phase)
 - **DONE** **derive_cst_fields**: Requires configuration for SN's `.rev()` iteration
-- **derive_cst_code**: Requires configuration for SN-specific logic
+- **DONE** **derive_cst_code**: Requires configuration for SN-specific logic
 
 ### High Risk (Careful Analysis Required)
 - **parse_into_fragments**: Complex function with significant variations between nikayas
