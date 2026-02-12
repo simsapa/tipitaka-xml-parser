@@ -280,11 +280,15 @@ pub fn check_xml_reconstruction(
 /// - `sn2.12` = nikaya 'sn', group Some(2), sutta 12
 /// - `dn10` = nikaya 'dn', group None, sutta 10
 /// - `mn5:1.2` = nikaya 'mn', group None, sutta 5 (colon part ignored)
+/// - `sn1.55-57` = nikaya 'sn', group Some(1), sutta_start 55, sutta_end 57 (range)
 #[derive(Debug, Clone, PartialEq)]
 struct ParsedScCode {
     nikaya: String,
     group: Option<u32>,
-    sutta: u32,
+    /// The starting sutta number (or the only sutta number if not a range)
+    sutta_start: u32,
+    /// The ending sutta number (same as sutta_start if not a range)
+    sutta_end: u32,
 }
 
 /// Parse an sc_code string into its components
@@ -305,15 +309,43 @@ fn parse_sc_code(sc_code: &str) -> Option<ParsedScCode> {
     let nikaya = base_code[..digit_start].to_string();
     let number_part = &base_code[digit_start..];
 
-    // Check if there's a group number (format: "2.12")
+    // Check if there's a group number (format: "2.12" or "2.12-15")
     if let Some(dot_pos) = number_part.find('.') {
         let group: u32 = number_part[..dot_pos].parse().ok()?;
-        let sutta: u32 = number_part[dot_pos + 1..].parse().ok()?;
-        Some(ParsedScCode { nikaya, group: Some(group), sutta })
+        let sutta_part = &number_part[dot_pos + 1..];
+
+        // Check if it's a range (e.g., "55-57")
+        let (sutta_start, sutta_end) = parse_sutta_range(sutta_part)?;
+        Some(ParsedScCode { nikaya, group: Some(group), sutta_start, sutta_end })
     } else {
-        // No group, just sutta number (format: "10")
-        let sutta: u32 = number_part.parse().ok()?;
-        Some(ParsedScCode { nikaya, group: None, sutta })
+        // No group, just sutta number or range (format: "10" or "10-12")
+        let (sutta_start, sutta_end) = parse_sutta_range(number_part)?;
+        Some(ParsedScCode { nikaya, group: None, sutta_start, sutta_end })
+    }
+}
+
+/// Parse a sutta number or range (e.g., "55" or "55-57")
+///
+/// Returns (start, end) tuple. For non-ranges, start == end.
+fn parse_sutta_range(sutta_part: &str) -> Option<(u32, u32)> {
+    if let Some(dash_pos) = sutta_part.find('-') {
+        let start: u32 = sutta_part[..dash_pos].parse().ok()?;
+        let end: u32 = sutta_part[dash_pos + 1..].parse().ok()?;
+        Some((start, end))
+    } else {
+        let sutta: u32 = sutta_part.parse().ok()?;
+        Some((sutta, sutta))
+    }
+}
+
+/// Format a sutta range for error messages
+///
+/// Returns "55" for single suttas (start == end) or "55-57" for ranges.
+fn format_sutta_range(start: u32, end: u32) -> String {
+    if start == end {
+        start.to_string()
+    } else {
+        format!("{}-{}", start, end)
     }
 }
 
@@ -392,33 +424,34 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection) -> ValidationCheckRes
                 }
 
                 // Check group and sutta progression
+                // For ranges, current sutta_start should follow prev sutta_end + 1
                 match (&prev.group, &parsed.group) {
                     // Both have groups (e.g., sn1.1 -> sn1.2 or sn1.3 -> sn2.1)
                     (Some(prev_group), Some(curr_group)) => {
                         if curr_group == prev_group {
-                            // Same group: sutta should increase by 1
-                            if parsed.sutta != prev.sutta + 1 {
+                            // Same group: sutta should increase by 1 from prev's end
+                            if parsed.sutta_start != prev.sutta_end + 1 {
                                 errors.push(ValidationError {
                                     cst_file: cst_file.clone(),
                                     frag_idx,
                                     fragment_id: id,
                                     message: format!(
                                         "Sutta number jump from {}{}.{} to {}{}.{} - expected step of 1",
-                                        prev.nikaya, prev_group, prev.sutta,
-                                        parsed.nikaya, curr_group, parsed.sutta
+                                        prev.nikaya, prev_group, format_sutta_range(prev.sutta_start, prev.sutta_end),
+                                        parsed.nikaya, curr_group, format_sutta_range(parsed.sutta_start, parsed.sutta_end)
                                     ),
                                 });
                             }
                         } else if *curr_group == prev_group + 1 {
                             // Group increased by 1: sutta should start at 1
-                            if parsed.sutta != 1 {
+                            if parsed.sutta_start != 1 {
                                 errors.push(ValidationError {
                                     cst_file: cst_file.clone(),
                                     frag_idx,
                                     fragment_id: id,
                                     message: format!(
                                         "Group changed from {} to {} but sutta starts at {} instead of 1",
-                                        prev_group, curr_group, parsed.sutta
+                                        prev_group, curr_group, parsed.sutta_start
                                     ),
                                 });
                             }
@@ -437,15 +470,15 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection) -> ValidationCheckRes
                     }
                     // Neither has groups (e.g., dn1 -> dn2)
                     (None, None) => {
-                        if parsed.sutta != prev.sutta + 1 {
+                        if parsed.sutta_start != prev.sutta_end + 1 {
                             errors.push(ValidationError {
                                 cst_file: cst_file.clone(),
                                 frag_idx,
                                 fragment_id: id,
                                 message: format!(
                                     "Sutta number jump from {}{} to {}{} - expected step of 1",
-                                    prev.nikaya, prev.sutta,
-                                    parsed.nikaya, parsed.sutta
+                                    prev.nikaya, format_sutta_range(prev.sutta_start, prev.sutta_end),
+                                    parsed.nikaya, format_sutta_range(parsed.sutta_start, parsed.sutta_end)
                                 ),
                             });
                         }
@@ -1124,7 +1157,8 @@ mod tests {
         let parsed = parse_sc_code("sn2.12").unwrap();
         assert_eq!(parsed.nikaya, "sn");
         assert_eq!(parsed.group, Some(2));
-        assert_eq!(parsed.sutta, 12);
+        assert_eq!(parsed.sutta_start, 12);
+        assert_eq!(parsed.sutta_end, 12);
     }
 
     #[test]
@@ -1133,7 +1167,8 @@ mod tests {
         let parsed = parse_sc_code("dn10").unwrap();
         assert_eq!(parsed.nikaya, "dn");
         assert_eq!(parsed.group, None);
-        assert_eq!(parsed.sutta, 10);
+        assert_eq!(parsed.sutta_start, 10);
+        assert_eq!(parsed.sutta_end, 10);
     }
 
     #[test]
@@ -1142,7 +1177,8 @@ mod tests {
         let parsed = parse_sc_code("mn5:1.2").unwrap();
         assert_eq!(parsed.nikaya, "mn");
         assert_eq!(parsed.group, None);
-        assert_eq!(parsed.sutta, 5);
+        assert_eq!(parsed.sutta_start, 5);
+        assert_eq!(parsed.sutta_end, 5);
     }
 
     #[test]
@@ -1151,7 +1187,28 @@ mod tests {
         let parsed = parse_sc_code("sn1.1:0.1").unwrap();
         assert_eq!(parsed.nikaya, "sn");
         assert_eq!(parsed.group, Some(1));
-        assert_eq!(parsed.sutta, 1);
+        assert_eq!(parsed.sutta_start, 1);
+        assert_eq!(parsed.sutta_end, 1);
+    }
+
+    #[test]
+    fn test_parse_sc_code_with_range() {
+        // sn1.55-57 = nikaya 'sn', group 1, sutta range 55-57
+        let parsed = parse_sc_code("sn1.55-57").unwrap();
+        assert_eq!(parsed.nikaya, "sn");
+        assert_eq!(parsed.group, Some(1));
+        assert_eq!(parsed.sutta_start, 55);
+        assert_eq!(parsed.sutta_end, 57);
+    }
+
+    #[test]
+    fn test_parse_sc_code_without_group_with_range() {
+        // dn10-12 = nikaya 'dn', no group, sutta range 10-12
+        let parsed = parse_sc_code("dn10-12").unwrap();
+        assert_eq!(parsed.nikaya, "dn");
+        assert_eq!(parsed.group, None);
+        assert_eq!(parsed.sutta_start, 10);
+        assert_eq!(parsed.sutta_end, 12);
     }
 
     #[test]
@@ -1424,6 +1481,46 @@ mod tests {
 
         let result = check_sc_code_sequence(&mut conn);
         assert_eq!(result.errors.len(), 0, "Valid sequence without groups should have no errors");
+    }
+
+    #[test]
+    fn test_sc_code_sequence_valid_with_ranges() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // Valid sequence with ranges: sn1.54 -> sn1.55-57 -> sn1.58
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.54"),
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.55-57"),
+                content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 2, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.58"),
+                content_xml: "<p>3</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 3, start_char: 0, end_line: 3, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_sc_code_sequence(&mut conn);
+        assert_eq!(result.errors.len(), 0, "Valid sequence with ranges should have no errors");
     }
 
     // =========================================================================
