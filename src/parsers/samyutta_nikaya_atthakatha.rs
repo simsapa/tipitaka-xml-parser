@@ -504,20 +504,26 @@ pub fn parse_into_fragments(
 
                 // Check if this text is for a pending subhead (MN/SN style)
                 if let Some((subhead_pos, subhead_line, subhead_char)) = pending_subhead_check.take() {
-                    // Check if text starts with a number followed by a dot (e.g., "1. ", "10. ")
-                    // Pattern: one or more digits, followed by a dot and space
+                    // Check if text starts with a number followed by a dot (e.g., "1. ", "10. ", "5-7. ")
+                    // Pattern: one or more digits (optionally followed by hyphen and more digits), then a dot
                     let is_numbered = text.split_whitespace()
                         .next()
                         .and_then(|first_word| first_word.strip_suffix('.'))
-                        .map_or(false, |num_part| num_part.chars().all(|c| c.is_numeric()));
+                        .map_or(false, |num_part| {
+                            // Support both single numbers ("1", "10") and ranges ("5-7", "10-11")
+                            num_part.split('-')
+                                .all(|part| !part.is_empty() && part.chars().all(|c| c.is_numeric()))
+                        });
 
                     // For commentary/sub-commentary files, also check if it ends with "suttavaṇṇanā"
+                    // or "suttādivaṇṇanā" (used for grouped commentaries like "5-7. Paṭhamajanasuttādivaṇṇanā")
                     // to distinguish actual sutta commentaries from subsections
                     let is_commentary = cst_file.ends_with(".att.xml") || cst_file.ends_with(".tik.xml");
 
                     let is_sutta_commentary = if is_commentary {
                         // In commentary files, only treat it as a sutta if it ends with "suttavaṇṇanā"
-                        text.ends_with("suttavaṇṇanā")
+                        // or "suttādivaṇṇanā" (grouped commentaries for multiple suttas)
+                        text.ends_with("suttavaṇṇanā") || text.ends_with("suttādivaṇṇanā")
                     } else {
                         // In base text files, any numbered subhead is a sutta
                         is_numbered

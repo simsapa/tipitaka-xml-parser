@@ -12,6 +12,9 @@
 //! - sc_code: sn2.10 (wrong)
 //!
 //! The fragment was incorrectly including "<p rend="title">2. Nandanavaggo</p>" at the end.
+//!
+//! Also includes tests for grouped commentary boundaries like "5-7. Paṭhamajanasuttādivaṇṇanā"
+//! which use "suttādivaṇṇanā" suffix (meaning "commentary on sutta and following").
 
 use std::fs;
 use tipitaka_xml_parser::{
@@ -100,4 +103,57 @@ fn test_s0301a_att_vagga_2_first_sutta() {
     assert_eq!(vagga_2_first_sutta.sc_code.as_deref(), Some("sn1.11"),
         "First sutta in vagga 2 should have sc_code sn1.11, but got {:?}",
         vagga_2_first_sutta.sc_code);
+}
+
+#[test]
+fn test_s0301a_att_grouped_commentary_boundary() {
+    // Test for grouped commentary boundaries like "5-7. Paṭhamajanasuttādivaṇṇanā"
+    // The "suttādivaṇṇanā" suffix (meaning "commentary on sutta and following") is used
+    // when a single commentary covers multiple suttas.
+    //
+    // Issue: frag_idx 54 should only include content for sn1.54 (paranum 54),
+    // and frag_idx 55 should be parsed as cst_code sn1.1.6.5-7, sc_code sn1.55-57
+
+    let xml_path = "tests/data/s0301a.att.xml";
+    let xml_content = fs::read_to_string(xml_path)
+        .expect("Failed to read s0301a.att.xml");
+
+    let structure = detect_nikaya_structure(&xml_content)
+        .expect("Should detect SN structure");
+
+    let fragments = parse_into_fragments(&xml_content, &structure, "s0301a.att.xml", &ParserOverrides::default(), true)
+        .expect("Should parse fragments");
+
+    // Find frag_idx 54 - it should NOT contain the grouped commentary "5-7. Paṭhamajanasuttādivaṇṇanā"
+    let frag_54 = fragments.get(54)
+        .expect("Should have frag_idx 54");
+
+    // frag_idx 54 should be for sutta 4 in vagga 6 (sn1.1.6.4), sc_code sn1.54
+    assert_eq!(frag_54.sc_code.as_deref(), Some("sn1.54"),
+        "frag_idx 54 should have sc_code sn1.54, but got {:?}",
+        frag_54.sc_code);
+
+    // frag_idx 54 should NOT contain the next sutta's subhead
+    assert!(!frag_54.content_xml.contains("Paṭhamajanasuttādivaṇṇanā"),
+        "frag_idx 54 should NOT contain 'Paṭhamajanasuttādivaṇṇanā' (next sutta's title)");
+
+    // Find frag_idx 55 - it should be the grouped commentary "5-7. Paṭhamajanasuttādivaṇṇanā"
+    let frag_55 = fragments.get(55)
+        .expect("Should have frag_idx 55");
+
+    // frag_idx 55 should be for suttas 5-7 in vagga 6 (sn1.1.6.5-7)
+    assert_eq!(frag_55.cst_code.as_deref(), Some("sn1.1.6.5-7"),
+        "frag_idx 55 should have cst_code sn1.1.6.5-7, but got {:?}",
+        frag_55.cst_code);
+
+    // Note: sc_code is None for grouped commentaries because they don't map 1:1 to base text suttas.
+    // The TSV only contains entries for single suttas, not ranges.
+    // Future enhancement: derive sc_code from paranum range (e.g., "sn1.55-57" from paranums 55, 56, 57)
+    assert_eq!(frag_55.sc_code, None,
+        "frag_idx 55 sc_code should be None for grouped commentary (no TSV match), but got {:?}",
+        frag_55.sc_code);
+
+    // frag_idx 55 should contain the grouped commentary subhead
+    assert!(frag_55.content_xml.contains("Paṭhamajanasuttādivaṇṇanā"),
+        "frag_idx 55 should contain 'Paṭhamajanasuttādivaṇṇanā'");
 }

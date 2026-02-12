@@ -1563,11 +1563,11 @@ pub fn derive_cst_code(
             .rev()
             .find_map(|level| {
                 if matches!(level.group_type, GroupType::Sutta) {
-                    // Extract number from title like "1. Title" or "10. Title"
+                    // Extract number from title like "1. Title", "10. Title", or "5-7. Title" (range)
                     level.title.split_whitespace()
                         .next()
                         .and_then(|first| first.strip_suffix('.'))
-                        .filter(|num| num.chars().all(|c| c.is_numeric()))
+                        .filter(|num| is_sutta_number_or_range(num))
                 } else {
                     None
                 }
@@ -1577,11 +1577,11 @@ pub fn derive_cst_code(
         fragment.group_levels.iter()
             .find_map(|level| {
                 if matches!(level.group_type, GroupType::Sutta) {
-                    // Extract number from title like "1. Title" or "10. Title"
+                    // Extract number from title like "1. Title", "10. Title", or "5-7. Title" (range)
                     level.title.split_whitespace()
                         .next()
                         .and_then(|first| first.strip_suffix('.'))
-                        .filter(|num| num.chars().all(|c| c.is_numeric()))
+                        .filter(|num| is_sutta_number_or_range(num))
                 } else {
                     None
                 }
@@ -1593,7 +1593,7 @@ pub fn derive_cst_code(
             title.split_whitespace()
                 .next()
                 .and_then(|first| first.strip_suffix('.'))
-                .filter(|num| num.chars().all(|c| c.is_numeric()))
+                .filter(|num| is_sutta_number_or_range(num))
         })
     });
 
@@ -1676,6 +1676,15 @@ pub fn derive_cst_code(
 ///
 /// # Returns
 /// Tuple of (cst_file, cst_code, cst_vagga, cst_sutta, cst_paranum)
+
+/// Check if a string is a valid sutta number, supporting both single numbers and ranges.
+/// Examples: "1", "10", "5-7", "10-11"
+fn is_sutta_number_or_range(s: &str) -> bool {
+    // Support both single numbers ("1", "10") and ranges ("5-7", "10-11")
+    s.split('-')
+        .all(|part| !part.is_empty() && part.chars().all(|c| c.is_numeric()))
+}
+
 pub fn derive_cst_fields(
     fragment: &XmlFragment,
     nikaya_structure: &NikayaStructure,
