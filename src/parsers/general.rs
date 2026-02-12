@@ -8,6 +8,7 @@
 //! Validated to handle specific nikāyas:
 //! - Dīgha Nikāya Mūla, Aṭṭhakathā, Ṭīkā
 //! - Majjhima Nikāya Mūla, Aṭṭhakathā, Ṭīkā
+//! - Aṅguttara Nikāya Mūla, Aṭṭhakathā, Ṭīkā
 
 use anyhow::{Result, Context};
 use quick_xml::events::Event;
@@ -207,12 +208,24 @@ pub fn parse_into_fragments(
 
                                 // Only close if this is a Sutta fragment and has actual sutta content
                                 if matches!(frag_type, FragmentType::Sutta) {
-                                    let tentative_content = xml_content[frag_start_pos..event_start_pos].to_string();
-                                    let has_sutta_content = tentative_content.contains("rend=\"subhead\"") ||
-                                                           tentative_content.contains("rend=\"chapter\"") ||
-                                                           tentative_content.contains("rend=\"bodytext\"");
+                                    // When overrides have pushed the fragment start to or past this
+                                    // boundary, always close the fragment to maintain frag_idx alignment
+                                    // with correction overrides (e.g., collapsed/moved fragments).
+                                    // This guard is specific to Anguttara Nikaya where correction
+                                    // overrides require strict frag_idx alignment.
+                                    let should_close = if frag_start_pos >= event_start_pos
+                                        && nikaya_structure.nikaya == "anguttara" {
+                                        true
+                                    } else if frag_start_pos < event_start_pos {
+                                        let tentative_content = xml_content[frag_start_pos..event_start_pos].to_string();
+                                        tentative_content.contains("rend=\"subhead\"") ||
+                                        tentative_content.contains("rend=\"chapter\"") ||
+                                        tentative_content.contains("rend=\"bodytext\"")
+                                    } else {
+                                        false
+                                    };
 
-                                    if has_sutta_content {
+                                    if should_close {
                                         // Close at the current position (before the new vagga/sutta div)
                                         let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                                             xml_content,
@@ -300,12 +313,24 @@ pub fn parse_into_fragments(
                                     (current_fragment_start, current_frag_type.as_ref()) {
 
                                     if matches!(frag_type, FragmentType::Sutta) {
-                                        let tentative_content = xml_content[frag_start_pos..event_start_pos].to_string();
-                                        let has_sutta_content = tentative_content.contains("rend=\"subhead\"") ||
-                                                               tentative_content.contains("rend=\"chapter\"") ||
-                                                               tentative_content.contains("rend=\"bodytext\"");
+                                        // When overrides have pushed the fragment start to or past this
+                                        // boundary, always close the fragment to maintain frag_idx alignment
+                                        // with correction overrides (e.g., collapsed/moved fragments).
+                                        // This guard is specific to Anguttara Nikaya where correction
+                                        // overrides require strict frag_idx alignment.
+                                        let should_close = if frag_start_pos >= event_start_pos
+                                            && nikaya_structure.nikaya == "anguttara" {
+                                            true
+                                        } else if frag_start_pos < event_start_pos {
+                                            let tentative_content = xml_content[frag_start_pos..event_start_pos].to_string();
+                                            tentative_content.contains("rend=\"subhead\"") ||
+                                            tentative_content.contains("rend=\"chapter\"") ||
+                                            tentative_content.contains("rend=\"bodytext\"")
+                                        } else {
+                                            false
+                                        };
 
-                                        if has_sutta_content {
+                                        if should_close {
                                             // Close at the current position (before the new vagga chapter)
                                             let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                                                 xml_content,
@@ -444,7 +469,12 @@ pub fn parse_into_fragments(
                                 overrides.adjustments.as_ref(),
                             )?;
 
-                            let content_xml = xml_content[frag_start_pos..end_pos].to_string();
+                            // Guard against inverted slice when overrides push positions
+                            let content_xml = if frag_start_pos <= end_pos {
+                                xml_content[frag_start_pos..end_pos].to_string()
+                            } else {
+                                String::new()
+                            };
                                  if collapsed || !content_xml.trim().is_empty() {
                                     fragments.push(XmlFragment {
                                         nikaya: nikaya_structure.nikaya.clone(),

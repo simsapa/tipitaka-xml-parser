@@ -14,9 +14,6 @@ use crate::parsers::{
     SamyuttaNikayaMula,
     SamyuttaNikayaAtthakatha,
     SamyuttaNikayaTika,
-    AnguttaraNikayaMula,
-    AnguttaraNikayaAtthakatha,
-    AnguttaraNikayaTika,
 };
 
 /// Parse XML content into fragments with automatic type detection
@@ -64,14 +61,10 @@ pub fn parse_into_fragments(
             Box::new(SamyuttaNikayaTika::new())
         }
 
-        XmlFileType::AnguttaraNikayaMula => {
-            Box::new(AnguttaraNikayaMula::new())
-        }
-        XmlFileType::AnguttaraNikayaAtthakatha => {
-            Box::new(AnguttaraNikayaAtthakatha::new())
-        }
+        XmlFileType::AnguttaraNikayaMula |
+        XmlFileType::AnguttaraNikayaAtthakatha |
         XmlFileType::AnguttaraNikayaTika => {
-            Box::new(AnguttaraNikayaTika::new())
+            Box::new(GeneralParser::new())
         }
 
         XmlFileType::KhuddakaNikaya
