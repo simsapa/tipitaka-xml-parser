@@ -816,50 +816,52 @@ impl HierarchyTracker {
                 return;
             }
 
-            // Check if we already have a level at this depth with the same type
-            if self.current_levels.len() > depth {
-                let existing = &self.current_levels[depth];
-                // Check if same type
-                let same_type = match (&existing.group_type, &level_type) {
+            // First, check if we already have a level of the same type at ANY position
+            // This handles cases like SN samyuttas without vaggas, where the Sutta level
+            // ends up at a different depth than the nikaya structure specifies.
+            let existing_pos = self.current_levels.iter().position(|existing| {
+                matches!((&existing.group_type, &level_type),
                     (GroupType::Nikaya, GroupType::Nikaya) |
                     (GroupType::Book, GroupType::Book) |
                     (GroupType::Pannasaka, GroupType::Pannasaka) |
                     (GroupType::Vagga, GroupType::Vagga) |
                     (GroupType::Samyutta, GroupType::Samyutta) |
-                    (GroupType::Sutta, GroupType::Sutta) => true,
-                    _ => false,
+                    (GroupType::Sutta, GroupType::Sutta)
+                )
+            });
+
+            if let Some(pos) = existing_pos {
+                // Found an existing level of the same type
+                let existing = &self.current_levels[pos];
+
+                // Update the existing level, but preserve ID if new ID is None
+                let preserved_id = if id.is_none() {
+                    existing.id.clone()
+                } else {
+                    id.clone()
                 };
 
-                if same_type {
-                    // Update the existing level, but preserve ID if new ID is None
-                    let preserved_id = if id.is_none() {
-                        existing.id.clone()
-                    } else {
-                        id.clone()
-                    };
+                // Only truncate child levels if we're providing a new ID OR if the title is changing
+                // If id is None AND title is the same, we're just re-entering the same level
+                // Otherwise, we're entering a NEW level (with a new title) and should truncate child levels
+                let title_changed = existing.title != title;
+                let should_truncate = id.is_some() || title_changed;
 
-                    // Only truncate child levels if we're providing a new ID OR if the title is changing
-                    // If id is None AND title is the same, we're just re-entering the same level
-                    // Otherwise, we're entering a NEW level (with a new title) and should truncate child levels
-                    let title_changed = existing.title != title;
-                    let should_truncate = id.is_some() || title_changed;
-
-                    if should_truncate {
-                        // Truncate levels after this one before updating
-                        self.current_levels.truncate(depth + 1);
-                    }
-
-                    self.current_levels[depth] = GroupLevel {
-                        group_type: level_type,
-                        group_number: number,
-                        title,
-                        id: preserved_id,
-                    };
-                    return;
+                if should_truncate {
+                    // Truncate levels after this one before updating
+                    self.current_levels.truncate(pos + 1);
                 }
+
+                self.current_levels[pos] = GroupLevel {
+                    group_type: level_type,
+                    group_number: number,
+                    title,
+                    id: preserved_id,
+                };
+                return;
             }
 
-            // Truncate to the appropriate depth (remove levels at this depth and below)
+            // No existing level of this type - truncate to the appropriate depth
             self.current_levels.truncate(depth);
 
             // Add the new level
