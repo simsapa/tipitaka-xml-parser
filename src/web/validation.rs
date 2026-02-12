@@ -477,6 +477,120 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection) -> ValidationCheckRes
     }
 }
 
+/// Check for duplicate cst_code and sc_code values within each file
+///
+/// Finds fragments where cst_code or sc_code values are not unique within the same cst_file.
+/// Only non-empty values are checked for uniqueness.
+/// Fragments with frag_review = 'moved' are excluded as they are essentially deleted.
+/// Header type fragments are excluded as they don't require unique codes.
+pub fn check_code_uniqueness(conn: &mut SqliteConnection) -> ValidationCheckResult {
+    let mut errors = Vec::new();
+
+    // Check cst_code uniqueness within each file
+    // Query fragments with non-empty cst_code, excluding moved and Header fragments
+    let cst_code_fragments: Vec<(i32, String, i32, Option<String>)> = xml_fragments::table
+        .select((
+            xml_fragments::id,
+            xml_fragments::cst_file,
+            xml_fragments::frag_idx,
+            xml_fragments::cst_code,
+        ))
+        .filter(xml_fragments::cst_code.is_not_null())
+        .filter(xml_fragments::cst_code.ne(""))
+        .filter(xml_fragments::frag_type.ne("Header"))
+        .filter(xml_fragments::frag_review.ne("moved").or(xml_fragments::frag_review.is_null()))
+        .load(conn)
+        .unwrap_or_default();
+
+    // Group by (cst_file, cst_code) to find duplicates within each file
+    let mut cst_code_map: HashMap<(String, String), Vec<(i32, i32)>> = HashMap::new();
+    for (id, cst_file, frag_idx, cst_code_opt) in cst_code_fragments {
+        if let Some(cst_code) = cst_code_opt {
+            cst_code_map
+                .entry((cst_file, cst_code))
+                .or_insert_with(Vec::new)
+                .push((id, frag_idx));
+        }
+    }
+
+    // Report duplicates for cst_code
+    for ((cst_file, code), fragments) in &cst_code_map {
+        if fragments.len() > 1 {
+            for (id, frag_idx) in fragments {
+                errors.push(ValidationError {
+                    cst_file: cst_file.clone(),
+                    frag_idx: *frag_idx,
+                    fragment_id: *id,
+                    message: format!(
+                        "Duplicate cst_code '{}' (found in {} fragments in this file)",
+                        code,
+                        fragments.len()
+                    ),
+                });
+            }
+        }
+    }
+
+    // Check sc_code uniqueness within each file
+    // Query fragments with non-empty sc_code, excluding moved and Header fragments
+    let sc_code_fragments: Vec<(i32, String, i32, Option<String>)> = xml_fragments::table
+        .select((
+            xml_fragments::id,
+            xml_fragments::cst_file,
+            xml_fragments::frag_idx,
+            xml_fragments::sc_code,
+        ))
+        .filter(xml_fragments::sc_code.is_not_null())
+        .filter(xml_fragments::sc_code.ne(""))
+        .filter(xml_fragments::frag_type.ne("Header"))
+        .filter(xml_fragments::frag_review.ne("moved").or(xml_fragments::frag_review.is_null()))
+        .load(conn)
+        .unwrap_or_default();
+
+    // Group by (cst_file, sc_code) to find duplicates within each file
+    let mut sc_code_map: HashMap<(String, String), Vec<(i32, i32)>> = HashMap::new();
+    for (id, cst_file, frag_idx, sc_code_opt) in sc_code_fragments {
+        if let Some(sc_code) = sc_code_opt {
+            sc_code_map
+                .entry((cst_file, sc_code))
+                .or_insert_with(Vec::new)
+                .push((id, frag_idx));
+        }
+    }
+
+    // Report duplicates for sc_code
+    for ((cst_file, code), fragments) in &sc_code_map {
+        if fragments.len() > 1 {
+            for (id, frag_idx) in fragments {
+                errors.push(ValidationError {
+                    cst_file: cst_file.clone(),
+                    frag_idx: *frag_idx,
+                    fragment_id: *id,
+                    message: format!(
+                        "Duplicate sc_code '{}' (found in {} fragments in this file)",
+                        code,
+                        fragments.len()
+                    ),
+                });
+            }
+        }
+    }
+
+    // Sort errors by file and frag_idx for consistent ordering
+    errors.sort_by(|a, b| {
+        a.cst_file.cmp(&b.cst_file)
+            .then_with(|| a.frag_idx.cmp(&b.frag_idx))
+    });
+
+    ValidationCheckResult {
+        name: "Code Uniqueness".to_string(),
+        description: "Checks that cst_code and sc_code values are unique within each file".to_string(),
+        auto_fixable: false,
+        errors,
+        auto_fixes: vec![],
+    }
+}
+
 /// Run all validation checks and return results
 ///
 /// Returns a HashMap where keys are check identifiers and values are the results.
@@ -510,6 +624,11 @@ pub fn run_all_validations(
     results.insert(
         "sc_code_sequence".to_string(),
         check_sc_code_sequence(conn),
+    );
+
+    results.insert(
+        "code_uniqueness".to_string(),
+        check_code_uniqueness(conn),
     );
 
     results
@@ -1305,5 +1424,312 @@ mod tests {
 
         let result = check_sc_code_sequence(&mut conn);
         assert_eq!(result.errors.len(), 0, "Valid sequence without groups should have no errors");
+    }
+
+    // =========================================================================
+    // Tests for check_code_uniqueness
+    // =========================================================================
+
+    #[test]
+    fn test_code_uniqueness_no_duplicates() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // All unique codes - should have no errors
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"),
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: Some("2"), sc_code: Some("dn2"),
+                content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 2, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: Some("3"), sc_code: Some("dn3"),
+                content_xml: "<p>3</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 3, start_char: 0, end_line: 3, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_code_uniqueness(&mut conn);
+        assert_eq!(result.errors.len(), 0, "Unique codes should have no errors");
+        assert_eq!(result.name, "Code Uniqueness");
+    }
+
+    #[test]
+    fn test_code_uniqueness_duplicate_cst_code() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // Duplicate cst_code "1" in two fragments
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"),
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn2"), // Duplicate cst_code
+                content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_code_uniqueness(&mut conn);
+        assert_eq!(result.errors.len(), 2, "Should report both fragments with duplicate cst_code");
+        assert!(result.errors.iter().all(|e| e.message.contains("Duplicate cst_code '1'")),
+            "All errors should mention duplicate cst_code");
+    }
+
+    #[test]
+    fn test_code_uniqueness_duplicate_sc_code() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // Duplicate sc_code "dn1" in two fragments
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"),
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: Some("2"), sc_code: Some("dn1"), // Duplicate sc_code
+                content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_code_uniqueness(&mut conn);
+        assert_eq!(result.errors.len(), 2, "Should report both fragments with duplicate sc_code");
+        assert!(result.errors.iter().all(|e| e.message.contains("Duplicate sc_code 'dn1'")),
+            "All errors should mention duplicate sc_code");
+    }
+
+    #[test]
+    fn test_code_uniqueness_moved_fragments_excluded() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // Duplicate cst_code "1" but one fragment is "moved" - should not report error
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"),
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: Some("moved"),
+                nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"), // Duplicate but moved
+                content_xml: "", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 2, start_char: 0, end_line: 2, end_char: 0, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_code_uniqueness(&mut conn);
+        assert_eq!(result.errors.len(), 0, "Moved fragments should be excluded from uniqueness check");
+    }
+
+    #[test]
+    fn test_code_uniqueness_empty_codes_ignored() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // Multiple fragments with empty/null codes - should not report as duplicates
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: None, sc_code: None,
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: Some(""), sc_code: Some(""),
+                content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 2, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: None, sc_code: None,
+                content_xml: "<p>3</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 3, start_char: 0, end_line: 3, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_code_uniqueness(&mut conn);
+        assert_eq!(result.errors.len(), 0, "Empty/null codes should not be reported as duplicates");
+    }
+
+    #[test]
+    fn test_code_uniqueness_header_fragments_excluded() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // Header fragments with duplicate codes - should be excluded from check
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Header", frag_review: None,
+                nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"),
+                content_xml: "<h>H1</h>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 1, frag_type: "Header", frag_review: None,
+                nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"), // Duplicate but Header
+                content_xml: "<h>H2</h>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 2, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"), // Same code in Sutta - only one, so OK
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 3, start_char: 0, end_line: 3, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_code_uniqueness(&mut conn);
+        assert_eq!(result.errors.len(), 0, "Header fragments should be excluded from uniqueness check");
+    }
+
+    #[test]
+    fn test_code_uniqueness_across_files_allowed() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // Same sc_code "dn1" across different files - should NOT be reported
+        // (uniqueness is only required within the same file)
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "file1.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"),
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "file2.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"), // Same codes, different file - OK
+                content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_code_uniqueness(&mut conn);
+        assert_eq!(result.errors.len(), 0, "Same codes in different files should be allowed");
+    }
+
+    #[test]
+    fn test_code_uniqueness_within_same_file() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // Duplicate sc_code "dn1" within the same file - should be reported
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"),
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: Some("2"), sc_code: Some("dn1"), // Duplicate sc_code in same file
+                content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "other.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"), // Same code but different file - OK
+                content_xml: "<p>3</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_code_uniqueness(&mut conn);
+        // Only 2 errors for the duplicates within test.xml, not 3
+        assert_eq!(result.errors.len(), 2, "Only duplicates within same file should be reported");
+
+        // All errors should be for test.xml
+        assert!(result.errors.iter().all(|e| e.cst_file == "test.xml"),
+            "All errors should be for test.xml");
     }
 }
