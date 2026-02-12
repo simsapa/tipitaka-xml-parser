@@ -2,7 +2,7 @@ use anyhow::{Result, Context};
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
-use crate::types::{XmlFragment, FragmentAdjustments, FragmentKey, CorrectionFragmentOverrides, ScCodeComponents, ParserError};
+use crate::types::{XmlFragment, FragmentAdjustments, FragmentKey, CorrectionFragmentOverrides, ScCodeComponents, ParserError, FragmentType};
 use crate::sutta_builder::cst_code_to_sc_code_map;
 use regex::Regex;
 
@@ -739,6 +739,422 @@ pub fn populate_sc_fields_from_tsv_conditional(
     Ok(())
 }
 
+// ============== HierarchyTracker ==============
+// NOTE: This was moved here from the individual nikaya parser files as part of
+// refactoring Plan 01. See tasks/01-hierarchy-tracker.md for details.
+
+use crate::types::{GroupType, GroupLevel};
+use crate::nikaya_structure::NikayaStructure;
+
+/// Hierarchy tracker for maintaining group level context
+///
+/// Tracks the current position in the nikaya hierarchy and manages
+/// entering/exiting levels according to the nikaya structure.
+#[derive(Debug, Clone)]
+pub struct HierarchyTracker {
+    current_levels: Vec<GroupLevel>,
+    nikaya_structure: NikayaStructure,
+}
+
+impl HierarchyTracker {
+    /// Create a new hierarchy tracker
+    pub fn new(nikaya_structure: NikayaStructure) -> Self {
+        Self {
+            current_levels: Vec::new(),
+            nikaya_structure,
+        }
+    }
+
+    /// Enter a new hierarchy level
+    ///
+    /// Determines the depth of the level type in the nikaya structure,
+    /// truncates current_levels to the appropriate depth, and adds the new level.
+    /// If a level of the same type exists at that depth, it updates the title but preserves the ID.
+    pub fn enter_level(
+        &mut self,
+        level_type: GroupType,
+        title: String,
+        id: Option<String>,
+        number: Option<i32>,
+    ) {
+
+        // Find the depth of this level type in the nikaya structure
+        let depth = self.nikaya_structure.levels
+            .iter()
+            .position(|t| matches!((t, &level_type),
+                (GroupType::Nikaya, GroupType::Nikaya) |
+                (GroupType::Book, GroupType::Book) |
+                (GroupType::Pannasaka, GroupType::Pannasaka) |
+                (GroupType::Vagga, GroupType::Vagga) |
+                (GroupType::Samyutta, GroupType::Samyutta) |
+                (GroupType::Sutta, GroupType::Sutta)
+            ));
+
+        if let Some(depth) = depth {
+            // Special case: If we're entering a Nikaya level (depth 0) and we already have
+            // levels (like Book), this means the XML has the nikaya tag INSIDE the book div.
+            // In this case, we should insert the Nikaya at the beginning rather than truncating.
+            if depth == 0 && matches!(level_type, GroupType::Nikaya) && !self.current_levels.is_empty() {
+                // Check if we already have a Nikaya level
+                if self.current_levels.first().map(|l| matches!(l.group_type, GroupType::Nikaya)).unwrap_or(false) {
+                    // Update existing Nikaya level
+                    self.current_levels[0] = GroupLevel {
+                        group_type: level_type,
+                        group_number: number,
+                        title,
+                        id,
+                    };
+                } else {
+                    // Insert Nikaya at the beginning
+                    self.current_levels.insert(0, GroupLevel {
+                        group_type: level_type,
+                        group_number: number,
+                        title,
+                        id,
+                    });
+                }
+                return;
+            }
+
+            // Check if we already have a level at this depth with the same type
+            if self.current_levels.len() > depth {
+                let existing = &self.current_levels[depth];
+                // Check if same type
+                let same_type = match (&existing.group_type, &level_type) {
+                    (GroupType::Nikaya, GroupType::Nikaya) |
+                    (GroupType::Book, GroupType::Book) |
+                    (GroupType::Pannasaka, GroupType::Pannasaka) |
+                    (GroupType::Vagga, GroupType::Vagga) |
+                    (GroupType::Samyutta, GroupType::Samyutta) |
+                    (GroupType::Sutta, GroupType::Sutta) => true,
+                    _ => false,
+                };
+
+                if same_type {
+                    // Update the existing level, but preserve ID if new ID is None
+                    let preserved_id = if id.is_none() {
+                        existing.id.clone()
+                    } else {
+                        id.clone()
+                    };
+
+                    // Only truncate child levels if we're providing a new ID OR if the title is changing
+                    // If id is None AND title is the same, we're just re-entering the same level
+                    // Otherwise, we're entering a NEW level (with a new title) and should truncate child levels
+                    let title_changed = existing.title != title;
+                    let should_truncate = id.is_some() || title_changed;
+
+                    if should_truncate {
+                        // Truncate levels after this one before updating
+                        self.current_levels.truncate(depth + 1);
+                    }
+
+                    self.current_levels[depth] = GroupLevel {
+                        group_type: level_type,
+                        group_number: number,
+                        title,
+                        id: preserved_id,
+                    };
+                    return;
+                }
+            }
+
+            // Truncate to the appropriate depth (remove levels at this depth and below)
+            self.current_levels.truncate(depth);
+
+            // Add the new level
+            self.current_levels.push(GroupLevel {
+                group_type: level_type,
+                group_number: number,
+                title,
+                id,
+            });
+        }
+    }
+
+    /// Get a clone of the current hierarchy levels
+    pub fn get_current_levels(&self) -> Vec<GroupLevel> {
+        self.current_levels.clone()
+    }
+}
+
+/// Extract sutta title from <head> or <p rend="subhead"> tag in fragment content
+///
+/// Prefers <p rend="subhead"> over <head rend="chapter"> to avoid extracting vagga titles.
+/// Returns the first title that looks like a sutta title (starts with a number).
+///
+/// # Arguments
+/// * `content` - The XML content to search
+///
+/// # Returns
+/// `Some(title)` if a sutta title is found, `None` otherwise
+pub fn extract_sutta_title_from_content(content: &str) -> Option<String> {
+    use quick_xml::Reader;
+    use quick_xml::events::Event;
+
+    let mut reader = Reader::from_str(content);
+    reader.trim_text(false);
+    let mut buf = Vec::new();
+
+    let mut first_chapter_title: Option<String> = None;
+    let mut first_subhead_title: Option<String> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) => {
+                let name_bytes = e.name();
+                let name = std::str::from_utf8(name_bytes.as_ref()).unwrap_or("").to_string();
+
+                // Check both <head> and <p> tags
+                if name == "head" || name == "p" {
+                    // Check if this has rend="chapter" or rend="subhead"
+                    let mut rend_value: Option<String> = None;
+
+                    for attr in e.attributes() {
+                        if let Ok(attr) = attr {
+                            let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
+                            let value = attr.unescape_value().unwrap_or_default();
+
+                            if key == "rend" && (value == "chapter" || value == "subhead") {
+                                rend_value = Some(value.to_string());
+                                break;
+                            }
+                        }
+                    }
+
+                    if let Some(rend) = rend_value {
+                        // Read the text content
+                        if let Ok(Event::Text(ref text)) = reader.read_event_into(&mut buf) {
+                            let title_text = text.unescape().unwrap_or_default().trim().to_string();
+
+                            // Keep the full title including number prefix (e.g., "2. Brahmajālasuttaṃ")
+                            // But skip if it's a subsection (like "Uddeso" which doesn't start with a number)
+                            let looks_like_sutta_title = title_text.chars().next()
+                                .map(|c| c.is_numeric())
+                                .unwrap_or(false);
+
+                            if !title_text.is_empty() && looks_like_sutta_title {
+                                if rend == "subhead" && first_subhead_title.is_none() {
+                                    first_subhead_title = Some(title_text.clone());
+                                } else if rend == "chapter" && first_chapter_title.is_none() {
+                                    // For <p rend="chapter">, only treat as sutta title if in DN
+                                    // In AN tika, <p rend="chapter"> is a Vagga marker, not a Sutta marker
+                                    // In DN, <head rend="chapter"> IS a Sutta marker
+                                    // We can't distinguish nikayas here, so use tag name: <head> = DN sutta, <p> = vagga
+                                    if name == "head" {
+                                        first_chapter_title = Some(title_text.clone());
+                                    }
+                                }
+
+                                // If we found a subhead title, we can return immediately
+                                // since subheads are sutta titles and take priority over chapter titles (vagga titles)
+                                if rend == "subhead" {
+                                    return Some(title_text);
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {},
+        }
+        buf.clear();
+    }
+
+    // Prefer subhead title over chapter title
+    first_subhead_title.or(first_chapter_title)
+}
+
+use std::collections::HashMap;
+
+// ============== FragmentBoundaryDetector ==============
+// NOTE: This was moved here from the individual nikaya parser files as part of
+// refactoring Plan 04. See tasks/04-boundary-detector.md for details.
+
+/// Fragment boundary detector
+///
+/// Detects boundaries between fragments based on nikaya-specific rules
+/// and extracts relevant metadata.
+pub struct FragmentBoundaryDetector<'a> {
+    nikaya_structure: &'a NikayaStructure,
+    cst_file: &'a str,
+}
+
+impl<'a> FragmentBoundaryDetector<'a> {
+    /// Create a new fragment boundary detector
+    pub fn new(nikaya_structure: &'a NikayaStructure, cst_file: &'a str) -> Self {
+        Self { nikaya_structure, cst_file }
+    }
+
+    /// Check if an element marks a level boundary and extract metadata
+    ///
+    /// Returns Some((GroupType, title, id, number)) if this is a boundary element
+    pub fn check_boundary(
+        &self,
+        tag_name: &str,
+        attributes: &HashMap<String, String>,
+    ) -> Option<(GroupType, String, Option<String>, Option<i32>)> {
+        match tag_name {
+            "p" if attributes.get("rend") == Some(&"nikaya".to_string()) => {
+                Some((GroupType::Nikaya, String::new(), None, None))
+            },
+            "p" if attributes.get("rend") == Some(&"book".to_string()) => {
+                Some((GroupType::Book, String::new(), None, None))
+            },
+            "div" if attributes.get("type") == Some(&"book".to_string()) => {
+                let id = attributes.get("id").cloned();
+                Some((GroupType::Book, String::new(), id, None))
+            },
+            "div" if attributes.get("type") == Some(&"samyutta".to_string()) => {
+                let id = attributes.get("id").cloned();
+                Some((GroupType::Samyutta, String::new(), id, None))
+            },
+            "div" if attributes.get("type") == Some(&"pannasaka".to_string()) => {
+                let id = attributes.get("id").cloned();
+                Some((GroupType::Pannasaka, String::new(), id, None))
+            },
+            "div" if attributes.get("type") == Some(&"vagga".to_string()) => {
+                let id = attributes.get("id").cloned();
+                Some((GroupType::Vagga, String::new(), id, None))
+            },
+            "div" if attributes.get("type") == Some(&"sutta".to_string()) => {
+                let id = attributes.get("id").cloned();
+                Some((GroupType::Sutta, String::new(), id, None))
+            },
+            "head" if attributes.get("rend") == Some(&"book".to_string()) => {
+                Some((GroupType::Book, String::new(), None, None))
+            },
+            "head" if attributes.get("rend") == Some(&"nikaya".to_string()) => {
+                Some((GroupType::Nikaya, String::new(), None, None))
+            },
+            "head" if attributes.get("rend") == Some(&"title".to_string()) => {
+                // In AN, <head rend="title"> = Pannasaka title
+                if self.nikaya_structure.nikaya == "anguttara" {
+                    Some((GroupType::Pannasaka, String::new(), None, None))
+                } else {
+                    None
+                }
+            },
+            "head" if attributes.get("rend") == Some(&"chapter".to_string()) => {
+                // In DN, chapter = Sutta
+                // In SN, chapter = Samyutta
+                // In MN/AN, chapter = Vagga
+                if self.nikaya_structure.nikaya == "digha" {
+                    Some((GroupType::Sutta, String::new(), None, None))
+                } else if self.nikaya_structure.nikaya == "samyutta" {
+                    Some((GroupType::Samyutta, String::new(), None, None))
+                } else {
+                    Some((GroupType::Vagga, String::new(), None, None))
+                }
+            },
+            "p" if attributes.get("rend") == Some(&"title".to_string()) => {
+                // In SN, <p rend="title"> = Vagga title
+                // In AN (commentary/tika), <p rend="title"> = Pannasaka title
+                if self.nikaya_structure.nikaya == "samyutta" {
+                    Some((GroupType::Vagga, String::new(), None, None))
+                } else if self.nikaya_structure.nikaya == "anguttara" {
+                    Some((GroupType::Pannasaka, String::new(), None, None))
+                } else {
+                    None
+                }
+            },
+            "p" if attributes.get("rend") == Some(&"chapter".to_string()) => {
+                // In AN (commentary/tika), <p rend="chapter"> = Vagga title
+                if self.nikaya_structure.nikaya == "anguttara" {
+                    Some((GroupType::Vagga, String::new(), None, None))
+                } else {
+                    None
+                }
+            },
+            "p" if attributes.get("rend") == Some(&"subhead".to_string()) => {
+                // In MN, SN, and AN, subhead = Sutta title
+                if self.nikaya_structure.nikaya == "majjhima" ||
+                   self.nikaya_structure.nikaya == "samyutta" ||
+                   self.nikaya_structure.nikaya == "anguttara" {
+                    Some((GroupType::Sutta, String::new(), None, None))
+                } else {
+                    None
+                }
+            },
+            _ => None,
+        }
+    }
+
+    /// Check if this is a sutta boundary (start of actual sutta content)
+    pub fn is_sutta_start(&self, tag_name: &str, attributes: &HashMap<String, String>) -> bool {
+        // Check if this is a commentary or sub-commentary file
+        let is_commentary = self.cst_file.ends_with(".att.xml") || self.cst_file.ends_with(".tik.xml");
+
+        match self.nikaya_structure.nikaya.as_str() {
+            "digha" => {
+                if is_commentary {
+                    // DN commentary: Use <head rend="chapter"> for sutta boundaries
+                    // NOT <div type="sutta"> which marks introduction sections
+                    tag_name == "head" && attributes.get("rend") == Some(&"chapter".to_string())
+                } else {
+                    // DN base text: Suttas are wrapped in <div type="sutta">
+                    tag_name == "div" && attributes.get("type") == Some(&"sutta".to_string())
+                }
+            },
+            "majjhima" | "samyutta" => {
+                // MN/SN: Suttas are delimited by <p rend="subhead">
+                // Each subhead starts a new sutta
+                tag_name == "p" && attributes.get("rend") == Some(&"subhead".to_string())
+            },
+            "anguttara" => {
+                // AN: Similar to MN/SN
+                tag_name == "p" && attributes.get("rend") == Some(&"subhead".to_string())
+            },
+            _ => {
+                // Default: look for div or subhead
+                (tag_name == "div" && attributes.get("type") == Some(&"sutta".to_string())) ||
+                (tag_name == "p" && attributes.get("rend") == Some(&"subhead".to_string()))
+            }
+        }
+    }
+}
+
+/// Macro to implement the XmlParser trait for a nikaya parser struct
+///
+/// This macro generates a standard XmlParser implementation that delegates
+/// to the shared `parse_into_fragments` function. All nikaya-specific parsers
+/// use this same pattern.
+///
+/// # Usage
+/// ```ignore
+/// impl_xml_parser!(DighaNikayaMula);
+/// impl_xml_parser!(MajjhimaNikayaMula);
+/// ```
+#[macro_export]
+macro_rules! impl_xml_parser {
+    ($struct_name:ident) => {
+        impl XmlParser for $struct_name {
+            fn parse_into_fragments(
+                &self,
+                xml_content: &str,
+                nikaya_structure: &NikayaStructure,
+                cst_file: &str,
+                overrides: &ParserOverrides,
+                populate_sc_fields: bool,
+            ) -> Result<Vec<XmlFragment>> {
+                // Delegate to the public function
+                parse_into_fragments(
+                    xml_content,
+                    nikaya_structure,
+                    cst_file,
+                    overrides,
+                    populate_sc_fields,
+                )
+            }
+        }
+    };
+}
+
+/// Re-export the macro for convenience
+pub use impl_xml_parser;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -974,4 +1390,396 @@ mod tests {
         // but we've demonstrated the function exists and runs
         assert!(fragments[0].sc_code.is_some() || original_sc.is_some());
     }
+}
+
+// ============== CST Fields Derivation ==============
+// NOTE: This was moved here from the individual nikaya parser files as part of
+// refactoring Plan 05. See tasks/05-derive-cst-fields-unification.md for details.
+
+/// Derive CST code from fragment metadata
+///
+/// For DN: code is like "dn1.1" from div id="dn1_1" or div id="dn1" + sutta number "1."
+/// For MN: code is like "mn1.5.1" from div id="mn1_5_1" or div id="mn1_5" + sutta number "1."
+/// For SN: code is like "sn1.1.1.1" from div id="sn1" + div id="sn1_1" + vagga number "1." + sutta number "1."
+///
+/// Handles nikaya-specific variations:
+/// - SN mula: uses reverse iteration for vagga/sutta extraction (group_levels may contain stale entries)
+/// - All others: uses forward iteration
+///
+/// # Arguments
+/// * `fragment` - The fragment containing group_levels with IDs and titles
+/// * `nikaya_structure` - The nikaya structure for determining code format
+/// * `cst_sutta_title` - Optional sutta title from fragment content (fallback)
+///
+/// # Returns
+/// The derived CST code (e.g., "dn1.1", "mn1.5.1", "sn1.1.1.1"), or None if insufficient metadata
+pub fn derive_cst_code(
+    fragment: &XmlFragment,
+    nikaya_structure: &NikayaStructure,
+    cst_sutta_title: Option<&str>,
+) -> Option<String> {
+    // First check if the Sutta level itself has an ID (like "dn1_12")
+    // This is the most direct and reliable source
+    if let Some(sutta_id) = fragment.group_levels.iter()
+        .find_map(|level| {
+            if matches!(level.group_type, GroupType::Sutta) {
+                level.id.as_ref()
+            } else {
+                None
+            }
+        }) {
+        // Convert id format: "dn1_12" or "mn1_5_3" -> "dn1.12" or "mn1.5.3"
+        let code = sutta_id.replace('_', ".");
+        return Some(code);
+    }
+
+    // Fallback: Try to construct from components based on nikaya structure
+    // Get book number from ID (e.g., "dn1" -> "1", "mn1" -> "1", "sn1" -> "1")
+    let book_id = fragment.group_levels.iter()
+        .find_map(|level| {
+            if matches!(level.group_type, GroupType::Book) {
+                level.id.as_ref()
+            } else {
+                None
+            }
+        });
+
+    // For Samyutta Nikaya: extract samyutta number from ID like "sn1_1"
+    let samyutta_number = if nikaya_structure.nikaya == "samyutta" {
+        fragment.group_levels.iter()
+            .find_map(|level| {
+                if matches!(level.group_type, GroupType::Samyutta) {
+                    // Extract number from samyutta title like "1. Devatāsaṃyuttaṃ"
+                    level.title.split_whitespace()
+                        .next()
+                        .and_then(|first| first.strip_suffix('.'))
+                        .filter(|num| num.chars().all(|c| c.is_numeric()))
+                        .or_else(|| {
+                            // Fallback: Extract from ID like "sn1_1" -> "1"
+                            level.id.as_ref().and_then(|id| {
+                                id.rsplit('_')
+                                    .next()
+                                    .filter(|num| num.chars().all(|c| c.is_numeric()))
+                            })
+                        })
+                } else {
+                    None
+                }
+            })
+    } else {
+        None
+    };
+
+    // For Anguttara Nikaya: extract pannasaka number from ID like "an3_1"
+    let pannasaka_number = if nikaya_structure.nikaya == "anguttara" {
+        fragment.group_levels.iter()
+            .find_map(|level| {
+                if matches!(level.group_type, GroupType::Pannasaka) {
+                    // Extract number from pannasaka title like "1. Paṭhamapaṇṇāsakaṃ"
+                    level.title.split_whitespace()
+                        .next()
+                        .and_then(|first| first.strip_suffix('.'))
+                        .filter(|num| num.chars().all(|c| c.is_numeric()))
+                        .or_else(|| {
+                            // Fallback: Extract from ID like "an3_1" -> "1"
+                            level.id.as_ref().and_then(|id| {
+                                id.rsplit('_')
+                                    .next()
+                                    .filter(|num| num.chars().all(|c| c.is_numeric()))
+                            })
+                        })
+                } else {
+                    None
+                }
+            })
+    } else {
+        None
+    };
+
+    // SN mula uses reverse iteration for vagga/sutta because
+    // group_levels may contain stale entries from previous samyuttas
+    let use_rev = nikaya_structure.nikaya == "samyutta"
+        && fragment.cst_file.ends_with(".mul.xml");
+
+    // Get vagga number from title (e.g., "1" from "1. Mūlapariyāyavaggo" or "1. Naḷavaggo")
+    // This is more reliable than using the vagga ID since the ID may be inherited from the next vagga
+    // However, for vagga 0 (introduction/preamble) in commentary files, the title is often empty,
+    // so we fallback to extracting from the ID (e.g., "mn1_0" -> "0")
+    let vagga_number = if use_rev {
+        // SN mula: use reverse iteration to get the LAST (most recent) Vagga level
+        fragment.group_levels.iter()
+            .rev()
+            .find_map(|level| {
+                if matches!(level.group_type, GroupType::Vagga) {
+                    // First try: Extract number from title like "1. Vagga Name"
+                    level.title.split_whitespace()
+                        .next()
+                        .and_then(|first| first.strip_suffix('.'))
+                        .filter(|num| num.chars().all(|c| c.is_numeric()))
+                        .or_else(|| {
+                            // Fallback: Extract from ID like "mn1_0" or "mn1_1"
+                            // Split by underscore and take the last part
+                            level.id.as_ref().and_then(|id| {
+                                id.rsplit('_')
+                                    .next()
+                                    .filter(|num| num.chars().all(|c| c.is_numeric()))
+                            })
+                        })
+                } else {
+                    None
+                }
+            })
+    } else {
+        // Standard: forward iteration
+        fragment.group_levels.iter()
+            .find_map(|level| {
+                if matches!(level.group_type, GroupType::Vagga) {
+                    // First try: Extract number from title like "1. Vagga Name"
+                    level.title.split_whitespace()
+                        .next()
+                        .and_then(|first| first.strip_suffix('.'))
+                        .filter(|num| num.chars().all(|c| c.is_numeric()))
+                        .or_else(|| {
+                            // Fallback: Extract from ID like "mn1_0" or "mn1_1"
+                            // Split by underscore and take the last part
+                            level.id.as_ref().and_then(|id| {
+                                id.rsplit('_')
+                                    .next()
+                                    .filter(|num| num.chars().all(|c| c.is_numeric()))
+                            })
+                        })
+                } else {
+                    None
+                }
+            })
+    };
+
+    // Extract sutta number from title (e.g., "1. Brahmajālasuttaṃ" or "1. Oghataraṇasuttaṃ" -> "1")
+    // First try from Sutta GroupLevel
+    let sutta_number = if use_rev {
+        // SN mula: use reverse iteration to get the LAST (most recent) Sutta level
+        // This is important because group_levels may contain multiple Sutta levels
+        fragment.group_levels.iter()
+            .rev()
+            .find_map(|level| {
+                if matches!(level.group_type, GroupType::Sutta) {
+                    // Extract number from title like "1. Title" or "10. Title"
+                    level.title.split_whitespace()
+                        .next()
+                        .and_then(|first| first.strip_suffix('.'))
+                        .filter(|num| num.chars().all(|c| c.is_numeric()))
+                } else {
+                    None
+                }
+            })
+    } else {
+        // Standard: forward iteration
+        fragment.group_levels.iter()
+            .find_map(|level| {
+                if matches!(level.group_type, GroupType::Sutta) {
+                    // Extract number from title like "1. Title" or "10. Title"
+                    level.title.split_whitespace()
+                        .next()
+                        .and_then(|first| first.strip_suffix('.'))
+                        .filter(|num| num.chars().all(|c| c.is_numeric()))
+                } else {
+                    None
+                }
+            })
+    }
+    .or_else(|| {
+        // Fallback: Extract from cst_sutta_title parameter (from fragment content)
+        cst_sutta_title.and_then(|title| {
+            title.split_whitespace()
+                .next()
+                .and_then(|first| first.strip_suffix('.'))
+                .filter(|num| num.chars().all(|c| c.is_numeric()))
+        })
+    });
+
+    // Build the code based on nikaya structure
+    match nikaya_structure.nikaya.as_str() {
+        "digha" => {
+            // DN style: dn{book}.{sutta}
+            match (book_id, sutta_number) {
+                (Some(book), Some(sutta)) => Some(format!("{}.{}", book, sutta)),
+                _ => None,
+            }
+        }
+        "majjhima" => {
+            // MN style: mn{book}.{vagga}.{sutta}
+            match (book_id, vagga_number, sutta_number) {
+                (Some(book), Some(vagga), Some(sutta)) => {
+                    Some(format!("{}.{}.{}", book, vagga, sutta))
+                }
+                (Some(book), Some(vagga), None) => {
+                    // MN vagga 0 (introduction/preamble) in commentary files: mn1.0.0
+                    Some(format!("{}.{}.0", book, vagga))
+                }
+                _ => None,
+            }
+        }
+        "samyutta" => {
+            // SN style: sn{book}.{samyutta}.{vagga}.{sutta}
+            // Some samyuttas (like Bhikkhunīsaṃyuttaṃ) don't have vaggas, so use 1 as the vagga number
+            match (book_id, samyutta_number, vagga_number, sutta_number) {
+                (Some(book), Some(samyutta), Some(vagga), Some(sutta)) => {
+                    Some(format!("{}.{}.{}.{}", book, samyutta, vagga, sutta))
+                }
+                (Some(book), Some(samyutta), Some(vagga), None) => {
+                    // SN vagga 0 (introduction/preamble) in commentary files: sn1.1.0.0
+                    Some(format!("{}.{}.{}.0", book, samyutta, vagga))
+                }
+                (Some(book), Some(samyutta), None, Some(sutta)) => {
+                    // SN without vaggas (like Bhikkhunīsaṃyuttaṃ): use 1 as vagga number
+                    Some(format!("{}.{}.1.{}", book, samyutta, sutta))
+                }
+                _ => None,
+            }
+        }
+        "anguttara" => {
+            // AN style: an{book}.{pannasaka}.{vagga}.{sutta}
+            match (book_id, pannasaka_number, vagga_number, sutta_number) {
+                (Some(book), Some(pannasaka), Some(vagga), Some(sutta)) => {
+                    Some(format!("{}.{}.{}.{}", book, pannasaka, vagga, sutta))
+                }
+                (Some(book), Some(pannasaka), Some(vagga), None) => {
+                    // AN vagga 0 (introduction/preamble) in commentary files: an3.1.0.0
+                    Some(format!("{}.{}.{}.0", book, pannasaka, vagga))
+                }
+                _ => None,
+            }
+        }
+        _ => {
+            // Default fallback for other nikayas
+            match (book_id, sutta_number) {
+                (Some(book), Some(sutta)) => Some(format!("{}.{}", book, sutta)),
+                _ => None,
+            }
+        }
+    }
+}
+
+/// Extract CST fields from fragment content
+///
+/// Derives cst_file, cst_code, cst_vagga, cst_sutta, and cst_paranum
+/// from the fragment.
+///
+/// Handles nikaya-specific variations:
+/// - SN mula: uses reverse iteration for vagga/sutta extraction and
+///   conditional vagga title fallback
+/// - All others: uses forward iteration and unconditional vagga title fallback
+///
+/// # Arguments
+/// * `fragment` - The fragment to process
+/// * `nikaya_structure` - The nikaya structure for context
+///
+/// # Returns
+/// Tuple of (cst_file, cst_code, cst_vagga, cst_sutta, cst_paranum)
+pub fn derive_cst_fields(
+    fragment: &XmlFragment,
+    nikaya_structure: &NikayaStructure,
+) -> (String, Option<String>, Option<String>, Option<String>, Option<String>) {
+    let cst_file = fragment.cst_file.clone();
+
+    // Only process Sutta fragments
+    if !matches!(fragment.frag_type, FragmentType::Sutta) {
+        return (cst_file, None, None, None, None);
+    }
+
+    // SN mula uses reverse iteration for vagga/sutta because
+    // group_levels may contain stale entries from previous samyuttas
+    let use_rev = nikaya_structure.nikaya == "samyutta"
+        && fragment.cst_file.ends_with(".mul.xml");
+
+    // --- cst_vagga ---
+    let cst_vagga = if use_rev {
+        // SN mula: no has_vagga_level guard, reverse iteration
+        // Check if THIS FRAGMENT actually has a Vagga level (not just if the nikaya supports vaggas)
+        // This is important for SN where some samyuttas have vaggas and some don't
+        // Use .rev() to get the LAST (most recent) Vagga level, not the first
+        fragment.group_levels.iter()
+            .rev()
+            .find(|level| matches!(level.group_type, GroupType::Vagga))
+            .and_then(|level| {
+                if level.title.trim().is_empty() {
+                    None
+                } else {
+                    Some(level.title.clone())
+                }
+            })
+            .or_else(|| {
+                // SN mula: only use vagga fallback for MN (never for SN itself)
+                // Fallback: Extract vagga title from <head rend="chapter"> tag in fragment content
+                // This is used for MN where <head rend="chapter"> is the vagga title
+                // NOTE: Do NOT use this fallback for SN because in SN, <head rend="chapter"> is a Samyutta marker,
+                // not a Vagga marker. We already have the Samyutta info in group_levels.
+                // Only apply fallback for MN (majjhima)
+                if nikaya_structure.nikaya == "majjhima" {
+                    extract_vagga_title_from_content(&fragment.content_xml)
+                } else {
+                    None
+                }
+            })
+    } else {
+        // Standard: check if nikaya structure has vaggas, forward iteration
+        let has_vagga_level = nikaya_structure.levels.iter()
+            .any(|t| matches!(t, GroupType::Vagga));
+
+        if has_vagga_level {
+            fragment.group_levels.iter()
+                .find(|level| matches!(level.group_type, GroupType::Vagga))
+                .and_then(|level| {
+                    if level.title.trim().is_empty() {
+                        None
+                    } else {
+                        Some(level.title.clone())
+                    }
+                })
+                .or_else(|| {
+                    // Fallback: Extract vagga title from <head rend="chapter"> tag
+                    // This is used for MN where <head rend="chapter"> is the vagga title
+                    extract_vagga_title_from_content(&fragment.content_xml)
+                })
+        } else {
+            None
+        }
+    };
+
+    // --- cst_sutta ---
+    // Extract sutta title from group_levels (filter out empty titles)
+    let cst_sutta = if use_rev {
+        // Used for SN mula:
+        // Use .rev() to get the LAST (most recent) Sutta level, not the first
+        // This is important because group_levels may contain multiple Sutta levels
+        // when a new sutta starts (the old one hasn't been removed yet)
+        fragment.group_levels.iter()
+            .rev()
+            .find(|level| matches!(level.group_type, GroupType::Sutta))
+    } else {
+        fragment.group_levels.iter()
+            .find(|level| matches!(level.group_type, GroupType::Sutta))
+    }
+    .and_then(|level| {
+        if level.title.trim().is_empty() {
+            None
+        } else {
+            Some(level.title.clone())
+        }
+    })
+    .or_else(|| {
+        // Fallback: Extract title from <head> or <p rend="subhead"> tag in fragment content
+        extract_sutta_title_from_content(&fragment.content_xml)
+    });
+
+    // --- cst_paranum ---
+    // Extract cst_paranum from first <p rend="bodytext" n="...">
+    let cst_paranum = extract_first_paranum(&fragment.content_xml);
+
+    // --- cst_code ---
+    // Derive cst_code from div id attributes and sutta number
+    // Pass the cst_sutta as a parameter so it can be used for deriving the code
+    let cst_code = derive_cst_code(fragment, nikaya_structure, cst_sutta.as_deref());
+
+    (cst_file, cst_code, cst_vagga, cst_sutta, cst_paranum)
 }

@@ -10,19 +10,10 @@ use crate::xml_file_type::XmlFileType;
 use crate::xml_type_detector::detect_xml_file_type;
 use crate::xml_parser_trait::XmlParser;
 use crate::parsers::{
-    DighaNikayaMula,
-    DighaNikayaAtthakatha,
-    DighaNikayaTika,
-    MajjhimaNikayaMula,
-    MajjhimaNikayaAtthakatha,
-    MajjhimaNikayaTika,
+    GeneralParser,
     SamyuttaNikayaMula,
     SamyuttaNikayaAtthakatha,
     SamyuttaNikayaTika,
-    AnguttaraNikayaMula,
-    AnguttaraNikayaAtthakatha,
-    AnguttaraNikayaTika,
-    GeneralParser,
 };
 
 /// Parse XML content into fragments with automatic type detection
@@ -48,29 +39,18 @@ pub fn parse_into_fragments(
 ) -> Result<Vec<XmlFragment>> {
     // Detect the XML file type
     let xml_type = detect_xml_file_type(xml_content, cst_file)?;
-    
+
     // Dispatch to the appropriate parser based on type
     let parser: Box<dyn XmlParser> = match xml_type {
-        XmlFileType::DighaNikayaMula => {
-            Box::new(DighaNikayaMula::new())
-        }
-        XmlFileType::DighaNikayaAtthakatha => {
-            Box::new(DighaNikayaAtthakatha::new())
-        }
-        XmlFileType::DighaNikayaTika => {
-            Box::new(DighaNikayaTika::new())
-        }
-        
-        XmlFileType::MajjhimaNikayaMula => {
-            Box::new(MajjhimaNikayaMula::new())
-        }
-        XmlFileType::MajjhimaNikayaAtthakatha => {
-            Box::new(MajjhimaNikayaAtthakatha::new())
-        }
+        XmlFileType::DighaNikayaMula |
+        XmlFileType::DighaNikayaAtthakatha |
+        XmlFileType::DighaNikayaTika |
+        XmlFileType::MajjhimaNikayaMula |
+        XmlFileType::MajjhimaNikayaAtthakatha |
         XmlFileType::MajjhimaNikayaTika => {
-            Box::new(MajjhimaNikayaTika::new())
+            Box::new(GeneralParser::new())
         }
-        
+
         XmlFileType::SamyuttaNikayaMula => {
             Box::new(SamyuttaNikayaMula::new())
         }
@@ -80,23 +60,19 @@ pub fn parse_into_fragments(
         XmlFileType::SamyuttaNikayaTika => {
             Box::new(SamyuttaNikayaTika::new())
         }
-        
-        XmlFileType::AnguttaraNikayaMula => {
-            Box::new(AnguttaraNikayaMula::new())
-        }
-        XmlFileType::AnguttaraNikayaAtthakatha => {
-            Box::new(AnguttaraNikayaAtthakatha::new())
-        }
+
+        XmlFileType::AnguttaraNikayaMula |
+        XmlFileType::AnguttaraNikayaAtthakatha |
         XmlFileType::AnguttaraNikayaTika => {
-            Box::new(AnguttaraNikayaTika::new())
+            Box::new(GeneralParser::new())
         }
-        
+
         XmlFileType::KhuddakaNikaya
         | XmlFileType::General => {
             Box::new(GeneralParser::new())
         }
     };
-    
+
     // Parse using the selected parser
     let mut fragments = parser.parse_into_fragments(
         xml_content,
@@ -109,8 +85,8 @@ pub fn parse_into_fragments(
     // Apply SC overrides from CorrectionFragmentOverrides (post-processing)
     // This applies sc_code and sc_sutta overrides directly to fragments
     // and propagates context to subsequent null fragments
-    if let Some(ref correction_overrides) = overrides.correction_overrides {
-        if !correction_overrides.is_empty() {
+    if let Some(ref correction_overrides) = overrides.correction_overrides
+        && !correction_overrides.is_empty() {
             crate::parsers::helpers::apply_sc_overrides(
                 &mut fragments,
                 correction_overrides,
@@ -118,7 +94,6 @@ pub fn parse_into_fragments(
                 overrides.pali_titles.as_ref()
             );
         }
-    }
 
     Ok(fragments)
 }
@@ -152,10 +127,10 @@ mod tests {
     fn test_parse_with_type_detection() {
         let xml = create_dn_sample_xml();
         let structure = detect_nikaya_structure(&xml).expect("Should detect structure");
-        
+
         let fragments = parse_into_fragments(&xml, &structure, "s0101m.mul.xml", &ParserOverrides::default(), false)
             .expect("Should parse fragments");
-        
+
         assert!(!fragments.is_empty(), "Should have fragments");
     }
 
@@ -163,10 +138,10 @@ mod tests {
     fn test_dispatch_to_general_parser() {
         let xml = create_dn_sample_xml();
         let structure = detect_nikaya_structure(&xml).unwrap();
-        
+
         // All types should currently dispatch to general parser
         let fragments = parse_into_fragments(&xml, &structure, "s0101m.mul.xml", &ParserOverrides::default(), false).unwrap();
-        
+
         // Verify we got valid fragments
         assert!(!fragments.is_empty());
         assert!(fragments.iter().any(|f| !f.content_xml.trim().is_empty()));

@@ -11,7 +11,7 @@ pub mod settings;
 pub mod validation;
 
 // Re-export commonly used functions
-pub use settings::{load_settings, load_settings_from_path, load_or_create_default_settings};
+pub use settings::{load_settings, load_settings_from_path, load_or_create_default_settings, generate_default_paths};
 
 use rocket::{Rocket, Build, Config};
 use rocket::figment::Figment;

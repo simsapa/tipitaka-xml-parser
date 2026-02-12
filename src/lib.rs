@@ -20,6 +20,7 @@ pub mod encoding;
 pub mod fragments_schema;
 pub mod fragments_models;
 pub mod fragment_operations;
+pub mod regenerate;
 
 // Modular XML parser modules
 pub mod xml_file_type;
@@ -44,3 +45,4 @@ pub use fragment_reconstructor::reconstruct_xml_from_db;
 pub use fragment_tsv_exporter::export_fragments_to_tsv;
 pub use tsv_diff_checker::{check_tsv_improvements, DiffCheckResult, ValidationError};
 pub use integration::{TipitakaImporter, FileImportStats, ProcessingStats};
+pub use regenerate::{RegenerateConfig, RegenerateResult, regenerate_fragments_db, parse_tipitaka_xml_files};
