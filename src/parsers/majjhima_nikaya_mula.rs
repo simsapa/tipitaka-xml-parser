@@ -46,7 +46,7 @@ pub fn parse_into_fragments(
     let mut reader = LineTrackingReader::new(xml_content);
     let mut hierarchy = HierarchyTracker::new(nikaya_structure.clone());
     let detector = FragmentBoundaryDetector::new(nikaya_structure, cst_file);
-    
+
     let mut fragments: Vec<XmlFragment> = Vec::new();
     // Track: (byte_pos, line_num, char_pos)
     let mut current_fragment_start: Option<(usize, usize, usize)>;
@@ -66,32 +66,32 @@ pub fn parse_into_fragments(
     let mut pending_sutta_div_pos: Option<(usize, usize, usize)> = None;
     // For MN/SN: track the position of <div type="vagga"> that precedes <p rend="subhead">
     let mut pending_vagga_div_pos: Option<(usize, usize, usize)> = None;
-    
+
     // Start with a Header fragment at the beginning of the file
     current_fragment_start = Some((0, 1, 0));
     current_frag_type = Some(FragmentType::Header);
     current_fragment_group_levels = hierarchy.get_current_levels();
-    
+
     loop {
         // Capture position BEFORE reading the event (this is the start of the tag)
         let event_start_pos = reader.buffer_position();
         let event_start_line = reader.current_line();
         let event_start_char = reader.current_char();
-        
+
         let event = reader.read_event()?;
-        
+
         // Capture position AFTER reading the event (this is the end of the tag)
         let current_line = reader.current_line();
         let current_char = reader.current_char();
         let current_pos = reader.buffer_position();
-        
+
         match event {
             Event::Start(ref e) | Event::Empty(ref e) => {
                 let name_bytes = e.name();
                 let tag_name = std::str::from_utf8(name_bytes.as_ref())
                     .context("Invalid UTF-8 in tag name")?
                     .to_string();
-                
+
                 // Parse attributes
                 let mut attributes = HashMap::new();
                 for attr in e.attributes() {
@@ -102,12 +102,12 @@ pub fn parse_into_fragments(
                         .context("Failed to unescape attribute value")?;
                     attributes.insert(key.to_string(), value.to_string());
                 }
-                
+
                 // Special handling for <body> tag - close Header fragment after it
                 // Content after <body> will be included in the first Sutta fragment
                 if tag_name == "body" && !seen_body_tag {
                     seen_body_tag = true;
-                    
+
                     // Close the Header fragment right after the <body> tag
                     // Track the adjusted end position to use as the next fragment's start
                     let mut next_frag_start_pos = current_pos;
@@ -168,7 +168,7 @@ pub fn parse_into_fragments(
                     current_fragment_group_levels = hierarchy.get_current_levels();
                     in_sutta_content = true;
                 }
-                
+
                 // Check for boundary
                 if let Some((group_type, _, id, number)) = detector.check_boundary(&tag_name, &attributes) {
                     // For <div> elements with an ID, enter the level immediately to preserve the ID
@@ -180,37 +180,37 @@ pub fn parse_into_fragments(
                         let is_structure_level = matches!(group_type, GroupType::Samyutta | GroupType::Vagga | GroupType::Sutta);
                         let is_vagga_or_sutta_level = matches!(group_type, GroupType::Vagga | GroupType::Sutta);
                         let is_first_vagga_or_sutta = !seen_first_vagga_or_sutta && is_vagga_or_sutta_level;
-                        
+
                         if is_first_vagga_or_sutta {
                             // Mark that we've seen the first vagga/sutta, but don't close the fragment
                             // The preamble content will be included with the first sutta
                             seen_first_vagga_or_sutta = true;
                         } else if is_structure_level && in_sutta_content {
-                            if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) = 
+                            if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) =
                                 (current_fragment_start, current_frag_type.as_ref()) {
-                                
+
                                 // Only close if this is a Sutta fragment and has actual sutta content
                                 if matches!(frag_type, FragmentType::Sutta) {
                                     let tentative_content = xml_content[frag_start_pos..event_start_pos].to_string();
-                                    let has_sutta_content = tentative_content.contains("rend=\"subhead\"") || 
+                                    let has_sutta_content = tentative_content.contains("rend=\"subhead\"") ||
                                                            tentative_content.contains("rend=\"chapter\"") ||
                                                            tentative_content.contains("rend=\"bodytext\"");
-                                    
-                                        if has_sutta_content {
-                                            // Close at the current position (before the new vagga/sutta div)
-                                            let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
-                                                xml_content,
-                                                event_start_pos,
-                                                event_start_line,
-                                                event_start_char,
-                                                cst_file,
-                                                fragments.len(),
-                                                frag_start_pos,
-                                                frag_start_line,
-                                                frag_start_char,
-                                                overrides.correction_overrides.as_ref(),
-                                                overrides.adjustments.as_ref(),
-                                            )?;
+
+                                    if has_sutta_content {
+                                        // Close at the current position (before the new vagga/sutta div)
+                                        let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
+                                            xml_content,
+                                            event_start_pos,
+                                            event_start_line,
+                                            event_start_char,
+                                            cst_file,
+                                            fragments.len(),
+                                            frag_start_pos,
+                                            frag_start_line,
+                                            frag_start_char,
+                                            overrides.correction_overrides.as_ref(),
+                                            overrides.adjustments.as_ref(),
+                                        )?;
 
                                         // Create content with adjusted end position
                                         let content_xml = xml_content[frag_start_pos..end_pos].to_string();
@@ -219,7 +219,7 @@ pub fn parse_into_fragments(
                                     fragments.push(XmlFragment {
                                         nikaya: nikaya_structure.nikaya.clone(),
                                         frag_type: frag_type.clone(),
-                                        content_xml: content_xml,
+                                        content_xml,
                                         start_line: frag_start_line,
                                         end_line,
                                         start_char: frag_start_char,
@@ -236,7 +236,7 @@ pub fn parse_into_fragments(
                                         sc_sutta: None,
                                     });
                                 }
-                                
+
                                         // Start new fragment at the adjusted end position of the previous fragment
                                         // This ensures no gap in XML reconstruction when adjustments are used
                                         current_fragment_start = Some((end_pos, end_line, end_char));
@@ -246,49 +246,49 @@ pub fn parse_into_fragments(
                                 }
                             }
                         }
-                        
+
                         hierarchy.enter_level(group_type.clone(), String::new(), id, number);
-                        
+
                         // Update group_levels after entering any new level while a fragment is open
                         if current_fragment_start.is_some() {
                             current_fragment_group_levels = hierarchy.get_current_levels();
                         }
-                        
+
                         // Don't set pending_title - the next <head> will update the title
                     } else {
                         // For other elements, we'll get the title from the text content, so store it as pending
                         // EXCEPT for MN/SN/AN subheads which need text content validation
-                        let is_sutta_subhead = (nikaya_structure.nikaya == "majjhima" || 
+                        let is_sutta_subhead = (nikaya_structure.nikaya == "majjhima" ||
                                                nikaya_structure.nikaya == "samyutta" ||
                                                nikaya_structure.nikaya == "anguttara") &&
                                               matches!(group_type, GroupType::Sutta) &&
-                                              tag_name == "p" && 
+                                              tag_name == "p" &&
                                               attributes.get("rend") == Some(&"subhead".to_string());
-                        
+
                         // For AN tika/commentary: <p rend="chapter"> = Vagga boundary, should close fragments
                         let is_an_vagga_chapter = nikaya_structure.nikaya == "anguttara" &&
                                                  matches!(group_type, GroupType::Vagga) &&
                                                  tag_name == "p" &&
                                                  attributes.get("rend") == Some(&"chapter".to_string());
-                        
+
                         // Before entering a new Vagga level in AN tika, close any open sutta fragment
                         if is_an_vagga_chapter && in_sutta_content {
                             let is_first_vagga = !seen_first_vagga_or_sutta;
-                            
+
                             if is_first_vagga {
                                 // Mark that we've seen the first vagga, but don't close the fragment
                                 seen_first_vagga_or_sutta = true;
                             } else {
                                 // Close current sutta fragment before entering new Vagga
-                                if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) = 
+                                if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) =
                                     (current_fragment_start, current_frag_type.as_ref()) {
-                                    
+
                                     if matches!(frag_type, FragmentType::Sutta) {
                                         let tentative_content = xml_content[frag_start_pos..event_start_pos].to_string();
-                                        let has_sutta_content = tentative_content.contains("rend=\"subhead\"") || 
+                                        let has_sutta_content = tentative_content.contains("rend=\"subhead\"") ||
                                                                tentative_content.contains("rend=\"chapter\"") ||
                                                                tentative_content.contains("rend=\"bodytext\"");
-                                        
+
                                         if has_sutta_content {
                                             // Close at the current position (before the new vagga chapter)
                                             let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
@@ -328,7 +328,7 @@ pub fn parse_into_fragments(
                                                     sc_sutta: None,
                                                 });
                                             }
-                                            
+
                                             // Start new fragment at the adjusted end position
                                             current_fragment_start = Some((end_pos, end_line, end_char));
                                             current_frag_type = Some(FragmentType::Sutta);
@@ -338,26 +338,26 @@ pub fn parse_into_fragments(
                                 }
                             }
                         }
-                        
+
                         if !is_sutta_subhead {
                             pending_title = Some((group_type.clone(), String::new(), id, number));
                         }
                     }
                 }
-                
+
                 // Track div depth for nested div elements
                 if tag_name == "div" {
                     div_depth += 1;
-                    
+
                     // For DN commentary: <div type="sutta"> precedes <head rend="chapter">
                     // Store its position to use when we encounter the <head> tag
                     let is_commentary = cst_file.ends_with(".att.xml") || cst_file.ends_with(".tik.xml");
-                    if is_commentary && 
+                    if is_commentary &&
                        nikaya_structure.nikaya == "digha" &&
                        attributes.get("type") == Some(&"sutta".to_string()) {
                         pending_sutta_div_pos = Some((event_start_pos, event_start_line, event_start_char));
                     }
-                    
+
                     // For MN/SN: <div type="vagga"> precedes <p rend="subhead">
                     // Store its position to use when we encounter the subhead
                     if (nikaya_structure.nikaya == "majjhima" || nikaya_structure.nikaya == "samyutta") &&
@@ -365,12 +365,12 @@ pub fn parse_into_fragments(
                         pending_vagga_div_pos = Some((event_start_pos, event_start_line, event_start_char));
                     }
                 }
-                
+
                 // Handle sutta boundaries based on nikaya structure
                 let is_potential_sutta_marker = detector.is_sutta_start(&tag_name, &attributes);
-                
+
                 // For MN/SN/AN, we need to check the text content to see if it's a numbered subhead
-                if is_potential_sutta_marker && 
+                if is_potential_sutta_marker &&
                    (nikaya_structure.nikaya == "majjhima" || nikaya_structure.nikaya == "samyutta" || nikaya_structure.nikaya == "anguttara") &&
                    tag_name == "p" && attributes.get("rend") == Some(&"subhead".to_string()) {
                     // Store START position of the tag for later text check
@@ -380,16 +380,16 @@ pub fn parse_into_fragments(
                     // For DN base text: <div type="sutta"> IS the sutta marker, so track depth
                     // For DN commentary: <head rend="chapter"> is the sutta marker, <div type="sutta"> is NOT
                     let is_commentary = cst_file.ends_with(".att.xml") || cst_file.ends_with(".tik.xml");
-                    let should_track_div_depth = tag_name == "div" && 
+                    let should_track_div_depth = tag_name == "div" &&
                                                  attributes.get("type") == Some(&"sutta".to_string()) &&
                                                  !is_commentary;
-                    
+
                     // Check if this is the first sutta marker after <body>
                     if !seen_first_sutta && in_sutta_content {
                         // This is the FIRST sutta marker - don't close current fragment
                         // Just mark that we've seen it
                         seen_first_sutta = true;
-                        
+
                         // Only track div depth if this is a div-based sutta marker
                         if should_track_div_depth {
                             sutta_div_depth = Some(div_depth);
@@ -399,7 +399,7 @@ pub fn parse_into_fragments(
                         // This is a SUBSEQUENT sutta marker - start a new fragment
                         // For DN commentary, check if there's a pending <div type="sutta"> position
                         // If so, use that as the start position (and close position for previous fragment)
-                        let (start_pos, start_line, start_char, close_pos, close_line, close_char) = 
+                        let (start_pos, start_line, start_char, close_pos, close_line, close_char) =
                             if let Some((div_pos, div_line, div_char)) = pending_sutta_div_pos.take() {
                                 // Use the <div> position
                                 (div_pos, div_line, div_char, div_pos, div_line, div_char)
@@ -408,11 +408,11 @@ pub fn parse_into_fragments(
                                 (event_start_pos, event_start_line, event_start_char,
                                  event_start_pos, event_start_line, event_start_char)
                             };
-                        
+
                         // Close current sutta fragment (excluding this tag)
-                        if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) = 
+                        if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) =
                             (current_fragment_start, current_frag_type.as_ref()) {
-                            
+
                             // Apply adjustments if any
                             let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                                 xml_content,
@@ -473,13 +473,13 @@ pub fn parse_into_fragments(
                     }
                 }
             },
-            
+
             Event::Text(ref e) => {
                 let text = e.unescape()
                     .context("Failed to unescape text content")?
                     .trim()
                     .to_string();
-                
+
                 // Check if this text is for a pending subhead (MN/SN style)
                 if let Some((subhead_pos, subhead_line, subhead_char)) = pending_subhead_check.take() {
                     // Check if text starts with a number followed by a dot (e.g., "1. ", "10. ")
@@ -488,11 +488,11 @@ pub fn parse_into_fragments(
                         .next()
                         .and_then(|first_word| first_word.strip_suffix('.'))
                         .map_or(false, |num_part| num_part.chars().all(|c| c.is_numeric()));
-                    
+
                     // For commentary/sub-commentary files, also check if it ends with "suttavaṇṇanā"
                     // to distinguish actual sutta commentaries from subsections
                     let is_commentary = cst_file.ends_with(".att.xml") || cst_file.ends_with(".tik.xml");
-                    
+
                     let is_sutta_commentary = if is_commentary {
                         // In commentary files, only treat it as a sutta if it ends with "suttavaṇṇanā"
                         text.ends_with("suttavaṇṇanā")
@@ -500,7 +500,7 @@ pub fn parse_into_fragments(
                         // In base text files, any numbered subhead is a sutta
                         is_numbered
                     };
-                    
+
                     if is_sutta_commentary {
                         // This is a sutta boundary!
                         // Check if this is the first sutta marker after <body>
@@ -519,7 +519,7 @@ pub fn parse_into_fragments(
                             // This is a SUBSEQUENT sutta marker - start a new fragment
                             // For MN/SN, check if there's a pending <div type="vagga"> position
                             // If so, use that as the start position (and close position for previous fragment)
-                            let (start_pos, start_line, start_char, close_pos, close_line, close_char) = 
+                            let (start_pos, start_line, start_char, close_pos, close_line, close_char) =
                                 if let Some((div_pos, div_line, div_char)) = pending_vagga_div_pos.take() {
                                     // Use the vagga <div> position
                                     (div_pos, div_line, div_char, div_pos, div_line, div_char)
@@ -528,11 +528,11 @@ pub fn parse_into_fragments(
                                     (subhead_pos, subhead_line, subhead_char,
                                      subhead_pos, subhead_line, subhead_char)
                                 };
-                            
+
                             // Already in a sutta - close current and start new
-                            if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) = 
+                            if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) =
                                 (current_fragment_start, current_frag_type.as_ref()) {
-                                
+
                                 // Apply adjustments if any
                                 let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                                     xml_content,
@@ -569,7 +569,7 @@ pub fn parse_into_fragments(
                                         sc_code: None,
                                         sc_sutta: None,
                                     });
-                                    
+
                                     // If we adjusted the end position, start the next fragment there
                                     // to avoid gaps in XML reconstruction
                                     current_fragment_start = Some((end_pos, end_line, end_char));
@@ -581,22 +581,22 @@ pub fn parse_into_fragments(
                                 // No previous fragment to close, start from the original position
                                 current_fragment_start = Some((start_pos, start_line, start_char));
                             }
-                            
+
                             // Update hierarchy with new sutta title
                             hierarchy.enter_level(GroupType::Sutta, text.clone(), None, None);
-                            
+
                             current_frag_type = Some(FragmentType::Sutta);
                             current_fragment_group_levels = hierarchy.get_current_levels();
                         }
                     }
                     // If not numbered, it's just a section heading within a sutta - ignore
                 }
-                
+
                 // If we have a pending title, update it with this text
                 if let Some((group_type, _, id, number)) = pending_title.take() {
                     if !text.is_empty() {
                         hierarchy.enter_level(group_type, text, id, number);
-                        
+
                         // Update group_levels after entering any new level while a fragment is open
                         if current_fragment_start.is_some() {
                             current_fragment_group_levels = hierarchy.get_current_levels();
@@ -604,13 +604,13 @@ pub fn parse_into_fragments(
                     }
                 }
             },
-            
+
             Event::End(ref e) => {
                 let name_bytes = e.name();
                 let tag_name = std::str::from_utf8(name_bytes.as_ref())
                     .context("Invalid UTF-8 in tag name")?
                     .to_string();
-                
+
                 // Track div depth - decrement when seeing closing div tags
                 if tag_name == "div" {
                     // Check if this is closing the current sutta div
@@ -624,18 +624,18 @@ pub fn parse_into_fragments(
                             }
                         }
                     }
-                    
+
                     // Decrement div depth after processing
                     div_depth = div_depth.saturating_sub(1);
                 }
-                
+
                 // Check if this closes the body tag - now we exit sutta content
                 if tag_name == "body" && seen_body_tag {
                     // Close any pending sutta fragment first
                     // The sutta fragment should include ALL content up to (but not including) </body>
-                    if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) = 
+                    if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) =
                         (current_fragment_start, current_frag_type.as_ref()) {
-                        
+
                         // Apply adjustments if any
                         let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                             xml_content,
@@ -673,7 +673,7 @@ pub fn parse_into_fragments(
                 sc_code: None,
                 sc_sutta: None,
             });
-            
+
             // Start the final Header fragment at the adjusted end position
             // to avoid gaps in XML reconstruction
             current_fragment_start = Some((end_pos, end_line, end_char));
@@ -685,23 +685,23 @@ pub fn parse_into_fragments(
                         // No previous fragment, start from the original position
                         current_fragment_start = Some((event_start_pos, event_start_line, event_start_char));
                     }
-                    
+
                     current_frag_type = Some(FragmentType::Header);
                     current_fragment_group_levels = hierarchy.get_current_levels();
                     in_sutta_content = false;
                 }
             },
-            
+
             Event::Eof => break,
-            
+
             _ => {},
         }
     }
-    
+
     // Close any remaining fragment (usually the final Header fragment)
-    if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) = 
+    if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) =
         (current_fragment_start, current_frag_type) {
-        
+
         // Apply adjustments if any
         let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
             xml_content,
@@ -740,7 +740,7 @@ pub fn parse_into_fragments(
                             });
         }
     }
-    
+
     // Post-process fragments to derive CST fields
     for fragment in &mut fragments {
         let (cst_file, cst_code, cst_vagga, cst_sutta, cst_paranum) =
@@ -752,12 +752,12 @@ pub fn parse_into_fragments(
         fragment.cst_sutta = cst_sutta;
         fragment.cst_paranum = cst_paranum;
     }
-    
+
     // Populate SC fields from embedded TSV if requested
     if populate_sc_fields {
         populate_sc_fields_from_tsv_conditional(&mut fragments)?;
     }
-    
+
     Ok(fragments)
 }
 
@@ -818,11 +818,11 @@ mod tests {
     fn test_parse_dn_sample_basic() {
         let xml = create_dn_sample_xml();
         let structure = detect_nikaya_structure(&xml).expect("Should detect DN structure");
-        
+
         assert_eq!(structure.nikaya, "digha");
-        
+
         let fragments = parse_into_fragments(&xml, &structure, "test.xml", &ParserOverrides::default(), false).expect("Should parse fragments");
-        
+
         // Should have at least one fragment
         assert!(!fragments.is_empty(), "Should have at least one fragment");
     }
@@ -832,12 +832,12 @@ mod tests {
         let xml = create_dn_sample_xml();
         let structure = detect_nikaya_structure(&xml).unwrap();
         let fragments = parse_into_fragments(&xml, &structure, "test.xml", &ParserOverrides::default(), false).unwrap();
-        
+
         // Count sutta fragments
         let sutta_fragments: Vec<_> = fragments.iter()
             .filter(|f| matches!(f.frag_type, FragmentType::Sutta))
             .collect();
-        
+
         // Should have one sutta fragment
         assert_eq!(sutta_fragments.len(), 1, "Should have exactly one sutta fragment");
     }
@@ -847,11 +847,11 @@ mod tests {
         let xml = create_dn_sample_xml();
         let structure = detect_nikaya_structure(&xml).unwrap();
         let fragments = parse_into_fragments(&xml, &structure, "test.xml", &ParserOverrides::default(), false).unwrap();
-        
+
         for fragment in &fragments {
             // Line numbers should be valid (start > 0, end >= start)
             assert!(fragment.start_line > 0, "Start line should be > 0");
-            assert!(fragment.end_line >= fragment.start_line, 
+            assert!(fragment.end_line >= fragment.start_line,
                     "End line should be >= start line");
         }
     }
@@ -860,11 +860,11 @@ mod tests {
     fn test_parse_mn_sample_basic() {
         let xml = create_mn_sample_xml();
         let structure = detect_nikaya_structure(&xml).expect("Should detect MN structure");
-        
+
         assert_eq!(structure.nikaya, "majjhima");
-        
+
         let fragments = parse_into_fragments(&xml, &structure, "test.xml", &ParserOverrides::default(), false).expect("Should parse fragments");
-        
+
         assert!(!fragments.is_empty(), "Should have at least one fragment");
     }
 
@@ -873,7 +873,7 @@ mod tests {
         let xml = create_dn_sample_xml();
         let structure = detect_nikaya_structure(&xml).unwrap();
         let fragments = parse_into_fragments(&xml, &structure, "test.xml", &ParserOverrides::default(), false).unwrap();
-        
+
         for fragment in &fragments {
             // Each fragment should have non-empty content
             assert!(!fragment.content_xml.trim().is_empty(),
@@ -886,13 +886,13 @@ mod tests {
         let xml = create_dn_sample_xml();
         let structure = detect_nikaya_structure(&xml).unwrap();
         let fragments = parse_into_fragments(&xml, &structure, "test.xml", &ParserOverrides::default(), false).unwrap();
-        
+
         for fragment in &fragments {
             // Character positions should be valid
             assert!(fragment.start_char <= fragment.end_char || fragment.start_line < fragment.end_line,
                     "Character positions should be valid: start_line={}, start_char={}, end_line={}, end_char={}",
                     fragment.start_line, fragment.start_char, fragment.end_line, fragment.end_char);
-            
+
             // If on same line, start_char should be < end_char
             if fragment.start_line == fragment.end_line {
                 assert!(fragment.start_char < fragment.end_char,
@@ -907,28 +907,28 @@ mod tests {
         // Create XML with multiple short elements on the same line
         let xml = r#"<?xml version="1.0"?>
 <text><body><p rend="nikaya">Dīghanikāyo</p><div type="book"><head rend="book">Book1</head><div type="sutta"><head rend="chapter">Sutta1</head><p n="1">Text1</p></div></div></body></text>"#;
-        
+
         let structure = detect_nikaya_structure(xml).unwrap();
         let fragments = parse_into_fragments(xml, &structure, "test.xml", &ParserOverrides::default(), false).unwrap();
-        
+
         // Check that we can distinguish elements on the same line
         // by their character positions
         for i in 0..fragments.len() {
             for j in (i+1)..fragments.len() {
                 let frag_i = &fragments[i];
                 let frag_j = &fragments[j];
-                
+
                 // If both fragments are on the same line
-                if frag_i.start_line == frag_j.start_line && 
+                if frag_i.start_line == frag_j.start_line &&
                    frag_i.end_line == frag_j.end_line &&
                    frag_i.start_line == frag_i.end_line {
                     // They should have non-overlapping character ranges
-                    let no_overlap = frag_i.end_char <= frag_j.start_char || 
+                    let no_overlap = frag_i.end_char <= frag_j.start_char ||
                                     frag_j.end_char <= frag_i.start_char;
                     assert!(no_overlap,
                             "Fragments on same line should not overlap: \
                              frag[{}]: {}:{}-{}:{}, frag[{}]: {}:{}-{}:{}",
-                            i, frag_i.start_line, frag_i.start_char, 
+                            i, frag_i.start_line, frag_i.start_char,
                             frag_i.end_line, frag_i.end_char,
                             j, frag_j.start_line, frag_j.start_char,
                             frag_j.end_line, frag_j.end_char);
@@ -956,15 +956,15 @@ mod tests {
 </body>
 </text>
 </TEI.2>"#;
-        
+
         let structure = detect_nikaya_structure(xml).unwrap();
         let fragments = parse_into_fragments(xml, &structure, "s0101m.mul.xml", &ParserOverrides::default(), false).unwrap();
-        
+
         // Find the sutta fragment
         let sutta_frag = fragments.iter()
             .find(|f| matches!(f.frag_type, FragmentType::Sutta))
             .expect("Should have a sutta fragment");
-        
+
         // Check CST fields
         assert_eq!(sutta_frag.cst_file.as_str(), "s0101m.mul.xml");
         assert_eq!(sutta_frag.cst_code.as_deref(), Some("dn1.1"));
@@ -992,15 +992,15 @@ mod tests {
 </body>
 </text>
 </TEI.2>"#;
-        
+
         let structure = detect_nikaya_structure(xml).unwrap();
         let fragments = parse_into_fragments(xml, &structure, "s0201m.mul.xml", &ParserOverrides::default(), false).unwrap();
-        
+
         // Find the sutta fragment
         let sutta_frag = fragments.iter()
             .find(|f| matches!(f.frag_type, FragmentType::Sutta))
             .expect("Should have a sutta fragment");
-        
+
         // Check CST fields
         assert_eq!(sutta_frag.cst_file.as_str(), "s0201m.mul.xml");
         assert_eq!(sutta_frag.cst_code.as_deref(), Some("mn1.5.1"));
@@ -1029,15 +1029,15 @@ mod tests {
 </body>
 </text>
 </TEI.2>"#;
-        
+
         let structure = detect_nikaya_structure(xml).unwrap();
         let fragments = parse_into_fragments(xml, &structure, "s0301m.mul.xml", &ParserOverrides::default(), false).unwrap();
-        
+
         // Find the sutta fragment
         let sutta_frag = fragments.iter()
             .find(|f| matches!(f.frag_type, FragmentType::Sutta))
             .expect("Should have a sutta fragment");
-        
+
         // Check CST fields
         assert_eq!(sutta_frag.cst_file.as_str(), "s0301m.mul.xml");
         assert_eq!(sutta_frag.cst_code.as_deref(), Some("sn1.1.1.1"));
@@ -1084,33 +1084,33 @@ mod tests {
 </body>
 </text>
 </TEI.2>"#;
-        
+
         let structure = detect_nikaya_structure(xml).unwrap();
         let fragments = parse_into_fragments(xml, &structure, "s0301m.mul.xml", &ParserOverrides::default(), false).unwrap();
-        
+
         let sutta_fragments: Vec<_> = fragments.iter()
             .filter(|f| matches!(f.frag_type, FragmentType::Sutta))
             .collect();
-        
+
         // Find sutta 10
         let sutta10 = sutta_fragments.iter()
             .find(|f| f.cst_sutta.as_ref().map(|s| s.contains("Pajjotasuttaṃ")).unwrap_or(false))
             .expect("Should find sutta 10");
-        
+
         assert_eq!(sutta10.cst_code.as_deref(), Some("sn1.1.8.10"));
         assert_eq!(sutta10.cst_vagga.as_deref(), Some("8. Chetvāvaggo"));
-        
+
         // Find sutta 11 - this is the critical test case
         let sutta11 = sutta_fragments.iter()
             .find(|f| f.cst_sutta.as_ref().map(|s| s.contains("Araṇasuttaṃ")).unwrap_or(false))
             .expect("Should find sutta 11");
-        
+
         // Sutta 11 should have correct code even though it's the 11th sutta in a vagga
         // and is followed by a new samyutta div
         assert_eq!(sutta11.cst_code.as_deref(), Some("sn1.1.8.11"));
         assert_eq!(sutta11.cst_vagga.as_deref(), Some("8. Chetvāvaggo"));
         assert_eq!(sutta11.cst_sutta.as_deref(), Some("11. Araṇasuttaṃ"));
-        
+
         // Verify that the samyutta level is still sn1_1, not sn1_2
         let samyutta_level = sutta11.group_levels.iter()
             .find(|l| matches!(l.group_type, GroupType::Samyutta));
@@ -1140,15 +1140,15 @@ mod tests {
 </body>
 </text>
 </TEI.2>"#;
-        
+
         let structure = detect_nikaya_structure(xml).unwrap();
         let fragments = parse_into_fragments(xml, &structure, "s0402m2.mul.xml", &ParserOverrides::default(), false).unwrap();
-        
+
         // Find the sutta fragment
         let sutta_frag = fragments.iter()
             .find(|f| matches!(f.frag_type, FragmentType::Sutta))
             .expect("Should have a sutta fragment");
-        
+
         // Check CST fields
         assert_eq!(sutta_frag.cst_file.as_str(), "s0402m2.mul.xml");
         assert_eq!(sutta_frag.cst_code.as_deref(), Some("an3.1.1.1"));
@@ -1178,38 +1178,38 @@ mod tests {
 </body>
 </text>
 </TEI.2>"#;
-        
+
         let structure = detect_nikaya_structure(xml).unwrap();
         let fragments = parse_into_fragments(xml, &structure, "s0402t.tik.xml", &ParserOverrides::default(), false).unwrap();
-        
+
         let sutta_fragments: Vec<_> = fragments.iter()
             .filter(|f| matches!(f.frag_type, FragmentType::Sutta))
             .collect();
-        
+
         // Should have at least 2 sutta fragments
         assert!(sutta_fragments.len() >= 2, "Should have at least 2 sutta fragments");
-        
+
         // Find first actual sutta (not preamble)
         let sutta1 = sutta_fragments.iter()
             .find(|f| f.cst_code.is_some() && f.cst_sutta.as_ref().map(|s| s.contains("Vajjasuttavaṇṇanā")).unwrap_or(false))
             .expect("Should find first sutta");
-        
+
         // Check CST fields for first sutta
         assert_eq!(sutta1.cst_code.as_deref(), Some("an2.1.1.1"));
         assert_eq!(sutta1.cst_vagga.as_deref(), Some("1. Kammakāraṇavaggo"));
         assert_eq!(sutta1.cst_sutta.as_deref(), Some("1. Vajjasuttavaṇṇanā"));
-        
+
         // Find second sutta
         let sutta2 = sutta_fragments.iter()
             .find(|f| f.cst_sutta.as_ref().map(|s| s.contains("Padhānasuttavaṇṇanā")).unwrap_or(false))
             .expect("Should find second sutta");
-        
+
         // Check CST fields for second sutta
         assert_eq!(sutta2.cst_code.as_deref(), Some("an2.1.1.2"));
         assert_eq!(sutta2.cst_vagga.as_deref(), Some("1. Kammakāraṇavaggo"));
         assert_eq!(sutta2.cst_sutta.as_deref(), Some("2. Padhānasuttavaṇṇanā"));
     }
-    
+
     #[test]
     fn test_cst_fields_an_tika_multi_vagga() {
         // Test that AN tika files properly split fragments on <p rend="chapter"> Vagga boundaries
@@ -1233,48 +1233,48 @@ mod tests {
 </body>
 </text>
 </TEI.2>"#;
-        
+
         let structure = detect_nikaya_structure(xml).unwrap();
         let fragments = parse_into_fragments(xml, &structure, "s0402t.tik.xml", &ParserOverrides::default(), false).unwrap();
-        
+
         let sutta_fragments: Vec<_> = fragments.iter()
             .filter(|f| matches!(f.frag_type, FragmentType::Sutta))
             .collect();
-        
+
         // Should have at least 3 fragments (one for each vagga)
         assert!(sutta_fragments.len() >= 3, "Should have at least 3 sutta fragments, got {}", sutta_fragments.len());
-        
+
         // Verify each fragment contains at most 1 chapter marker (its own vagga title)
         for frag in &sutta_fragments {
             let chapter_count = frag.content_xml.matches("rend=\"chapter\"").count();
-            assert!(chapter_count <= 1, 
-                "Fragment should contain at most 1 chapter marker, found {} in fragment with vagga: {:?}", 
+            assert!(chapter_count <= 1,
+                "Fragment should contain at most 1 chapter marker, found {} in fragment with vagga: {:?}",
                 chapter_count, frag.cst_vagga);
         }
-        
+
         // Find fragment with first vagga
         let vagga1_frag = sutta_fragments.iter()
             .find(|f| f.cst_vagga.as_ref().map(|v| v.contains("Kammakāraṇavaggo")).unwrap_or(false))
             .expect("Should find fragment with first vagga");
-        
+
         assert_eq!(vagga1_frag.cst_code.as_deref(), Some("an2.1.1.1"));
         assert_eq!(vagga1_frag.cst_vagga.as_deref(), Some("1. Kammakāraṇavaggo"));
         assert_eq!(vagga1_frag.cst_sutta.as_deref(), Some("1. Vajjasuttavaṇṇanā"));
-        
+
         // Find fragment with second vagga
         let vagga2_frag = sutta_fragments.iter()
             .find(|f| f.cst_vagga.as_ref().map(|v| v.contains("Adhikaraṇavaggavaṇṇanā")).unwrap_or(false))
             .expect("Should find fragment with second vagga");
-        
+
         assert_eq!(vagga2_frag.cst_code.as_deref(), Some("an2.1.2.0"));
         assert_eq!(vagga2_frag.cst_vagga.as_deref(), Some("2. Adhikaraṇavaggavaṇṇanā"));
         assert_eq!(vagga2_frag.cst_sutta, None); // No sutta subhead
-        
+
         // Find fragment with third vagga
         let vagga3_frag = sutta_fragments.iter()
             .find(|f| f.cst_vagga.as_ref().map(|v| v.contains("Bālavaggavaṇṇanā")).unwrap_or(false))
             .expect("Should find fragment with third vagga");
-        
+
         assert_eq!(vagga3_frag.cst_code.as_deref(), Some("an2.1.3.0"));
         assert_eq!(vagga3_frag.cst_vagga.as_deref(), Some("3. Bālavaggavaṇṇanā"));
         assert_eq!(vagga3_frag.cst_sutta, None); // No sutta subhead
