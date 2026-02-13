@@ -722,7 +722,7 @@ fn format_sc_code(components: &ScCodeComponents) -> String {
 /// # Returns
 /// Result indicating success or error
 pub fn populate_sc_fields_from_tsv_conditional(
-    fragments: &mut Vec<XmlFragment>,
+    fragments: &mut [XmlFragment],
 ) -> anyhow::Result<()> {
     let tsv_map = cst_code_to_sc_code_map()?;
 
@@ -747,6 +747,150 @@ pub fn populate_sc_fields_from_tsv_conditional(
     }
 
     Ok(())
+}
+
+/// Propagate SC codes from previous fragments when TSV lookup fails.
+///
+/// For each fragment where sc_code is null after TSV lookup:
+/// 1. Compare the current fragment's cst_code with the previous fragment's sc_code
+/// 2. If only the sutta number increased (e.g., sn15.20 → sn15.21), increment the sutta
+/// 3. If a new group started (e.g., sn15.20 → sn16.1), increment group and reset sutta to 1
+///
+/// This provides a fallback when derived cst_code values are not in the lookup data.
+pub fn propagate_sc_codes_from_previous(
+    fragments: &mut [XmlFragment],
+    pali_titles: Option<&std::collections::HashMap<String, String>>,
+) {
+    let tsv_map = match cst_code_to_sc_code_map() {
+        Ok(map) => map,
+        Err(_) => return,
+    };
+
+    for i in 1..fragments.len() {
+        let current_cst_code = fragments[i].cst_code.clone();
+        let previous_sc_code = fragments[i - 1].sc_code.clone();
+
+        if fragments[i].sc_code.is_some() {
+            continue;
+        }
+
+        let current_cst_code = match current_cst_code {
+            Some(code) => code,
+            None => continue,
+        };
+
+        let previous_sc_code = match previous_sc_code {
+            Some(code) => code,
+            None => continue,
+        };
+
+        if let Some(derived_sc) = derive_sc_code_from_previous(&current_cst_code, &previous_sc_code) {
+            fragments[i].sc_code = Some(derived_sc.clone());
+
+            if let Some((_, sc_sutta)) = tsv_map.get(&derived_sc) {
+                fragments[i].sc_sutta = Some(sc_sutta.clone());
+            } else if let Some(titles_cache) = pali_titles {
+                if let Some(title) = titles_cache.get(&derived_sc) {
+                    fragments[i].sc_sutta = Some(title.clone());
+                }
+            }
+        }
+    }
+}
+
+/// Derive SC code from previous fragment's sc_code based on current cst_code.
+///
+/// Compares cst_code with previous sc_code to determine if:
+/// - Only sutta number incremented (sn15.20 → sn15.21)
+/// - New group started (sn15.20 → sn16.1)
+/// - Handles range sc_codes (e.g., sn12.93-103)
+fn derive_sc_code_from_previous(cst_code: &str, previous_sc_code: &str) -> Option<String> {
+    let cst_parts: Vec<&str> = cst_code.split('.').collect();
+
+    if cst_parts.len() < 4 {
+        return None;
+    }
+
+    let cst_sutta: i32 = cst_parts[3].parse().ok()?;
+
+    // First try to parse as a regular sc_code
+    if let Some(prev_components) = parse_sc_code(previous_sc_code) {
+        return derive_sc_code_with_components(cst_code, cst_sutta, &prev_components);
+    }
+
+    // If regular parse fails, try to handle range sc_code (e.g., "sn12.93-103")
+    if let Some(range_components) = parse_range_sc_code(previous_sc_code) {
+        return derive_sc_code_with_components(cst_code, cst_sutta, &range_components);
+    }
+
+    None
+}
+
+/// Derive sc_code using parsed components
+fn derive_sc_code_with_components(_cst_code: &str, cst_sutta: i32, prev_components: &ScCodeComponents) -> Option<String> {
+    match prev_components.prefix.as_str() {
+        "sn" => {
+            let prev_samyutta = prev_components.samyutta?;
+            let prev_sutta = prev_components.sutta?;
+
+            if cst_sutta == prev_sutta + 1 {
+                Some(format!("sn{}.{}", prev_samyutta, cst_sutta))
+            } else if cst_sutta == 1 || cst_sutta < prev_sutta {
+                Some(format!("sn{}.1", prev_samyutta + 1))
+            } else {
+                None
+            }
+        }
+        "an" => {
+            let prev_nipata = prev_components.nipata?;
+            let prev_sutta = prev_components.sutta?;
+
+            if cst_sutta == prev_sutta + 1 {
+                Some(format!("an{}.{}", prev_nipata, cst_sutta))
+            } else if cst_sutta == 1 || cst_sutta < prev_sutta {
+                Some(format!("an{}.1", prev_nipata + 1))
+            } else {
+                None
+            }
+        }
+        "dn" | "mn" => {
+            let prev_sutta = prev_components.sutta?;
+
+            if cst_sutta == prev_sutta + 1 {
+                Some(format!("{}{}", prev_components.prefix, cst_sutta))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Parse a range sc_code like "sn12.93-103" into components.
+///
+/// Returns ScCodeComponents with the end sutta number.
+fn parse_range_sc_code(sc_code: &str) -> Option<ScCodeComponents> {
+    let parts: Vec<&str> = sc_code.split('-').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+
+    // Parse the first part to get prefix and samyutta/nipata
+    let first_part = parts[0];
+    let second_part = parts[1];
+
+    // Parse first part: "sn12.93" or just "sn12"
+    let first_components = parse_sc_code(first_part)?;
+
+    // Parse second part: "103" (just a number)
+    let end_sutta: i32 = second_part.parse().ok()?;
+
+    Some(ScCodeComponents {
+        prefix: first_components.prefix,
+        samyutta: first_components.samyutta,
+        nipata: first_components.nipata,
+        sutta: Some(end_sutta),
+    })
 }
 
 /// Look up a range cst_code in the TSV map.

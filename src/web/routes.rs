@@ -790,8 +790,10 @@ struct ReparseFileResponse {
 
 /// POST /api/regenerate - Run regeneration process
 #[post("/api/regenerate", data = "<request>")]
-fn regenerate(request: Json<RegenerateRequest>) -> Json<RegenerateResponse> {
+async fn regenerate(request: Json<RegenerateRequest>) -> Json<RegenerateResponse> {
     use crate::regenerate::{RegenerateConfig, regenerate_fragments_db};
+    use crate::logger;
+    use crate::web::arangodb;
 
     // Load settings
     let mut settings = match settings::load_settings() {
@@ -869,6 +871,17 @@ fn regenerate(request: Json<RegenerateRequest>) -> Json<RegenerateResponse> {
     };
 
     // Build regeneration config from settings
+    let pali_titles = match arangodb::get_pali_titles().await {
+        Ok(titles) => {
+            logger::info(&format!("Loaded {} Pali titles from ArangoDB", titles.len()));
+            Some(titles)
+        }
+        Err(e) => {
+            logger::warn(&format!("Failed to load Pali titles from ArangoDB: {}", e));
+            None
+        }
+    };
+
     let config = RegenerateConfig {
         db_path: PathBuf::from(&settings.db_path),
         new_db_path: PathBuf::from(&new_db_path),
@@ -878,6 +891,7 @@ fn regenerate(request: Json<RegenerateRequest>) -> Json<RegenerateResponse> {
         xml_dir: PathBuf::from(&settings.xml_dir),
         xml_filenames: settings.xml_filenames.clone(),
         use_reference_db: request.use_reference_db,
+        pali_titles,
     };
 
     // Run regeneration using the helper function

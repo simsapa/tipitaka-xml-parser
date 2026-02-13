@@ -36,6 +36,8 @@ pub struct RegenerateConfig {
     pub xml_filenames: Vec<String>,
     /// Whether to use the current database as reference for preserving corrections
     pub use_reference_db: bool,
+    /// Pali titles from ArangoDB for sc_sutta lookup
+    pub pali_titles: Option<std::collections::HashMap<String, String>>,
 }
 
 /// Result of the regeneration process
@@ -121,7 +123,7 @@ pub fn regenerate_fragments_db(config: &RegenerateConfig) -> RegenerateResult {
         None
     };
 
-    match parse_tipitaka_xml_files(&xml_files, &config.new_db_path, reference_db) {
+    match parse_tipitaka_xml_files(&xml_files, &config.new_db_path, reference_db, config.pali_titles.clone()) {
         Ok(count) => {
             output.push_str(&format!("Successfully parsed {} files\n\n", count));
         }
@@ -220,6 +222,7 @@ pub fn parse_tipitaka_xml_files(
     xml_files: &[PathBuf],
     fragments_db: &Path,
     reference_fragments_db: Option<&Path>,
+    pali_titles: Option<std::collections::HashMap<String, String>>,
 ) -> Result<usize> {
     // Load fragment adjustments from embedded TSV
     let adjustments = load_fragment_adjustments()
@@ -245,11 +248,11 @@ pub fn parse_tipitaka_xml_files(
         None
     };
 
-    // Build ParserOverrides
+    // Build ParserOverrides using the provided pali_titles
     let overrides = ParserOverrides {
         adjustments: Some(adjustments),
         correction_overrides,
-        pali_titles: None,
+        pali_titles,
     };
 
     if xml_files.is_empty() {
@@ -339,6 +342,7 @@ mod tests {
             xml_dir: PathBuf::from("./xml"),
             xml_filenames: vec!["s0101m.mul.xml".to_string()],
             use_reference_db: true,
+            pali_titles: None,
         };
 
         assert!(config.use_reference_db);

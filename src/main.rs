@@ -576,12 +576,13 @@ fn main() {
         Commands::Regenerate { config, fresh } => {
             use tipitaka_xml_parser::web;
             use tipitaka_xml_parser::regenerate::{RegenerateConfig, regenerate_fragments_db};
+            use tipitaka_xml_parser::logger;
 
             // use_reference_db is true by default, unless --fresh is specified
             let use_reference_db = !fresh;
 
             // Helper function to avoid early return issues
-            let run_regenerate = || -> Result<(), String> {
+            let run_regenerate =|| -> Result<(), String> {
                 // Load settings from config file
                 let mut settings = if let Some(config_path) = &config {
                     // Load from custom config path
@@ -595,6 +596,26 @@ fn main() {
 
                 // Generate default paths
                 web::generate_default_paths(&mut settings);
+
+                // Try to load Pali titles from ArangoDB
+                let pali_titles = match tokio::runtime::Runtime::new() {
+                    Ok(runtime) => {
+                        match runtime.block_on(async { web::arangodb::get_pali_titles().await }) {
+                            Ok(titles) => {
+                                logger::info(&format!("Loaded {} Pali titles from ArangoDB", titles.len()));
+                                Some(titles)
+                            }
+                            Err(e) => {
+                                logger::warn(&format!("Failed to load Pali titles from ArangoDB: {}", e));
+                                None
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        logger::warn(&format!("Failed to create tokio runtime: {}", e));
+                        None
+                    }
+                };
 
                 // Validate required settings
                 if settings.db_path.is_empty() {
@@ -626,6 +647,7 @@ fn main() {
                     xml_dir: PathBuf::from(&settings.xml_dir),
                     xml_filenames: settings.xml_filenames.clone(),
                     use_reference_db,
+                    pali_titles,
                 };
 
                 logger::info(&format!("Regenerating fragments database (use_reference_db: {})", use_reference_db));

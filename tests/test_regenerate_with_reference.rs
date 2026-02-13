@@ -461,3 +461,139 @@ fn verify_first_last_fragments_are_headers(db_path: &Path) {
 
     eprintln!("✓ All {} files have Header fragments as first and last", files.len());
 }
+
+/// Test that s0302m.mul.xml frag_idx 146 has sc_code and sc_sutta populated.
+///
+/// This tests the fix for when derived cst_code values are not in the lookup data:
+/// - If the derived cst_code is not in the lookup data, compare the current fragment's
+///   cst_code with the previous fragment's sc_code
+/// - If only the sutta number increased (e.g., sn15.20 → sn15.21), increment the sutta
+/// - If a new group started (e.g., sn15.20 → sn16.1), increment group and reset sutta to 1
+/// - Use pali_titles from ArangoDB for sc_sutta lookup
+#[test]
+fn test_s0302m_frag_146_sc_code_propagation() {
+    use tipitaka_xml_parser::nikaya_detector::detect_nikaya_structure;
+    use tipitaka_xml_parser::parse_into_fragments;
+    use tipitaka_xml_parser::types::ParserOverrides;
+
+    let pali_titles = tokio::runtime::Runtime::new()
+        .expect("Failed to create tokio runtime")
+        .block_on(async {
+            match arangodb::get_pali_titles().await {
+                Ok(titles) => Some(titles),
+                Err(_) => None,
+            }
+        });
+
+    let overrides = ParserOverrides {
+        pali_titles,
+        ..Default::default()
+    };
+
+    let xml_content = std::fs::read_to_string("tests/data/s0302m.mul.xml")
+        .expect("Failed to read s0302m.mul.xml");
+
+    let structure = detect_nikaya_structure(&xml_content)
+        .expect("Failed to detect nikaya structure");
+
+    let fragments = parse_into_fragments(
+        &xml_content,
+        &structure,
+        "s0302m.mul.xml",
+        &overrides,
+        true,
+    ).expect("Failed to parse fragments");
+
+    let fragment = fragments.get(146).expect("Fragment 146 not found in s0302m.mul.xml");
+
+    assert!(
+        fragment.sc_code.is_some() && !fragment.sc_code.as_ref().unwrap().is_empty(),
+        "frag_idx 146 should have sc_code populated, got {:?}",
+        fragment.sc_code
+    );
+
+    assert!(
+        fragment.sc_sutta.is_some() && !fragment.sc_sutta.as_ref().unwrap().is_empty(),
+        "frag_idx 146 should have sc_sutta populated, got {:?}",
+        fragment.sc_sutta
+    );
+
+    assert_eq!(
+        fragment.sc_code.as_deref(),
+        Some("sn16.1"),
+        "frag_idx 146 should have sc_code 'sn16.1'"
+    );
+
+    assert_eq!(
+        fragment.sc_sutta.as_deref(),
+        Some("Santuṭṭhasutta"),
+        "frag_idx 146 should have sc_sutta 'Santuṭṭhasutta' from ArangoDB"
+    );
+}
+
+/// Test that s0302m.mul.xml frag_idx 76 has sc_code and sc_sutta populated after a range.
+///
+/// This tests the case when the previous fragment has a range sc_code (e.g., sn12.93-103).
+/// The propagate_sc_codes_from_previous() should handle ranges correctly.
+#[test]
+fn test_s0302m_frag_76_after_range() {
+    use tipitaka_xml_parser::nikaya_detector::detect_nikaya_structure;
+    use tipitaka_xml_parser::parse_into_fragments;
+    use tipitaka_xml_parser::types::ParserOverrides;
+
+    let pali_titles = tokio::runtime::Runtime::new()
+        .expect("Failed to create tokio runtime")
+        .block_on(async {
+            match arangodb::get_pali_titles().await {
+                Ok(titles) => Some(titles),
+                Err(_) => None,
+            }
+        });
+
+    let overrides = ParserOverrides {
+        pali_titles,
+        ..Default::default()
+    };
+
+    let xml_content = std::fs::read_to_string("tests/data/s0302m.mul.xml")
+        .expect("Failed to read s0302m.mul.xml");
+
+    let structure = detect_nikaya_structure(&xml_content)
+        .expect("Failed to detect nikaya structure");
+
+    let fragments = parse_into_fragments(
+        &xml_content,
+        &structure,
+        "s0302m.mul.xml",
+        &overrides,
+        true,
+    ).expect("Failed to parse fragments");
+
+    // frag_idx 75 has range sc_code sn12.93-103
+    // frag_idx 76 should have sc_code derived from previous
+    let frag_76 = fragments.get(76).expect("Fragment 76 not found");
+
+    assert!(
+        frag_76.sc_code.is_some() && !frag_76.sc_code.as_ref().unwrap().is_empty(),
+        "frag_idx 76 should have sc_code populated, got {:?}",
+        frag_76.sc_code
+    );
+
+    assert!(
+        frag_76.sc_sutta.is_some() && !frag_76.sc_sutta.as_ref().unwrap().is_empty(),
+        "frag_idx 76 should have sc_sutta populated, got {:?}",
+        frag_76.sc_sutta
+    );
+
+    assert_eq!(
+        frag_76.sc_code.as_deref(),
+        Some("sn13.1"),
+        "frag_idx 76 should have sc_code 'sn13.1'"
+    );
+
+    assert_eq!(
+        frag_76.sc_sutta.as_deref(),
+        Some("Nakhasikhāsutta"),
+        "frag_idx 76 should have sc_sutta 'Nakhasikhāsutta' from ArangoDB"
+    );
+}

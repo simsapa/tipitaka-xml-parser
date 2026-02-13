@@ -11,6 +11,7 @@ use crate::parsers::helpers::{
     LineTrackingReader,
     apply_fragment_adjustment,
     populate_sc_fields_from_tsv_conditional,
+    propagate_sc_codes_from_previous,
     HierarchyTracker,
     impl_xml_parser,
     FragmentBoundaryDetector,
@@ -826,6 +827,7 @@ pub fn parse_into_fragments(
     // Populate SC fields from embedded TSV if requested
     if populate_sc_fields {
         populate_sc_fields_from_tsv_conditional(&mut fragments)?;
+        propagate_sc_codes_from_previous(&mut fragments, overrides.pali_titles.as_ref());
     }
 
     Ok(fragments)
