@@ -1040,6 +1040,18 @@ pub fn extract_sutta_title_from_content(content: &str) -> Option<String> {
     first_subhead_title.or(first_chapter_title)
 }
 
+/// Check if text starts with a numbered sutta marker (e.g., "1. ", "10. ", "2-11. ")
+///
+/// Handles both single numbers and ranges like "2-11" by checking each part is numeric.
+pub fn is_numbered_sutta_subhead(text: &str) -> bool {
+    text.split_whitespace()
+        .next()
+        .and_then(|first_word| first_word.strip_suffix('.'))
+        .map_or(false, |num_part| {
+            num_part.split('-').all(|part| !part.is_empty() && part.chars().all(|c| c.is_numeric()))
+        })
+}
+
 use std::collections::HashMap;
 
 // ============== FragmentBoundaryDetector ==============

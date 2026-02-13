@@ -25,6 +25,7 @@ use crate::parsers::helpers::{
     impl_xml_parser,
     FragmentBoundaryDetector,
     derive_cst_fields as derive_cst_fields_shared,
+    is_numbered_sutta_subhead,
 };
 
 /// General XML parser implementation
@@ -528,12 +529,8 @@ pub fn parse_into_fragments(
 
                 // Check if this text is for a pending subhead (MN/SN style)
                 if let Some((subhead_pos, subhead_line, subhead_char)) = pending_subhead_check.take() {
-                    // Check if text starts with a number followed by a dot (e.g., "1. ", "10. ")
-                    // Pattern: one or more digits, followed by a dot and space
-                    let is_numbered = text.split_whitespace()
-                        .next()
-                        .and_then(|first_word| first_word.strip_suffix('.'))
-                        .map_or(false, |num_part| num_part.chars().all(|c| c.is_numeric()));
+                    // Check if text starts with a numbered sutta marker (e.g., "1. ", "10. ", "2-11. ")
+                    let is_numbered = is_numbered_sutta_subhead(&text);
 
                     // For commentary/sub-commentary files, also check if it ends with "suttavaṇṇanā"
                     // to distinguish actual sutta commentaries from subsections

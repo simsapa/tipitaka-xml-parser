@@ -15,6 +15,7 @@ use crate::parsers::helpers::{
     impl_xml_parser,
     FragmentBoundaryDetector,
     derive_cst_fields as derive_cst_fields_shared,
+    is_numbered_sutta_subhead,
 };
 
 pub struct SamyuttaNikayaTika;
@@ -534,16 +535,8 @@ pub fn parse_into_fragments(
 
                 // Check if this text is for a pending subhead (MN/SN style)
                 if let Some((subhead_pos, subhead_line, subhead_char)) = pending_subhead_check.take() {
-                    // Check if text starts with a number followed by a dot (e.g., "1. ", "10. ", "5-7. ")
-                    // Pattern: one or more digits (optionally followed by hyphen and more digits), then a dot
-                    let is_numbered = text.split_whitespace()
-                        .next()
-                        .and_then(|first_word| first_word.strip_suffix('.'))
-                        .map_or(false, |num_part| {
-                            // Support both single numbers ("1", "10") and ranges ("5-7", "10-11")
-                            num_part.split('-')
-                                .all(|part| !part.is_empty() && part.chars().all(|c| c.is_numeric()))
-                        });
+                    // Check if text starts with a numbered sutta marker (e.g., "1. ", "10. ", "2-11. ")
+                    let is_numbered = is_numbered_sutta_subhead(&text);
 
                     // For commentary/sub-commentary files, also check if it ends with "suttavaṇṇanā"
                     // or "suttādivaṇṇanā" (used for grouped commentaries like "5-7. Paṭhamajanasuttādivaṇṇanā")

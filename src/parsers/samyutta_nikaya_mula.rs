@@ -15,6 +15,7 @@ use crate::parsers::helpers::{
     impl_xml_parser,
     FragmentBoundaryDetector,
     derive_cst_fields as derive_cst_fields_shared,
+    is_numbered_sutta_subhead,
 };
 
 pub struct SamyuttaNikayaMula;
@@ -66,6 +67,8 @@ pub fn parse_into_fragments(
     let mut pending_sutta_div_pos: Option<(usize, usize, usize)> = None;
     // For MN/SN: track the position of <div type="vagga"> that precedes <p rend="subhead">
     let mut pending_vagga_div_pos: Option<(usize, usize, usize)> = None;
+    // For SN: track the position of <p rend="title"> (vagga title) that precedes sutta subhead
+    let mut pending_vagga_title_pos: Option<(usize, usize, usize)> = None;
 
     // Start with a Header fragment at the beginning of the file
     current_fragment_start = Some((0, 1, 0));
@@ -280,8 +283,15 @@ pub fn parse_into_fragments(
                                                  tag_name == "p" &&
                                                  attributes.get("rend") == Some(&"chapter".to_string());
 
-                        // Before entering a new Vagga level in AN tika, close any open sutta fragment
-                        if is_an_vagga_chapter && in_sutta_content {
+                        // For SN: <p rend="title"> = Vagga title, should close fragments
+                        let is_sn_vagga_title = nikaya_structure.nikaya == "samyutta" &&
+                                                matches!(group_type, GroupType::Vagga) &&
+                                                tag_name == "p" &&
+                                                attributes.get("rend") == Some(&"title".to_string());
+
+                        // Before entering a new Vagga level, close any open sutta fragment
+                        let is_vagga_boundary = is_an_vagga_chapter || is_sn_vagga_title;
+                        if is_vagga_boundary && in_sutta_content {
                             let is_first_vagga = !seen_first_vagga_or_sutta;
 
                             if is_first_vagga {
@@ -341,6 +351,10 @@ pub fn parse_into_fragments(
                                             // Start new fragment at the adjusted end position
                                             current_fragment_start = Some((end_pos, end_line, end_char));
                                             current_frag_type = Some(FragmentType::Sutta);
+                                            // For SN vagga title, store position so the next sutta starts here
+                                            if is_sn_vagga_title {
+                                                pending_vagga_title_pos = Some((end_pos, end_line, end_char));
+                                            }
                                             // Note: we'll update group_levels AFTER entering the new level via pending_title
                                         }
                                     }
@@ -497,12 +511,8 @@ pub fn parse_into_fragments(
 
                 // Check if this text is for a pending subhead (MN/SN style)
                 if let Some((subhead_pos, subhead_line, subhead_char)) = pending_subhead_check.take() {
-                    // Check if text starts with a number followed by a dot (e.g., "1. ", "10. ")
-                    // Pattern: one or more digits, followed by a dot and space
-                    let is_numbered = text.split_whitespace()
-                        .next()
-                        .and_then(|first_word| first_word.strip_suffix('.'))
-                        .map_or(false, |num_part| num_part.chars().all(|c| c.is_numeric()));
+                    // Check if text starts with a numbered sutta marker (e.g., "1. ", "10. ", "2-11. ")
+                    let is_numbered = is_numbered_sutta_subhead(&text);
 
                     // For commentary/sub-commentary files, also check if it ends with "suttavaṇṇanā"
                     // to distinguish actual sutta commentaries from subsections
@@ -539,12 +549,15 @@ pub fn parse_into_fragments(
                             // Continue with the current fragment
                         } else if seen_first_sutta {
                             // This is a SUBSEQUENT sutta marker - start a new fragment
-                            // For MN/SN, check if there's a pending <div type="vagga"> position
+                            // For MN/SN, check if there's a pending vagga div or vagga title position
                             // If so, use that as the start position (and close position for previous fragment)
                             let (start_pos, start_line, start_char, close_pos, close_line, close_char) =
                                 if let Some((div_pos, div_line, div_char)) = pending_vagga_div_pos.take() {
                                     // Use the vagga <div> position
                                     (div_pos, div_line, div_char, div_pos, div_line, div_char)
+                                } else if let Some((title_pos, title_line, title_char)) = pending_vagga_title_pos.take() {
+                                    // Use the vagga title <p rend="title"> position
+                                    (title_pos, title_line, title_char, title_pos, title_line, title_char)
                                 } else {
                                     // Use the subhead position (normal case)
                                     (subhead_pos, subhead_line, subhead_char,
