@@ -624,6 +624,90 @@ pub fn check_code_uniqueness(conn: &mut SqliteConnection) -> ValidationCheckResu
     }
 }
 
+/// Check if a cst_code is in range format (e.g., "sn2.1.9.2-12")
+///
+/// A cst_code is considered a range if the last numeric segment contains a dash.
+fn is_cst_code_range(cst_code: &str) -> bool {
+    // Split by '.' and check if the last segment contains a dash (e.g., "2-12")
+    if let Some(last_segment) = cst_code.rsplit('.').next() {
+        return last_segment.contains('-');
+    }
+    false
+}
+
+/// Check if an sc_code is in range format (e.g., "sn12.93-103")
+///
+/// An sc_code is considered a range if the last numeric segment contains a dash.
+fn is_sc_code_range(sc_code: &str) -> bool {
+    // First, remove any colon suffix (e.g., "dn1:1.2" -> "dn1")
+    let base_code = sc_code.split(':').next().unwrap_or(sc_code);
+
+    // Split by '.' and check if the last segment contains a dash
+    if let Some(last_segment) = base_code.rsplit('.').next() {
+        return last_segment.contains('-');
+    }
+    false
+}
+
+/// Check that Sutta fragments with range cst_code also have range sc_code
+///
+/// For Sutta type fragments where cst_code is a range (e.g., "sn2.1.9.2-12"),
+/// if the fragment has an sc_code, it should also be in range form (e.g., "sn12.93-103").
+///
+/// This ensures consistency between CST and SC code formatting for range entries.
+pub fn check_cst_sc_range_consistency(conn: &mut SqliteConnection) -> ValidationCheckResult {
+    // Get Sutta fragments with non-empty cst_code and sc_code
+    let results: Vec<(i32, String, i32, Option<String>, Option<String>)> = xml_fragments::table
+        .select((
+            xml_fragments::id,
+            xml_fragments::cst_file,
+            xml_fragments::frag_idx,
+            xml_fragments::cst_code,
+            xml_fragments::sc_code,
+        ))
+        .filter(xml_fragments::frag_type.eq("Sutta"))
+        .filter(xml_fragments::cst_code.is_not_null())
+        .filter(xml_fragments::cst_code.ne(""))
+        .filter(xml_fragments::sc_code.is_not_null())
+        .filter(xml_fragments::sc_code.ne(""))
+        .load(conn)
+        .unwrap_or_default();
+
+    let errors: Vec<ValidationError> = results
+        .into_iter()
+        .filter_map(|(id, cst_file, frag_idx, cst_code_opt, sc_code_opt)| {
+            let cst_code = cst_code_opt?;
+            let sc_code = sc_code_opt?;
+
+            let cst_is_range = is_cst_code_range(&cst_code);
+            let sc_is_range = is_sc_code_range(&sc_code);
+
+            // If cst_code is a range but sc_code is not, that's an error
+            if cst_is_range && !sc_is_range {
+                Some(ValidationError {
+                    cst_file,
+                    frag_idx,
+                    fragment_id: id,
+                    message: format!(
+                        "cst_code '{}' is a range but sc_code '{}' is not a range",
+                        cst_code, sc_code
+                    ),
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    ValidationCheckResult {
+        name: "CST/SC Range Consistency".to_string(),
+        description: "Ensures that Sutta fragments with range cst_code also have range sc_code".to_string(),
+        auto_fixable: false,
+        errors,
+        auto_fixes: vec![],
+    }
+}
+
 /// Run all validation checks and return results
 ///
 /// Returns a HashMap where keys are check identifiers and values are the results.
@@ -662,6 +746,11 @@ pub fn run_all_validations(
     results.insert(
         "code_uniqueness".to_string(),
         check_code_uniqueness(conn),
+    );
+
+    results.insert(
+        "cst_sc_range_consistency".to_string(),
+        check_cst_sc_range_consistency(conn),
     );
 
     results
@@ -1828,5 +1917,178 @@ mod tests {
         // All errors should be for test.xml
         assert!(result.errors.iter().all(|e| e.cst_file == "test.xml"),
             "All errors should be for test.xml");
+    }
+
+    // =========================================================================
+    // Tests for check_cst_sc_range_consistency
+    // =========================================================================
+
+    #[test]
+    fn test_is_cst_code_range() {
+        // Range formats
+        assert!(is_cst_code_range("sn2.1.9.2-12"));
+        assert!(is_cst_code_range("sn1.1.7.2-3"));
+        assert!(is_cst_code_range("dn1.2-5"));
+
+        // Non-range formats
+        assert!(!is_cst_code_range("sn2.1.9.2"));
+        assert!(!is_cst_code_range("dn1"));
+        assert!(!is_cst_code_range("sn1.1.7"));
+    }
+
+    #[test]
+    fn test_is_sc_code_range() {
+        // Range formats
+        assert!(is_sc_code_range("sn12.93-103"));
+        assert!(is_sc_code_range("sn1.62-63"));
+        assert!(is_sc_code_range("dn10-12"));
+
+        // Non-range formats
+        assert!(!is_sc_code_range("dn1"));
+        assert!(!is_sc_code_range("sn1.62"));
+
+        // With colon suffix (should be ignored)
+        assert!(!is_sc_code_range("dn1:1.2"));
+    }
+
+    #[test]
+    fn test_cst_sc_range_consistency_valid_both_ranges() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // Both cst_code and sc_code are ranges - should be valid
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: Some("sn2.1.9.2-12"), sc_code: Some("sn12.93-103"),
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_cst_sc_range_consistency(&mut conn);
+        assert_eq!(result.errors.len(), 0, "Both ranges should be valid");
+    }
+
+    #[test]
+    fn test_cst_sc_range_consistency_valid_both_single() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // Both cst_code and sc_code are single values (not ranges) - should be valid
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"),
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_cst_sc_range_consistency(&mut conn);
+        assert_eq!(result.errors.len(), 0, "Both single values should be valid");
+    }
+
+    #[test]
+    fn test_cst_sc_range_consistency_cst_range_sc_single_error() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // cst_code is a range but sc_code is not - should error
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "samyutta", cst_code: Some("sn2.1.9.2-12"), sc_code: Some("sn12.93"),
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_cst_sc_range_consistency(&mut conn);
+        assert_eq!(result.errors.len(), 1, "Should report range mismatch");
+        assert!(result.errors[0].message.contains("sn2.1.9.2-12"),
+            "Error should mention the cst_code");
+        assert!(result.errors[0].message.contains("sn12.93"),
+            "Error should mention the sc_code");
+    }
+
+    #[test]
+    fn test_cst_sc_range_consistency_skips_null_codes() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // Null cst_code or sc_code should be skipped
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: None, sc_code: Some("dn1"),
+                content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                nikaya: "digha", cst_code: Some("1"), sc_code: None,
+                content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_cst_sc_range_consistency(&mut conn);
+        assert_eq!(result.errors.len(), 0, "Null codes should be skipped");
+    }
+
+    #[test]
+    fn test_cst_sc_range_consistency_ignores_header_fragments() {
+        let (mut conn, _temp_db) = setup_test_db();
+
+        // Header fragments should be ignored
+        let fragments = vec![
+            NewXmlFragment {
+                cst_file: "test.xml", frag_idx: 0, frag_type: "Header", frag_review: None,
+                nikaya: "samyutta", cst_code: Some("sn2.1.9.2-12"), sc_code: Some("sn12.93"),
+                content_xml: "<h>Header</h>", content_html: None, cst_vagga: None,
+                cst_sutta: None, cst_paranum: None, sc_sutta: None,
+                start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
+            },
+        ];
+
+        for fragment in fragments {
+            diesel::insert_into(xml_fragments::table)
+                .values(&fragment)
+                .execute(&mut conn)
+                .expect("Failed to insert fragment");
+        }
+
+        let result = check_cst_sc_range_consistency(&mut conn);
+        assert_eq!(result.errors.len(), 0, "Header fragments should be ignored");
     }
 }
