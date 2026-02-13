@@ -708,6 +708,75 @@ pub fn check_cst_sc_range_consistency(conn: &mut SqliteConnection) -> Validation
     }
 }
 
+/// Check for sc_code values that don't exist in ArangoDB
+///
+/// Finds Sutta fragments where sc_code is set but the base code (without :suffix)
+/// doesn't exist in the ArangoDB names collection as a root title.
+///
+/// This validation requires ArangoDB to be connected. If ArangoDB is not available,
+/// no errors will be reported (as we cannot verify existence).
+pub fn check_sc_code_not_in_arangodb(
+    conn: &mut SqliteConnection,
+    pali_titles: Option<&HashMap<String, String>>,
+) -> ValidationCheckResult {
+    // If ArangoDB is not connected, we can't check - return empty result
+    let Some(titles) = pali_titles else {
+        return ValidationCheckResult {
+            name: "sc_code Not in ArangoDB".to_string(),
+            description: "Fragments with sc_code that don't exist in ArangoDB (ArangoDB not connected)".to_string(),
+            auto_fixable: false,
+            errors: vec![],
+            auto_fixes: vec![],
+        };
+    };
+
+    // Get all unique sc_codes from the database with their fragment info
+    let results: Vec<(i32, String, i32, Option<String>)> = xml_fragments::table
+        .select((
+            xml_fragments::id,
+            xml_fragments::cst_file,
+            xml_fragments::frag_idx,
+            xml_fragments::sc_code,
+        ))
+        .filter(xml_fragments::sc_code.is_not_null())
+        .filter(xml_fragments::sc_code.ne(""))
+        .load(conn)
+        .unwrap_or_default();
+
+    let errors: Vec<ValidationError> = results
+        .into_iter()
+        .filter_map(|(id, cst_file, frag_idx, sc_code_opt)| {
+            let sc_code = sc_code_opt?;
+
+            // Extract base sc_code (without colon suffix, e.g., "dn1" from "dn1:1.2")
+            let base_code = sc_code.split(':').next().unwrap_or(&sc_code);
+
+            // Check if the base code exists in ArangoDB
+            if !titles.contains_key(base_code) {
+                Some(ValidationError {
+                    cst_file,
+                    frag_idx,
+                    fragment_id: id,
+                    message: format!(
+                        "sc_code '{}' (base: '{}') does not exist in ArangoDB",
+                        sc_code, base_code
+                    ),
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    ValidationCheckResult {
+        name: "sc_code Not in ArangoDB".to_string(),
+        description: "Fragments with sc_code values that don't exist in ArangoDB".to_string(),
+        auto_fixable: false,
+        errors,
+        auto_fixes: vec![],
+    }
+}
+
 /// Run all validation checks and return results
 ///
 /// Returns a HashMap where keys are check identifiers and values are the results.
@@ -751,6 +820,11 @@ pub fn run_all_validations(
     results.insert(
         "cst_sc_range_consistency".to_string(),
         check_cst_sc_range_consistency(conn),
+    );
+
+    results.insert(
+        "sc_code_not_in_arangodb".to_string(),
+        check_sc_code_not_in_arangodb(conn, pali_titles),
     );
 
     results
