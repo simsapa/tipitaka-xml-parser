@@ -587,13 +587,16 @@ pub fn apply_sc_overrides(
             // Derive sc_code from cst_code using propagated context
             if let Some(ref cst_code) = subsequent.cst_code {
                 if let Some(derived_sc) = derive_sc_code_from_context(cst_code, &components) {
-                    fragments[subsequent_idx].sc_code = Some(derived_sc.clone());
-
-                    // Look up and populate sc_sutta title from cache if available
+                    // Only assign sc_code if it exists in ArangoDB
+                    // Try in order: exact match -> range match -> non-range base
                     if let Some(titles_cache) = pali_titles {
-                        if let Some(title) = titles_cache.get(&derived_sc) {
-                            fragments[subsequent_idx].sc_sutta = Some(title.clone());
+                        if let Some((sc_code_to_use, title)) = find_sc_code_in_pali_titles(&derived_sc, titles_cache) {
+                            fragments[subsequent_idx].sc_code = Some(sc_code_to_use);
+                            fragments[subsequent_idx].sc_sutta = Some(title);
                         }
+                    } else {
+                        // No ArangoDB, just assign the derived sc_code without title lookup
+                        fragments[subsequent_idx].sc_code = Some(derived_sc.clone());
                     }
                 }
             }
@@ -615,9 +618,25 @@ pub fn apply_sc_overrides(
 fn derive_sc_code_from_context(cst_code: &str, context: &ScCodeComponents) -> Option<String> {
     // Extract the sutta number from cst_code
     // CST codes have format like: sn1.5.1.2 (book.samyutta.vagga.sutta)
+    // Or range: sn1.5.1.11-20 (book.samyutta.vagga.start-end)
     // We need to extract the sutta number and combine with context
 
-    let parts: Vec<&str> = cst_code.split('.').collect();
+    // Check if cst_code has a range (e.g., "11-20")
+    let (cst_code_base, is_range) = if let Some(dash_pos) = cst_code.rfind('-') {
+        let base_part = &cst_code[..dash_pos];
+        // Check if the dash is part of a range (followed by digits)
+        if base_part.rfind('.').map_or(false, |pos| {
+            base_part[pos+1..].chars().all(|c| c.is_ascii_digit())
+        }) {
+            (base_part.to_string(), true)
+        } else {
+            (cst_code.to_string(), false)
+        }
+    } else {
+        (cst_code.to_string(), false)
+    };
+
+    let parts: Vec<&str> = cst_code_base.split('.').collect();
 
     match context.prefix.as_str() {
         "sn" => {
@@ -627,6 +646,14 @@ fn derive_sc_code_from_context(cst_code: &str, context: &ScCodeComponents) -> Op
                 // Try to get the sutta number from the last part of cst_code
                 if parts.len() >= 4 {
                     if let Ok(sutta) = parts[3].parse::<i32>() {
+                        if is_range {
+                            // Extract end number from original cst_code
+                            if let Some(end_part) = cst_code.rsplit('-').next() {
+                                if let Ok(end_sutta) = end_part.parse::<i32>() {
+                                    return Some(format!("sn{}.{}-{}", samyutta, sutta, end_sutta));
+                                }
+                            }
+                        }
                         return Some(format!("sn{}.{}", samyutta, sutta));
                     }
                 } else if parts.len() == 3 {
@@ -648,6 +675,13 @@ fn derive_sc_code_from_context(cst_code: &str, context: &ScCodeComponents) -> Op
             if let Some(nipata) = context.nipata {
                 if parts.len() >= 4 {
                     if let Ok(sutta) = parts[3].parse::<i32>() {
+                        if is_range {
+                            if let Some(end_part) = cst_code.rsplit('-').next() {
+                                if let Ok(end_sutta) = end_part.parse::<i32>() {
+                                    return Some(format!("an{}.{}-{}", nipata, sutta, end_sutta));
+                                }
+                            }
+                        }
                         return Some(format!("an{}.{}", nipata, sutta));
                     }
                 }
@@ -785,13 +819,18 @@ pub fn propagate_sc_codes_from_previous(
         };
 
         if let Some(derived_sc) = derive_sc_code_from_previous(&current_cst_code, &previous_sc_code) {
-            fragments[i].sc_code = Some(derived_sc.clone());
-
-            if let Some((_, sc_sutta)) = tsv_map.get(&derived_sc) {
-                fragments[i].sc_sutta = Some(sc_sutta.clone());
-            } else if let Some(titles_cache) = pali_titles {
-                if let Some(title) = titles_cache.get(&derived_sc) {
-                    fragments[i].sc_sutta = Some(title.clone());
+            // Only assign sc_code if it exists in ArangoDB
+            // Try in order: exact match -> range match -> non-range base
+            if let Some(titles_cache) = pali_titles {
+                if let Some((sc_code_to_use, title)) = find_sc_code_in_pali_titles(&derived_sc, titles_cache) {
+                    fragments[i].sc_code = Some(sc_code_to_use.clone());
+                    fragments[i].sc_sutta = Some(title);
+                }
+            } else {
+                // No ArangoDB, fall back to TSV lookup
+                if let Some((_, sc_sutta)) = tsv_map.get(&derived_sc) {
+                    fragments[i].sc_code = Some(derived_sc.clone());
+                    fragments[i].sc_sutta = Some(sc_sutta.clone());
                 }
             }
         }
@@ -805,33 +844,54 @@ pub fn propagate_sc_codes_from_previous(
 /// - New group started (sn15.20 → sn16.1)
 /// - Handles range sc_codes (e.g., sn12.93-103)
 fn derive_sc_code_from_previous(cst_code: &str, previous_sc_code: &str) -> Option<String> {
-    let cst_parts: Vec<&str> = cst_code.split('.').collect();
+    // Extract base cst_code (handle ranges like "sn3.8.1.11-20" -> "sn3.8.1.11")
+    let cst_code_base = if let Some(dash_pos) = cst_code.rfind('-') {
+        let base_part = &cst_code[..dash_pos];
+        if base_part.rsplit('.').next().map_or(false, |s| s.chars().all(|c| c.is_ascii_digit())) {
+            base_part.to_string()
+        } else {
+            cst_code.to_string()
+        }
+    } else {
+        cst_code.to_string()
+    };
+
+    let cst_parts: Vec<&str> = cst_code_base.split('.').collect();
 
     if cst_parts.len() < 4 {
         return None;
     }
 
+    // Extract cst_samyutta from cst_code (sn3.10.1.1 -> samyutta = 10)
+    let cst_samyutta: i32 = cst_parts[1].parse().ok()?;
     let cst_sutta: i32 = cst_parts[3].parse().ok()?;
 
     // First try to parse as a regular sc_code
     if let Some(prev_components) = parse_sc_code(previous_sc_code) {
-        return derive_sc_code_with_components(cst_code, cst_sutta, &prev_components);
+        return derive_sc_code_with_components(cst_code, cst_sutta, cst_samyutta, &prev_components);
     }
 
     // If regular parse fails, try to handle range sc_code (e.g., "sn12.93-103")
     if let Some(range_components) = parse_range_sc_code(previous_sc_code) {
-        return derive_sc_code_with_components(cst_code, cst_sutta, &range_components);
+        return derive_sc_code_with_components(cst_code, cst_sutta, cst_samyutta, &range_components);
     }
 
     None
 }
 
 /// Derive sc_code using parsed components
-fn derive_sc_code_with_components(_cst_code: &str, cst_sutta: i32, prev_components: &ScCodeComponents) -> Option<String> {
+fn derive_sc_code_with_components(cst_code: &str, cst_sutta: i32, _cst_samyutta: i32, prev_components: &ScCodeComponents) -> Option<String> {
     match prev_components.prefix.as_str() {
         "sn" => {
             let prev_samyutta = prev_components.samyutta?;
             let prev_sutta = prev_components.sutta?;
+
+            // If cst_sutta is 1 and previous sutta was > 1 (or we have a range),
+            // it means a new samyutta started in cst_code
+            if cst_sutta == 1 && (prev_sutta > 1 || prev_sutta > 0) {
+                // Increment the sc samyutta by 1 for the new cst samyutta
+                return Some(format!("sn{}.{}", prev_samyutta + 1, cst_sutta));
+            }
 
             if cst_sutta == prev_sutta + 1 {
                 Some(format!("sn{}.{}", prev_samyutta, cst_sutta))
@@ -844,6 +904,11 @@ fn derive_sc_code_with_components(_cst_code: &str, cst_sutta: i32, prev_componen
         "an" => {
             let prev_nipata = prev_components.nipata?;
             let prev_sutta = prev_components.sutta?;
+
+            // If cst_sutta is 1 and previous sutta was > 1, new nipata
+            if cst_sutta == 1 && (prev_sutta > 1 || prev_sutta > 0) {
+                return Some(format!("an{}.{}", prev_nipata + 1, cst_sutta));
+            }
 
             if cst_sutta == prev_sutta + 1 {
                 Some(format!("an{}.{}", prev_nipata, cst_sutta))
@@ -952,6 +1017,71 @@ fn lookup_range_cst_code(
     let range_sc_code = format!("{}.{}-{}", sc_prefix, start_sc_sutta, end_sc_sutta);
 
     Some((range_sc_code, sc_sutta.clone()))
+}
+
+/// Look up a range sc_code in the pali_titles cache.
+///
+/// For sc_code like `sn29.11` (derived from a range cst_code like `sn3.8.1.11-20`):
+/// 1. Try to find an exact match first
+/// Find an sc_code that exists in pali_titles using fallback logic.
+///
+/// Tries in order:
+/// 1. Exact match (e.g., sn30.3)
+/// 2. Range match (e.g., sn30.3 -> sn30.3-*)
+/// 3. Non-range base (e.g., sn30.3-12 -> sn30.3)
+///
+/// Returns the sc_code to use and its title if found, None otherwise.
+fn find_sc_code_in_pali_titles(
+    derived_sc: &str,
+    titles_cache: &std::collections::HashMap<String, String>,
+) -> Option<(String, String)> {
+    // 1. Try exact match first
+    if let Some(title) = titles_cache.get(derived_sc) {
+        return Some((derived_sc.to_string(), title.clone()));
+    }
+
+    // 2. Try range match: sn30.3 -> sn30.3-*
+    let range_prefix = format!("{}-", derived_sc);
+    for (key, title) in titles_cache {
+        if key.starts_with(&range_prefix) {
+            return Some((key.clone(), title.clone()));
+        }
+    }
+
+    // 3. Try non-range base: sn30.3-12 -> sn30.3
+    // Extract the base (everything before the last hyphen followed by digits)
+    if let Some(base) = extract_non_range_base(derived_sc) {
+        if let Some(title) = titles_cache.get(&base) {
+            return Some((base, title.clone()));
+        }
+        // Also try range match on the base
+        let base_range_prefix = format!("{}-", base);
+        for (key, title) in titles_cache {
+            if key.starts_with(&base_range_prefix) {
+                return Some((key.clone(), title.clone()));
+            }
+        }
+    }
+
+    None
+}
+
+/// Extract the non-range base from an sc_code.
+///
+/// For example:
+/// - sn30.3-12 -> Some(sn30.3)
+/// - sn29.11-20 -> Some(sn29.11)
+/// - sn30.3 -> None (already non-range)
+fn extract_non_range_base(sc_code: &str) -> Option<String> {
+    // Check if sc_code contains a range (e.g., sn30.3-12)
+    if let Some(dash_pos) = sc_code.rfind('-') {
+        let before_dash = &sc_code[..dash_pos];
+        // Check if the part before dash ends with a number (indicating a range)
+        if before_dash.rsplit('.').next()?.chars().all(|c| c.is_ascii_digit()) {
+            return Some(before_dash.to_string());
+        }
+    }
+    None
 }
 
 // ============== HierarchyTracker ==============
@@ -1677,6 +1807,123 @@ mod tests {
         // Invalid format should return None
         let result = lookup_range_cst_code("invalid", &tsv_map);
         assert!(result.is_none(), "Invalid code should not match");
+    }
+
+    #[test]
+    fn test_derive_sc_code_from_previous_new_samyutta() {
+        // Test transition from sn3.9 to sn3.10 (cst_code)
+        // Previous sc_code was sn29.11-20, new cst_code is sn3.10.1.1
+        // Should derive to sn30.1 (increment samyutta by 1)
+
+        // From range sc_code sn29.11-20 to cst_code sn3.10.1.1 should give sn30.1
+        let result = derive_sc_code_from_previous("sn3.10.1.1", "sn29.11-20");
+        assert!(result.is_some(), "Should derive sc_code for new samyutta");
+        assert_eq!(result.unwrap(), "sn30.1");
+
+        // From range sc_code sn29.21-50 to cst_code sn3.10.1.1 should give sn30.1
+        let result = derive_sc_code_from_previous("sn3.10.1.1", "sn29.21-50");
+        assert!(result.is_some(), "Should derive sc_code for new samyutta");
+        assert_eq!(result.unwrap(), "sn30.1");
+
+        // From range sc_code sn30.17-46 to cst_code sn3.10.1.1 should give sn31.1
+        let result = derive_sc_code_from_previous("sn3.10.1.1", "sn30.17-46");
+        assert!(result.is_some(), "Should derive sc_code for new samyutta");
+        assert_eq!(result.unwrap(), "sn31.1");
+
+        // From sn30.1 to sn3.10.1.2 should give sn30.2 (same samyutta, increment sutta)
+        let result = derive_sc_code_from_previous("sn3.10.1.2", "sn30.1");
+        assert!(result.is_some(), "Should derive sc_code for same samyutta");
+        assert_eq!(result.unwrap(), "sn30.2");
+    }
+
+    #[test]
+    fn test_derive_sc_code_from_context_range_cst_code() {
+        // Test deriving sc_code from a range cst_code
+        let context = ScCodeComponents {
+            prefix: "sn".to_string(),
+            samyutta: Some(29),
+            sutta: None,
+            nipata: None,
+        };
+
+        // Range cst_code: sn3.8.1.11-20 should derive to sn29.11-20
+        let result = derive_sc_code_from_context("sn3.8.1.11-20", &context);
+        assert!(result.is_some(), "Should derive sc_code from range cst_code");
+        assert_eq!(result.unwrap(), "sn29.11-20");
+    }
+
+    #[test]
+    fn test_derive_sc_code_from_context_single_cst_code() {
+        // Test deriving sc_code from a single cst_code
+        let context = ScCodeComponents {
+            prefix: "sn".to_string(),
+            samyutta: Some(30),
+            sutta: None,
+            nipata: None,
+        };
+
+        // Single cst_code: sn3.9.1.1 should derive to sn30.1
+        let result = derive_sc_code_from_context("sn3.9.1.1", &context);
+        assert!(result.is_some(), "Should derive sc_code from single cst_code");
+        assert_eq!(result.unwrap(), "sn30.1");
+    }
+
+    #[test]
+    fn test_find_sc_code_in_pali_titles() {
+        use std::collections::HashMap;
+
+        // Create a mock pali_titles cache with range sc_codes
+        let mut titles: HashMap<String, String> = HashMap::new();
+        titles.insert("sn29.11-20".to_string(), "Aṇḍajadānūpakārasuttadasaka".to_string());
+        titles.insert("sn29.21-50".to_string(), "Jalābujādidānūpakārasuttattiṃsaka".to_string());
+        titles.insert("sn30.17-46".to_string(), "Some title".to_string());
+        titles.insert("sn30.3".to_string(), "Single sutta 30.3".to_string());
+        titles.insert("sn30.1".to_string(), "Single sutta 30.1".to_string());
+
+        // Exact match should return the exact code and title
+        let result = find_sc_code_in_pali_titles("sn29.11-20", &titles);
+        assert!(result.is_some(), "Exact match should return Some");
+        let (code, title) = result.unwrap();
+        assert_eq!(code, "sn29.11-20");
+        assert_eq!(title, "Aṇḍajadānūpakārasuttadasaka");
+
+        // Range lookup: sn29.11 should find sn29.11-20
+        let result = find_sc_code_in_pali_titles("sn29.11", &titles);
+        assert!(result.is_some(), "Should find range match");
+        let (code, title) = result.unwrap();
+        assert_eq!(code, "sn29.11-20");
+        assert_eq!(title, "Aṇḍajadānūpakārasuttadasaka");
+
+        // Range lookup: sn29.21 should find sn29.21-50
+        let result = find_sc_code_in_pali_titles("sn29.21", &titles);
+        assert!(result.is_some(), "Should find range match for sn29.21");
+        let (code, title) = result.unwrap();
+        assert_eq!(code, "sn29.21-50");
+        assert_eq!(title, "Jalābujādidānūpakārasuttattiṃsaka");
+
+        // Test case: sn30.3-12 (range) should find sn30.3 (non-range base)
+        // sn30.3-12 doesn't exist, sn30.3 does
+        let result = find_sc_code_in_pali_titles("sn30.3-12", &titles);
+        assert!(result.is_some(), "Should find non-range base match");
+        let (code, title) = result.unwrap();
+        assert_eq!(code, "sn30.3");
+        assert_eq!(title, "Single sutta 30.3");
+
+        // Non-matching code should return None
+        let result = find_sc_code_in_pali_titles("sn99.99", &titles);
+        assert!(result.is_none(), "Non-matching code should return None");
+    }
+
+    #[test]
+    fn test_extract_non_range_base() {
+        // Range codes should extract base
+        assert_eq!(extract_non_range_base("sn30.3-12"), Some("sn30.3".to_string()));
+        assert_eq!(extract_non_range_base("sn29.11-20"), Some("sn29.11".to_string()));
+        assert_eq!(extract_non_range_base("an3.5-10"), Some("an3.5".to_string()));
+
+        // Non-range codes should return None
+        assert_eq!(extract_non_range_base("sn30.3"), None);
+        assert_eq!(extract_non_range_base("dn1"), None);
     }
 }
 
