@@ -15,9 +15,9 @@ body, html {
 
 /* Left panel */
 #left-panel {
-    flex: 0 0 400px;
-    min-width: 250px;
-    max-width: 600px;
+    flex: 0 0 500px;
+    min-width: 300px;
+    max-width: 700px;
     overflow-y: auto;
 }
 
@@ -144,6 +144,36 @@ body, html {
     cursor: pointer;
 }
 
+/* Validation badge in file list */
+.file-validation-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.5rem;
+    height: 1.25rem;
+    padding: 0 0.25rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 9999px;
+    margin-left: 0.5rem;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.file-validation-badge:hover {
+    opacity: 0.8;
+}
+
+.file-validation-badge.no-errors {
+    background-color: #48c774;
+    color: white;
+}
+
+.file-validation-badge.has-errors {
+    background-color: #f14668;
+    color: white;
+}
+
 /* Reparse button styling */
 .reparse-btn {
     opacity: 0.6;
@@ -203,7 +233,7 @@ body, html {
 }
 
 #fragment-list .panel-item .tag {
-    font-size: 1rem; /* Normal text size */
+    font-size: 0.9em;
     margin: 0;
     flex-shrink: 0;
 }

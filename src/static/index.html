@@ -55,7 +55,7 @@
 <body>
     <div class="columns is-gapless" id="main-container">
                 <!-- Left Panel -->
-                <div class="column" id="left-panel" style="flex: 0 0 450px;">
+                <div class="column" id="left-panel" style="flex: 0 0 500px;">
                     <div class="box" style="height: 100%;">
                         <!-- Menu Button -->
                         <div class="level mb-2">
@@ -588,6 +588,9 @@
                                 <span class="icon"><span class="validation-spinner" style="display: none;"></span></span>
                                 <span>Run Validation</span>
                             </button>
+                            <button class="button is-small is-light mt-2" id="clear-validation-selection-btn" style="display: none;">
+                                Clear Selection
+                            </button>
                         </div>
                         <div class="validation-checks-list" id="validation-checks-list">
                             <div class="validation-check-item" data-check-id="missing_sc_code">
@@ -623,7 +626,17 @@
                     <!-- Right panel: Results -->
                     <div class="validation-results-panel">
                         <div class="validation-results-header">
-                            <span class="results-title" id="validation-results-title">Select a check to view results</span>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span class="results-title" id="validation-results-title">Select a check to view results</span>
+                                <div class="select is-small">
+                                    <select id="validation-file-filter">
+                                        <option value="">All Files</option>
+                                    </select>
+                                </div>
+                                <button class="button is-small is-light" id="reset-file-filter-btn" title="Reset file filter">
+                                    Reset
+                                </button>
+                            </div>
                             <button class="button is-warning is-small" id="auto-fix-btn" style="display: none;">
                                 Auto-Fix All
                             </button>

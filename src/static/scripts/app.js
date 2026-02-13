@@ -14,6 +14,7 @@ window.arangoConnected = false; // Track ArangoDB connection state
 // Validation state
 let validationResults = null;   // Results from last validation run
 let selectedCheckType = null;   // Currently selected check type ID
+let validationFileFilter = null; // Current file filter in validation modal (null = all files)
 
 // Operation state - tracks when reparse/regeneration is in progress
 let isOperationInProgress = false;
@@ -31,6 +32,9 @@ function init() {
     // Check ArangoDB status on init and every 5 seconds
     checkArangoStatus();
     setInterval(checkArangoStatus, 5000);
+
+    // Auto-run validation on load
+    runValidation();
 
     console.log('Fragment Review Application initialized');
 }
@@ -1438,27 +1442,24 @@ function openValidationModal() {
     // Show modal
     document.getElementById('validation-modal').classList.add('is-active');
 
+    // Update file filter dropdown
+    updateValidationFileFilterDropdown();
+
     // If we have cached results, restore the UI state
     if (validationResults) {
         // Update badges for all check types
-        for (const [checkId, result] of Object.entries(validationResults)) {
-            const badge = document.getElementById(`badge-${checkId}`);
-            if (badge) {
-                const errorCount = result.errors.length;
-                badge.textContent = errorCount.toString();
-                badge.classList.remove('has-errors', 'no-errors');
-                badge.classList.add(errorCount > 0 ? 'has-errors' : 'no-errors');
-            }
-        }
+        updateValidationCheckBadges();
 
-        // Restore selected check type or select first one
+        // Show appropriate UI based on whether a check type is selected
         if (selectedCheckType && validationResults[selectedCheckType]) {
             selectCheckType(selectedCheckType);
         } else {
-            const firstCheckId = Object.keys(validationResults)[0];
-            if (firstCheckId) {
-                selectCheckType(firstCheckId);
-            }
+            // No check type selected - show all errors
+            selectedCheckType = null;
+            document.querySelectorAll('.validation-check-item').forEach(item => {
+                item.classList.remove('is-active');
+            });
+            renderAllValidationResults();
         }
     } else {
         // No cached results - show initial state
@@ -1470,9 +1471,14 @@ function openValidationModal() {
             badge.textContent = '-';
             badge.classList.remove('has-errors', 'no-errors');
         });
-        document.getElementById('validation-results-title').textContent = 'Select a check to view results';
+        document.getElementById('validation-results-title').textContent = 'All Validation Results';
         document.getElementById('validation-results-list').innerHTML = '<div class="validation-placeholder">Run validation to see results</div>';
         document.getElementById('auto-fix-btn').style.display = 'none';
+        
+        const clearBtn = document.getElementById('clear-validation-selection-btn');
+        if (clearBtn) {
+            clearBtn.style.display = 'none';
+        }
     }
 }
 
@@ -1510,6 +1516,12 @@ async function runValidation() {
             }
         }
 
+        // Update validation counts in file list
+        updateFileListValidationBadges();
+
+        // Update file filter dropdown in validation modal
+        updateValidationFileFilterDropdown();
+
         // Select first check type
         const firstCheckId = Object.keys(validationResults)[0];
         if (firstCheckId) {
@@ -1527,6 +1539,234 @@ async function runValidation() {
     }
 }
 
+// Calculate and update validation badges in file list
+function updateFileListValidationBadges() {
+    if (!validationResults) return;
+
+    // Calculate error counts per file
+    const fileErrorCounts = {};
+    for (const [checkId, result] of Object.entries(validationResults)) {
+        for (const error of result.errors) {
+            fileErrorCounts[error.cst_file] = (fileErrorCounts[error.cst_file] || 0) + 1;
+        }
+    }
+
+    // Update badges in file list - show all files with 0 or more errors
+    document.querySelectorAll('#file-list .panel-item.file-item').forEach(item => {
+        const filename = item.dataset.filename;
+        const existingBadge = item.querySelector('.file-validation-badge');
+        
+        if (filename !== undefined) {
+            const count = fileErrorCounts[filename] || 0;
+            const badgeClass = count > 0 ? 'has-errors' : 'no-errors';
+            
+            if (existingBadge) {
+                existingBadge.textContent = count;
+                existingBadge.classList.remove('has-errors', 'no-errors');
+                existingBadge.classList.add(badgeClass);
+            } else {
+                const badge = document.createElement('span');
+                badge.className = `file-validation-badge ${badgeClass}`;
+                badge.textContent = count;
+                badge.title = 'Click to view validation results for this file';
+                badge.onclick = (e) => {
+                    e.stopPropagation();
+                    openValidationModalWithFileFilter(filename);
+                };
+                item.appendChild(badge);
+            }
+        }
+    });
+}
+
+// Get unique file names from validation results
+function getValidationFileNames() {
+    if (!validationResults) return [];
+    
+    const fileNames = new Set();
+    for (const [checkId, result] of Object.entries(validationResults)) {
+        for (const error of result.errors) {
+            fileNames.add(error.cst_file);
+        }
+    }
+    return Array.from(fileNames).sort();
+}
+
+// Update file filter dropdown in validation modal
+function updateValidationFileFilterDropdown() {
+    const dropdown = document.getElementById('validation-file-filter');
+    if (!dropdown) return;
+
+    const fileNames = getValidationFileNames();
+    
+    // Clear existing options except "all"
+    dropdown.innerHTML = '<option value="">All Files</option>';
+    
+    for (const fileName of fileNames) {
+        const option = document.createElement('option');
+        option.value = fileName;
+        option.textContent = fileName;
+        dropdown.appendChild(option);
+    }
+
+    // Restore selected filter if still valid
+    if (validationFileFilter && fileNames.includes(validationFileFilter)) {
+        dropdown.value = validationFileFilter;
+    } else {
+        validationFileFilter = null;
+    }
+}
+
+// Update validation check badges based on current file filter
+function updateValidationCheckBadges() {
+    if (!validationResults) return;
+
+    for (const [checkId, result] of Object.entries(validationResults)) {
+        const badge = document.getElementById(`badge-${checkId}`);
+        if (!badge) continue;
+
+        let errorCount;
+        if (validationFileFilter) {
+            // Filter by file
+            errorCount = result.errors.filter(e => e.cst_file === validationFileFilter).length;
+        } else {
+            errorCount = result.errors.length;
+        }
+        
+        // Update badge text and class
+        badge.textContent = errorCount.toString();
+        badge.classList.remove('has-errors', 'no-errors');
+        badge.classList.add(errorCount > 0 ? 'has-errors' : 'no-errors');
+    }
+
+    // Show/hide Clear Selection button based on validation type selection
+    const clearBtn = document.getElementById('clear-validation-selection-btn');
+    if (clearBtn) {
+        clearBtn.style.display = selectedCheckType ? 'inline-block' : 'none';
+    }
+}
+
+// Open validation modal with a specific file filter
+function openValidationModalWithFileFilter(filename) {
+    validationFileFilter = filename;
+    selectedCheckType = null; // No validation type selected when opened from file badge
+    openValidationModal();
+    
+    // Set the dropdown value
+    const dropdown = document.getElementById('validation-file-filter');
+    if (dropdown) {
+        dropdown.value = filename || '';
+    }
+    
+    // Update badges based on file filter
+    updateValidationCheckBadges();
+    
+    // Show all results (no validation type selected)
+    renderAllValidationResults();
+    
+    // Remove active state from all check items
+    document.querySelectorAll('.validation-check-item').forEach(item => {
+        item.classList.remove('is-active');
+    });
+    
+    // Hide Clear Selection button
+    const clearBtn = document.getElementById('clear-validation-selection-btn');
+    if (clearBtn) {
+        clearBtn.style.display = 'none';
+    }
+}
+
+// Clear validation type selection
+function clearValidationSelection() {
+    selectedCheckType = null;
+    
+    // Remove active state from all check items
+    document.querySelectorAll('.validation-check-item').forEach(item => {
+        item.classList.remove('is-active');
+    });
+    
+    // Hide Clear Selection button
+    const clearBtn = document.getElementById('clear-validation-selection-btn');
+    if (clearBtn) {
+        clearBtn.style.display = 'none';
+    }
+    
+    // Show all results
+    renderAllValidationResults();
+}
+
+// Render all validation results from all check types
+function renderAllValidationResults() {
+    const resultsList = document.getElementById('validation-results-list');
+    const resultsTitle = document.getElementById('validation-results-title');
+    const autoFixBtn = document.getElementById('auto-fix-btn');
+
+    if (!validationResults) {
+        resultsList.innerHTML = '<div class="validation-placeholder">No results available</div>';
+        resultsTitle.textContent = 'All Validation Results';
+        autoFixBtn.style.display = 'none';
+        return;
+    }
+
+    // Collect all errors from all check types
+    let allErrors = [];
+    for (const [checkId, result] of Object.entries(validationResults)) {
+        for (const error of result.errors) {
+            allErrors.push({
+                ...error,
+                checkName: result.name
+            });
+        }
+    }
+
+    // Filter by file if filter is set
+    if (validationFileFilter) {
+        allErrors = allErrors.filter(e => e.cst_file === validationFileFilter);
+    }
+
+    // Sort by file name, then by fragment index
+    allErrors.sort((a, b) => {
+        if (a.cst_file !== b.cst_file) return a.cst_file.localeCompare(b.cst_file);
+        return a.frag_idx - b.frag_idx;
+    });
+
+    const totalCount = allErrors.length;
+    const displayCount = validationFileFilter 
+        ? `${totalCount} of ${totalCount}`
+        : totalCount;
+    
+    resultsTitle.textContent = `All Validation Results (${displayCount} issues)`;
+    autoFixBtn.style.display = 'none';
+
+    if (allErrors.length === 0) {
+        if (validationFileFilter) {
+            resultsList.innerHTML = `<div class="validation-placeholder">No issues found for ${validationFileFilter}</div>`;
+        } else {
+            resultsList.innerHTML = '<div class="validation-placeholder" style="color: #48c774;">No issues found</div>';
+        }
+        return;
+    }
+
+    // Build results HTML
+    let html = '';
+    for (const error of allErrors) {
+        html += `
+            <div class="validation-result-item">
+                <div class="result-info">
+                    <span class="result-location">${error.cst_file} #${error.frag_idx} (${error.checkName})</span>
+                    <span class="result-message">${error.message}</span>
+                </div>
+                <div class="result-actions">
+                    <button class="button is-small is-info" onclick="openFragmentFromValidation('${error.cst_file}', ${error.frag_idx})">
+                        Open
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+    resultsList.innerHTML = html;
+}
+
 // Select a check type and show its results
 function selectCheckType(checkId) {
     selectedCheckType = checkId;
@@ -1535,6 +1775,12 @@ function selectCheckType(checkId) {
     document.querySelectorAll('.validation-check-item').forEach(item => {
         item.classList.toggle('is-active', item.dataset.checkId === checkId);
     });
+
+    // Show/hide Clear Selection button
+    const clearBtn = document.getElementById('clear-validation-selection-btn');
+    if (clearBtn) {
+        clearBtn.style.display = 'inline-block';
+    }
 
     // Render results
     renderValidationResults(checkId);
@@ -1554,19 +1800,33 @@ function renderValidationResults(checkId) {
     }
 
     const result = validationResults[checkId];
-    resultsTitle.textContent = `${result.name} (${result.errors.length} issues)`;
+    
+    // Filter errors by file if filter is set
+    const filteredErrors = validationFileFilter 
+        ? result.errors.filter(e => e.cst_file === validationFileFilter)
+        : result.errors;
+    
+    const displayCount = validationFileFilter 
+        ? `${filteredErrors.length} of ${result.errors.length}`
+        : `${result.errors.length} issues`;
+    
+    resultsTitle.textContent = `${result.name} (${displayCount})`;
 
     // Show/hide auto-fix button
     autoFixBtn.style.display = (result.auto_fixable && result.auto_fixes.length > 0) ? 'inline-block' : 'none';
 
-    if (result.errors.length === 0) {
-        resultsList.innerHTML = '<div class="validation-placeholder" style="color: #48c774;">No issues found</div>';
+    if (filteredErrors.length === 0) {
+        if (validationFileFilter) {
+            resultsList.innerHTML = `<div class="validation-placeholder">No issues found for ${validationFileFilter}</div>`;
+        } else {
+            resultsList.innerHTML = '<div class="validation-placeholder" style="color: #48c774;">No issues found</div>';
+        }
         return;
     }
 
     // Build results HTML
     let html = '';
-    for (const error of result.errors) {
+    for (const error of filteredErrors) {
         html += `
             <div class="validation-result-item">
                 <div class="result-info">
@@ -1693,6 +1953,31 @@ function setupValidationModal() {
             selectCheckType(item.dataset.checkId);
         });
     });
+
+    // File filter dropdown change
+    document.getElementById('validation-file-filter').addEventListener('change', (e) => {
+        validationFileFilter = e.target.value || null;
+        updateValidationCheckBadges();
+        if (selectedCheckType) {
+            renderValidationResults(selectedCheckType);
+        }
+    });
+
+    // Reset file filter button
+    document.getElementById('reset-file-filter-btn').addEventListener('click', () => {
+        validationFileFilter = null;
+        const dropdown = document.getElementById('validation-file-filter');
+        if (dropdown) {
+            dropdown.value = '';
+        }
+        updateValidationCheckBadges();
+        if (selectedCheckType) {
+            renderValidationResults(selectedCheckType);
+        }
+    });
+
+    // Clear validation selection button
+    document.getElementById('clear-validation-selection-btn').addEventListener('click', clearValidationSelection);
 
     // Auto-Fix All button
     document.getElementById('auto-fix-btn').addEventListener('click', showAutoFixConfirmation);
