@@ -146,14 +146,57 @@ fn test_s0301a_att_grouped_commentary_boundary() {
         "frag_idx 55 should have cst_code sn1.1.6.5-7, but got {:?}",
         frag_55.cst_code);
 
-    // Note: sc_code is None for grouped commentaries because they don't map 1:1 to base text suttas.
-    // The TSV only contains entries for single suttas, not ranges.
-    // Future enhancement: derive sc_code from paranum range (e.g., "sn1.55-57" from paranums 55, 56, 57)
-    assert_eq!(frag_55.sc_code, None,
-        "frag_idx 55 sc_code should be None for grouped commentary (no TSV match), but got {:?}",
+    // For grouped commentaries (ranges like sn1.1.6.5-7), we now derive sc_code from the range:
+    // 1. Look up start code sn1.1.6.5 -> sn1.55
+    // 2. Look up end code sn1.1.6.7 -> sn1.57
+    // 3. Combine to get sn1.55-57
+    assert_eq!(frag_55.sc_code.as_deref(), Some("sn1.55-57"),
+        "frag_idx 55 sc_code should be sn1.55-57 for grouped commentary, but got {:?}",
         frag_55.sc_code);
 
     // frag_idx 55 should contain the grouped commentary subhead
     assert!(frag_55.content_xml.contains("Paṭhamajanasuttādivaṇṇanā"),
         "frag_idx 55 should contain 'Paṭhamajanasuttādivaṇṇanā'");
+}
+
+/// Test that the fragment with "2-3. Cittasuttādivaṇṇanā" (vagga 7, suttas 2-3)
+/// has the correct sc_code derived from the range lookup.
+///
+/// cst_code: sn1.1.7.2-3
+/// Expected sc_code: sn1.62-63 (from sn1.1.7.2 -> sn1.62 and sn1.1.7.3 -> sn1.63)
+#[test]
+fn test_s0301a_att_cittasutta_range() {
+    let xml_path = "tests/data/s0301a.att.xml";
+    let xml_content = std::fs::read_to_string(xml_path)
+        .expect("Failed to read s0301a.att.xml");
+
+    let structure = detect_nikaya_structure(&xml_content)
+        .expect("Should detect SN structure");
+
+    let fragments = parse_into_fragments(&xml_content, &structure, "s0301a.att.xml", &ParserOverrides::default(), true)
+        .expect("Should parse fragments");
+
+    // Find the fragment with "Cittasuttādivaṇṇanā"
+    let citta_frag = fragments.iter()
+        .find(|f| f.content_xml.contains("Cittasuttādivaṇṇanā"))
+        .expect("Should find fragment with Cittasuttādivaṇṇanā");
+
+    println!("Cittasuttādivaṇṇanā fragment:");
+    println!("  frag_idx: {}", citta_frag.frag_idx);
+    println!("  cst_code: {:?}", citta_frag.cst_code);
+    println!("  sc_code: {:?}", citta_frag.sc_code);
+    println!("  sc_sutta: {:?}", citta_frag.sc_sutta);
+
+    // Verify cst_code is the range
+    assert_eq!(citta_frag.cst_code.as_deref(), Some("sn1.1.7.2-3"),
+        "cst_code should be sn1.1.7.2-3, but got {:?}", citta_frag.cst_code);
+
+    // Verify sc_code is derived from the range lookup:
+    // sn1.1.7.2 -> sn1.62, sn1.1.7.3 -> sn1.63, combined: sn1.62-63
+    assert_eq!(citta_frag.sc_code.as_deref(), Some("sn1.62-63"),
+        "sc_code should be sn1.62-63 (derived from range lookup), but got {:?}", citta_frag.sc_code);
+
+    // Verify sc_sutta is populated from the start code's sutta title
+    assert!(citta_frag.sc_sutta.is_some(),
+        "sc_sutta should be populated from range lookup");
 }

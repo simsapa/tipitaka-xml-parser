@@ -711,6 +711,11 @@ fn format_sc_code(components: &ScCodeComponents) -> String {
 /// This is the conditional version of `populate_sc_fields_from_tsv` that skips
 /// fragments where sc_code has already been set (e.g., from checked overrides).
 ///
+/// Handles range codes (e.g., `sn1.1.7.2-3`) by:
+/// 1. Looking up the start code (`sn1.1.7.2`) to get base `sc_code` (`sn1.62`)
+/// 2. Looking up the end code (`sn1.1.7.3`) to get end `sc_code` (`sn1.63`)
+/// 3. Combining to create range `sc_code` (`sn1.62-63`)
+///
 /// # Arguments
 /// * `fragments` - Mutable vector of fragments to populate
 ///
@@ -729,14 +734,80 @@ pub fn populate_sc_fields_from_tsv_conditional(
         }
 
         if let Some(ref cst_code) = fragment.cst_code {
+            // First try direct lookup
             if let Some((sc_code, sc_sutta)) = tsv_map.get(cst_code) {
                 fragment.sc_code = Some(sc_code.clone());
                 fragment.sc_sutta = Some(sc_sutta.clone());
+            } else if let Some((sc_code, sc_sutta)) = lookup_range_cst_code(cst_code, &tsv_map) {
+                // Try range lookup if direct lookup failed
+                fragment.sc_code = Some(sc_code);
+                fragment.sc_sutta = Some(sc_sutta);
             }
         }
     }
 
     Ok(())
+}
+
+/// Look up a range cst_code in the TSV map.
+///
+/// For cst_code like `sn1.1.7.2-3`:
+/// 1. Extract start code `sn1.1.7.2` and end number `3`
+/// 2. Look up start code to get `sn1.62`
+/// 3. Build end code `sn1.1.7.3` and look up to get `sn1.63`
+/// 4. Return combined sc_code `sn1.62-63` with the start's sc_sutta
+///
+/// Returns None if the cst_code is not a range or lookup fails.
+fn lookup_range_cst_code(
+    cst_code: &str,
+    tsv_map: &std::collections::HashMap<String, (String, String)>,
+) -> Option<(String, String)> {
+    // Check if the last segment contains a range (e.g., "2-3")
+    let parts: Vec<&str> = cst_code.rsplitn(2, '.').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let last_segment = parts[0];
+    let prefix = parts[1];
+
+    // Check if last segment is a range like "2-3"
+    let range_parts: Vec<&str> = last_segment.split('-').collect();
+    if range_parts.len() != 2 {
+        return None;
+    }
+
+    let start_num: u32 = range_parts[0].parse().ok()?;
+    let end_num: u32 = range_parts[1].parse().ok()?;
+
+    // Build start and end cst_codes
+    let start_cst_code = format!("{}.{}", prefix, start_num);
+    let end_cst_code = format!("{}.{}", prefix, end_num);
+
+    // Look up start code
+    let (start_sc_code, sc_sutta) = tsv_map.get(&start_cst_code)?;
+
+    // Look up end code
+    let (end_sc_code, _) = tsv_map.get(&end_cst_code)?;
+
+    // Extract sutta numbers from sc_codes to build range
+    // sc_code format: "sn1.62" -> prefix="sn1", sutta=62
+    let start_sc_parts: Vec<&str> = start_sc_code.rsplitn(2, '.').collect();
+    let end_sc_parts: Vec<&str> = end_sc_code.rsplitn(2, '.').collect();
+
+    if start_sc_parts.len() != 2 || end_sc_parts.len() != 2 {
+        // Fallback: just return start sc_code if format doesn't match
+        return Some((start_sc_code.clone(), sc_sutta.clone()));
+    }
+
+    let sc_prefix = start_sc_parts[1];
+    let start_sc_sutta: u32 = start_sc_parts[0].parse().ok()?;
+    let end_sc_sutta: u32 = end_sc_parts[0].parse().ok()?;
+
+    // Build the range sc_code
+    let range_sc_code = format!("{}.{}-{}", sc_prefix, start_sc_sutta, end_sc_sutta);
+
+    Some((range_sc_code, sc_sutta.clone()))
 }
 
 // ============== HierarchyTracker ==============
@@ -1162,6 +1233,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_extract_number_from_title_with_space() {
+        // Standard format: "number. title"
+        assert_eq!(extract_number_from_title("1. Suttavaṇṇanā"), Some("1"));
+        assert_eq!(extract_number_from_title("10. Suttavaṇṇanā"), Some("10"));
+        assert_eq!(extract_number_from_title("5-7. Suttādivaṇṇanā"), Some("5-7"));
+        assert_eq!(extract_number_from_title("10-11. Title"), Some("10-11"));
+    }
+
+    #[test]
+    fn test_extract_number_from_title_without_space() {
+        // No space after dot: "number.title"
+        assert_eq!(extract_number_from_title("1.Sattisuttavaṇṇanā"), Some("1"));
+        assert_eq!(extract_number_from_title("10.Suttavaṇṇanā"), Some("10"));
+        assert_eq!(extract_number_from_title("5-7.Suttādivaṇṇanā"), Some("5-7"));
+    }
+
+    #[test]
+    fn test_extract_number_from_title_invalid() {
+        // No number prefix
+        assert_eq!(extract_number_from_title("Suttavaṇṇanā"), None);
+        assert_eq!(extract_number_from_title(""), None);
+        // No dot after number
+        assert_eq!(extract_number_from_title("1 Suttavaṇṇanā"), None);
+    }
+
+    #[test]
     fn test_parse_sc_code_dn() {
         let result = parse_sc_code("dn1").unwrap();
         assert_eq!(result.prefix, "dn");
@@ -1392,6 +1489,39 @@ mod tests {
         // but we've demonstrated the function exists and runs
         assert!(fragments[0].sc_code.is_some() || original_sc.is_some());
     }
+
+    #[test]
+    fn test_lookup_range_cst_code() {
+        use crate::sutta_builder::cst_code_to_sc_code_map;
+
+        let tsv_map = cst_code_to_sc_code_map().expect("Should load TSV map");
+
+        // Test with a known range: sn1.1.7.2-3 should map to sn1.62-63
+        // First verify the individual mappings exist
+        assert!(tsv_map.contains_key("sn1.1.7.2"), "TSV should contain sn1.1.7.2");
+        assert!(tsv_map.contains_key("sn1.1.7.3"), "TSV should contain sn1.1.7.3");
+
+        let result = lookup_range_cst_code("sn1.1.7.2-3", &tsv_map);
+        assert!(result.is_some(), "Should find range mapping for sn1.1.7.2-3");
+
+        let (sc_code, _sc_sutta) = result.unwrap();
+        assert_eq!(sc_code, "sn1.62-63", "Range sc_code should be sn1.62-63");
+    }
+
+    #[test]
+    fn test_lookup_range_cst_code_non_range() {
+        use crate::sutta_builder::cst_code_to_sc_code_map;
+
+        let tsv_map = cst_code_to_sc_code_map().expect("Should load TSV map");
+
+        // Non-range code should return None
+        let result = lookup_range_cst_code("sn1.1.7.2", &tsv_map);
+        assert!(result.is_none(), "Non-range code should not match");
+
+        // Invalid format should return None
+        let result = lookup_range_cst_code("invalid", &tsv_map);
+        assert!(result.is_none(), "Invalid code should not match");
+    }
 }
 
 // ============== CST Fields Derivation ==============
@@ -1504,6 +1634,7 @@ pub fn derive_cst_code(
         && fragment.cst_file.ends_with(".mul.xml");
 
     // Get vagga number from title (e.g., "1" from "1. Mūlapariyāyavaggo" or "1. Naḷavaggo")
+    // Also handles titles without space after dot like "1.Vaggavaṇṇanā"
     // This is more reliable than using the vagga ID since the ID may be inherited from the next vagga
     // However, for vagga 0 (introduction/preamble) in commentary files, the title is often empty,
     // so we fallback to extracting from the ID (e.g., "mn1_0" -> "0")
@@ -1513,11 +1644,8 @@ pub fn derive_cst_code(
             .rev()
             .find_map(|level| {
                 if matches!(level.group_type, GroupType::Vagga) {
-                    // First try: Extract number from title like "1. Vagga Name"
-                    level.title.split_whitespace()
-                        .next()
-                        .and_then(|first| first.strip_suffix('.'))
-                        .filter(|num| num.chars().all(|c| c.is_numeric()))
+                    // First try: Extract number from title (handles both "1. Name" and "1.Name")
+                    extract_number_from_title(&level.title)
                         .or_else(|| {
                             // Fallback: Extract from ID like "mn1_0" or "mn1_1"
                             // Split by underscore and take the last part
@@ -1536,11 +1664,8 @@ pub fn derive_cst_code(
         fragment.group_levels.iter()
             .find_map(|level| {
                 if matches!(level.group_type, GroupType::Vagga) {
-                    // First try: Extract number from title like "1. Vagga Name"
-                    level.title.split_whitespace()
-                        .next()
-                        .and_then(|first| first.strip_suffix('.'))
-                        .filter(|num| num.chars().all(|c| c.is_numeric()))
+                    // First try: Extract number from title (handles both "1. Name" and "1.Name")
+                    extract_number_from_title(&level.title)
                         .or_else(|| {
                             // Fallback: Extract from ID like "mn1_0" or "mn1_1"
                             // Split by underscore and take the last part
@@ -1557,6 +1682,7 @@ pub fn derive_cst_code(
     };
 
     // Extract sutta number from title (e.g., "1. Brahmajālasuttaṃ" or "1. Oghataraṇasuttaṃ" -> "1")
+    // Also handles titles without space after dot like "1.Sattisuttavaṇṇanā"
     // First try from Sutta GroupLevel
     let sutta_number = if use_rev {
         // SN mula: use reverse iteration to get the LAST (most recent) Sutta level
@@ -1565,11 +1691,7 @@ pub fn derive_cst_code(
             .rev()
             .find_map(|level| {
                 if matches!(level.group_type, GroupType::Sutta) {
-                    // Extract number from title like "1. Title", "10. Title", or "5-7. Title" (range)
-                    level.title.split_whitespace()
-                        .next()
-                        .and_then(|first| first.strip_suffix('.'))
-                        .filter(|num| is_sutta_number_or_range(num))
+                    extract_number_from_title(&level.title)
                 } else {
                     None
                 }
@@ -1579,11 +1701,7 @@ pub fn derive_cst_code(
         fragment.group_levels.iter()
             .find_map(|level| {
                 if matches!(level.group_type, GroupType::Sutta) {
-                    // Extract number from title like "1. Title", "10. Title", or "5-7. Title" (range)
-                    level.title.split_whitespace()
-                        .next()
-                        .and_then(|first| first.strip_suffix('.'))
-                        .filter(|num| is_sutta_number_or_range(num))
+                    extract_number_from_title(&level.title)
                 } else {
                     None
                 }
@@ -1591,12 +1709,7 @@ pub fn derive_cst_code(
     }
     .or_else(|| {
         // Fallback: Extract from cst_sutta_title parameter (from fragment content)
-        cst_sutta_title.and_then(|title| {
-            title.split_whitespace()
-                .next()
-                .and_then(|first| first.strip_suffix('.'))
-                .filter(|num| is_sutta_number_or_range(num))
-        })
+        cst_sutta_title.and_then(|title| extract_number_from_title(title))
     });
 
     // Build the code based on nikaya structure
@@ -1685,6 +1798,49 @@ fn is_sutta_number_or_range(s: &str) -> bool {
     // Support both single numbers ("1", "10") and ranges ("5-7", "10-11")
     s.split('-')
         .all(|part| !part.is_empty() && part.chars().all(|c| c.is_numeric()))
+}
+
+/// Extract a number (or range) from the beginning of a title string.
+/// Handles both formats:
+/// - "1. Suttavaṇṇanā" (with space after dot) -> "1"
+/// - "1.Suttavaṇṇanā" (no space after dot) -> "1"
+/// - "5-7. Suttādivaṇṇanā" (range with space) -> "5-7"
+/// - "5-7.Suttādivaṇṇanā" (range without space) -> "5-7"
+fn extract_number_from_title(title: &str) -> Option<&str> {
+    // First try the standard format: "number. title" or "number-number. title"
+    if let Some(num) = title.split_whitespace()
+        .next()
+        .and_then(|first| first.strip_suffix('.'))
+        .filter(|num| is_sutta_number_or_range(num)) {
+        return Some(num);
+    }
+
+    // Fallback: try to extract "number." from the beginning without requiring space
+    // Pattern: digits (optionally with hyphen and more digits), followed by dot
+    // This handles "1.Suttavaṇṇanā" -> "1"
+    let title_bytes = title.as_bytes();
+    let mut end_pos = 0;
+
+    // Find the end of the number/range part
+    for (i, &b) in title_bytes.iter().enumerate() {
+        if b.is_ascii_digit() || b == b'-' {
+            end_pos = i + 1;
+        } else if b == b'.' {
+            // Found the dot after the number
+            if end_pos > 0 {
+                let num_str = &title[..end_pos];
+                if is_sutta_number_or_range(num_str) {
+                    return Some(num_str);
+                }
+            }
+            break;
+        } else {
+            // Non-digit, non-hyphen, non-dot character - stop
+            break;
+        }
+    }
+
+    None
 }
 
 pub fn derive_cst_fields(

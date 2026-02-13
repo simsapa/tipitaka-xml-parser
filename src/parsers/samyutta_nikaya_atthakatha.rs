@@ -71,6 +71,13 @@ pub fn parse_into_fragments(
     let mut pending_vagga_title_pos: Option<(usize, usize, usize)> = None;
     // Store the vagga title info to apply when the next sutta starts
     let mut pending_vagga_title_info: Option<(String, Option<String>, Option<i32>)> = None; // (title, id, number)
+    // For SN: track position of <div type="samyutta"> to include in next sutta fragment
+    // When a new samyutta starts, its header should be part of the FIRST sutta, not a separate fragment
+    // We defer entering the hierarchy level until we actually use the pending position, to ensure
+    // the previous sutta fragment gets the correct (old) group levels.
+    let mut pending_samyutta_div_pos: Option<(usize, usize, usize)> = None;
+    // Store the samyutta info (title, id, number) to apply when we start the new fragment
+    let mut pending_samyutta_info: Option<(String, Option<String>, Option<i32>)> = None;
 
     // Start with a Header fragment at the beginning of the file
     current_fragment_start = Some((0, 1, 0));
@@ -182,15 +189,34 @@ pub fn parse_into_fragments(
                         // Before entering a new Samyutta, Vagga, or Sutta level, close any open sutta fragment
                         // This ensures the fragment uses the CURRENT level, not the next one
                         // BUT: Don't close for the FIRST vagga/sutta - that should include the preamble content
+                        // ALSO: For Samyutta level, don't close immediately - store as pending and let the
+                        // next sutta handle it, so the samyutta header is included with the first sutta
+                        let is_samyutta_level = matches!(group_type, GroupType::Samyutta);
                         let is_structure_level = matches!(group_type, GroupType::Samyutta | GroupType::Vagga | GroupType::Sutta);
                         let is_vagga_or_sutta_level = matches!(group_type, GroupType::Vagga | GroupType::Sutta);
                         let is_first_vagga_or_sutta = !seen_first_vagga_or_sutta && is_vagga_or_sutta_level;
+
+                        // Track whether we should skip entering the hierarchy level
+                        // (used when storing a pending samyutta)
+                        let mut skip_hierarchy_entry = false;
 
                         if is_first_vagga_or_sutta {
                             // Mark that we've seen the first vagga/sutta, but don't close the fragment
                             // The preamble content will be included with the first sutta
                             seen_first_vagga_or_sutta = true;
-                        } else if is_structure_level && in_sutta_content {
+                        } else if is_samyutta_level && in_sutta_content && seen_first_sutta {
+                            // For Samyutta level changes (after the first sutta), don't close the fragment yet.
+                            // Store the position as pending - the samyutta header should be included with
+                            // the FIRST sutta of the new samyutta, not as a separate fragment.
+                            // IMPORTANT: We also defer entering the hierarchy level, so the previous sutta
+                            // fragment gets the correct (old) group levels when it's closed.
+                            pending_samyutta_div_pos = Some((event_start_pos, event_start_line, event_start_char));
+                            pending_samyutta_info = Some((String::new(), id.clone(), number));
+                            // DON'T close the current fragment here - it will be closed when the next
+                            // sutta subhead is detected, using this pending position
+                            // Skip entering the hierarchy level - we'll do that when we use the pending position
+                            skip_hierarchy_entry = true;
+                        } else if is_structure_level && in_sutta_content && !is_samyutta_level {
                             if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) =
                                 (current_fragment_start, current_frag_type.as_ref()) {
 
@@ -252,11 +278,15 @@ pub fn parse_into_fragments(
                             }
                         }
 
-                        hierarchy.enter_level(group_type.clone(), String::new(), id, number);
+                        // Only enter the hierarchy level if we're not deferring it
+                        // (pending samyutta divs defer hierarchy entry until the pending position is used)
+                        if !skip_hierarchy_entry {
+                            hierarchy.enter_level(group_type.clone(), String::new(), id, number);
 
-                        // Update group_levels after entering any new level while a fragment is open
-                        if current_fragment_start.is_some() {
-                            current_fragment_group_levels = hierarchy.get_current_levels();
+                            // Update group_levels after entering any new level while a fragment is open
+                            if current_fragment_start.is_some() {
+                                current_fragment_group_levels = hierarchy.get_current_levels();
+                            }
                         }
 
                         // Don't set pending_title - the next <head> will update the title
@@ -544,14 +574,38 @@ pub fn parse_into_fragments(
                             // Continue with the current fragment
                         } else if seen_first_sutta {
                             // This is a SUBSEQUENT sutta marker - start a new fragment
-                            // For MN/SN, check if there's a pending <div type="vagga"> position
-                            // If so, use that as the start position (and close position for previous fragment)
-                            // For SN: also check for pending vagga title - it should be included in the NEXT sutta
+                            // Priority order for determining the fragment boundary position:
+                            // 1. pending_samyutta_div_pos - samyutta header should be part of first sutta
+                            // 2. pending_vagga_title_pos - vagga title should be part of next sutta
+                            // 3. pending_vagga_div_pos - vagga div position
+                            // 4. subhead position - normal case
                             //
                             // IMPORTANT: We must ensure the close position is >= current fragment start position
                             // to avoid invalid slice bounds
+                            // Track if we used the pending samyutta position, so we can enter the hierarchy level later
+                            let mut used_pending_samyutta = false;
+
                             let (start_pos, start_line, start_char, close_pos, close_line, close_char) =
-                                if let (Some((title_pos, title_line, title_char)), Some((frag_start_pos, _, _))) =
+                                if let (Some((samyutta_pos, samyutta_line, samyutta_char)), Some((frag_start_pos, _, _))) =
+                                    (pending_samyutta_div_pos, current_fragment_start) {
+                                    // Samyutta div position takes priority - the samyutta header should be
+                                    // part of the first sutta of the new samyutta
+                                    if frag_start_pos < samyutta_pos {
+                                        pending_samyutta_div_pos = None; // Clear it since we're using it
+                                        // Also clear vagga positions since they're within this samyutta boundary
+                                        pending_vagga_title_pos = None;
+                                        pending_vagga_title_info = None;
+                                        pending_vagga_div_pos = None;
+                                        used_pending_samyutta = true;
+                                        (samyutta_pos, samyutta_line, samyutta_char, samyutta_pos, samyutta_line, samyutta_char)
+                                    } else {
+                                        // Fragment started after samyutta div, can't use it as boundary
+                                        pending_samyutta_div_pos = None;
+                                        pending_samyutta_info = None;
+                                        (subhead_pos, subhead_line, subhead_char,
+                                         subhead_pos, subhead_line, subhead_char)
+                                    }
+                                } else if let (Some((title_pos, title_line, title_char)), Some((frag_start_pos, _, _))) =
                                     (pending_vagga_title_pos, current_fragment_start) {
                                     // Only use vagga title position if the fragment started before it
                                     if frag_start_pos < title_pos {
@@ -630,6 +684,16 @@ pub fn parse_into_fragments(
                                 current_fragment_start = Some((start_pos, start_line, start_char));
                             }
 
+                            // Apply pending samyutta info if we used a samyutta boundary
+                            // This ensures the samyutta hierarchy level is entered before entering vagga/sutta
+                            if used_pending_samyutta {
+                                if let Some((samyutta_title, id, number)) = pending_samyutta_info.take() {
+                                    // Enter the samyutta level that was deferred
+                                    // The title may be empty here - it will be updated when we see the <head> text
+                                    hierarchy.enter_level(GroupType::Samyutta, samyutta_title, id, number);
+                                }
+                            }
+
                             // Apply pending vagga title if there is one
                             // This ensures the vagga hierarchy is updated before the new sutta starts
                             if let Some((vagga_title, id, number)) = pending_vagga_title_info.take() {
@@ -661,11 +725,24 @@ pub fn parse_into_fragments(
                 // If we have a pending title, update it with this text
                 if let Some((group_type, _, id, number)) = pending_title.take() {
                     if !text.is_empty() {
-                        hierarchy.enter_level(group_type, text, id, number);
+                        // Special handling for Samyutta titles when we have a pending samyutta position:
+                        // Don't enter the hierarchy yet - update pending_samyutta_info instead.
+                        // The hierarchy will be entered when we use the pending samyutta position.
+                        if matches!(group_type, GroupType::Samyutta) && pending_samyutta_div_pos.is_some() {
+                            // Update pending_samyutta_info with the title text
+                            if let Some((_, existing_id, existing_number)) = pending_samyutta_info.take() {
+                                pending_samyutta_info = Some((text.clone(), existing_id.or(id), existing_number.or(number)));
+                            } else {
+                                pending_samyutta_info = Some((text.clone(), id, number));
+                            }
+                            // Don't enter the hierarchy or update group_levels yet
+                        } else {
+                            hierarchy.enter_level(group_type, text, id, number);
 
-                        // Update group_levels after entering any new level while a fragment is open
-                        if current_fragment_start.is_some() {
-                            current_fragment_group_levels = hierarchy.get_current_levels();
+                            // Update group_levels after entering any new level while a fragment is open
+                            if current_fragment_start.is_some() {
+                                current_fragment_group_levels = hierarchy.get_current_levels();
+                            }
                         }
                     }
                 }
