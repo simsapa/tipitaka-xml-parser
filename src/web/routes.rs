@@ -15,7 +15,7 @@ use crate::web::models::{
     FileListItem, FragmentListItem, FragmentDetail, AdjacentFragment,
     UpdateMetadataRequest, BoundaryAdjustmentRequest, BoundaryAdjustmentResponse, BoundaryAction, CreateFragmentRequest, CreateFragmentResponse, MoveFragmentRequest, MoveFragmentResponse, AppSettings, NikayaGroup,
     ArangoStatusResponse, PaliTitlesResponse,
-    ValidationRunResponse, AutoFixRequest, AutoFixResponse,
+    ValidationRunRequest, ValidationRunResponse, AutoFixRequest, AutoFixResponse,
 };
 use crate::web::settings;
 use crate::web::arangodb;
@@ -1166,8 +1166,16 @@ async fn get_pali_titles() -> Result<Json<PaliTitlesResponse>, String> {
 ///
 /// Runs all validation checks and returns results. If ArangoDB is connected,
 /// auto-fix suggestions will be included for applicable checks.
-#[post("/api/validation/run")]
-async fn run_validation(db_state: &State<DbState>) -> Result<Json<ValidationRunResponse>, String> {
+///
+/// Request body (JSON):
+/// {
+///     "include_checked": false  // optional, defaults to false
+/// }
+#[post("/api/validation/run", data = "<request>")]
+async fn run_validation(
+    db_state: &State<DbState>,
+    request: Json<ValidationRunRequest>,
+) -> Result<Json<ValidationRunResponse>, String> {
     let mut conn = db_state.connect()
         .map_err(|e| format!("Database connection failed: {}", e))?;
 
@@ -1177,7 +1185,12 @@ async fn run_validation(db_state: &State<DbState>) -> Result<Json<ValidationRunR
         Err(_) => (false, None),
     };
 
-    let checks = validation::run_all_validations(&mut conn, &db_state.db_path, pali_titles.as_ref());
+    let checks = validation::run_all_validations(
+        &mut conn,
+        &db_state.db_path,
+        pali_titles.as_ref(),
+        request.include_checked,
+    );
 
     Ok(Json(ValidationRunResponse {
         checks,

@@ -33,6 +33,21 @@ pub struct ValidationError {
     pub fragment_id: i32,
     /// Human-readable description of the error
     pub message: String,
+    /// The frag_review status of the fragment (if any)
+    #[serde(default)]
+    pub frag_review: Option<String>,
+}
+
+impl Default for ValidationError {
+    fn default() -> Self {
+        Self {
+            cst_file: String::new(),
+            frag_idx: 0,
+            fragment_id: 0,
+            message: String::new(),
+            frag_review: None,
+        }
+    }
 }
 
 /// An auto-fix suggestion for a validation error
@@ -69,29 +84,48 @@ pub struct ValidationCheckResult {
 ///
 /// Finds fragments where:
 /// - frag_type = 'Sutta'
-/// - frag_review != 'moved'
+/// - frag_review != 'moved' (and optionally != 'checked' if include_checked is false)
 /// - sc_code IS NULL OR sc_code = ''
-pub fn check_missing_sc_code(conn: &mut SqliteConnection) -> ValidationCheckResult {
-    let results: Vec<(i32, String, i32, Option<String>)> = xml_fragments::table
-        .select((
-            xml_fragments::id,
-            xml_fragments::cst_file,
-            xml_fragments::frag_idx,
-            xml_fragments::sc_code,
-        ))
-        .filter(xml_fragments::frag_type.eq("Sutta"))
-        .filter(xml_fragments::frag_review.ne("moved").or(xml_fragments::frag_review.is_null()))
-        .filter(xml_fragments::sc_code.is_null().or(xml_fragments::sc_code.eq("")))
-        .load(conn)
-        .unwrap_or_default();
+pub fn check_missing_sc_code(conn: &mut SqliteConnection, include_checked: bool) -> ValidationCheckResult {
+    let results: Vec<(i32, String, i32, Option<String>, Option<String>)> = if include_checked {
+        xml_fragments::table
+            .select((
+                xml_fragments::id,
+                xml_fragments::cst_file,
+                xml_fragments::frag_idx,
+                xml_fragments::sc_code,
+                xml_fragments::frag_review,
+            ))
+            .filter(xml_fragments::frag_type.eq("Sutta"))
+            .filter(xml_fragments::frag_review.ne("moved").or(xml_fragments::frag_review.is_null()))
+            .filter(xml_fragments::sc_code.is_null().or(xml_fragments::sc_code.eq("")))
+            .load(conn)
+            .unwrap_or_default()
+    } else {
+        xml_fragments::table
+            .select((
+                xml_fragments::id,
+                xml_fragments::cst_file,
+                xml_fragments::frag_idx,
+                xml_fragments::sc_code,
+                xml_fragments::frag_review,
+            ))
+            .filter(xml_fragments::frag_type.eq("Sutta"))
+            .filter(xml_fragments::frag_review.ne("moved").or(xml_fragments::frag_review.is_null()))
+            .filter(xml_fragments::frag_review.ne("checked").or(xml_fragments::frag_review.is_null()))
+            .filter(xml_fragments::sc_code.is_null().or(xml_fragments::sc_code.eq("")))
+            .load(conn)
+            .unwrap_or_default()
+    };
 
     let errors: Vec<ValidationError> = results
         .into_iter()
-        .map(|(id, cst_file, frag_idx, _)| ValidationError {
+        .map(|(id, cst_file, frag_idx, _, frag_review)| ValidationError {
             cst_file,
             frag_idx,
             fragment_id: id,
             message: "Sutta fragment is missing sc_code".to_string(),
+            frag_review,
         })
         .collect();
 
@@ -109,31 +143,54 @@ pub fn check_missing_sc_code(conn: &mut SqliteConnection) -> ValidationCheckResu
 /// Finds fragments where:
 /// - sc_code IS NOT NULL AND sc_code != ''
 /// - sc_sutta IS NULL OR sc_sutta = ''
+/// - frag_review != 'moved' (and optionally != 'checked' if include_checked is false)
 ///
 /// If a pali_titles cache is provided, auto-fix suggestions will be generated
 /// for fragments whose sc_code (base part) matches a title in the cache.
 pub fn check_missing_sc_sutta(
     conn: &mut SqliteConnection,
     pali_titles: Option<&HashMap<String, String>>,
+    include_checked: bool,
 ) -> ValidationCheckResult {
-    let results: Vec<(i32, String, i32, Option<String>, Option<String>)> = xml_fragments::table
-        .select((
-            xml_fragments::id,
-            xml_fragments::cst_file,
-            xml_fragments::frag_idx,
-            xml_fragments::sc_code,
-            xml_fragments::sc_sutta,
-        ))
-        .filter(xml_fragments::sc_code.is_not_null())
-        .filter(xml_fragments::sc_code.ne(""))
-        .filter(xml_fragments::sc_sutta.is_null().or(xml_fragments::sc_sutta.eq("")))
-        .load(conn)
-        .unwrap_or_default();
+    let results: Vec<(i32, String, i32, Option<String>, Option<String>, Option<String>)> = if include_checked {
+        xml_fragments::table
+            .select((
+                xml_fragments::id,
+                xml_fragments::cst_file,
+                xml_fragments::frag_idx,
+                xml_fragments::sc_code,
+                xml_fragments::sc_sutta,
+                xml_fragments::frag_review,
+            ))
+            .filter(xml_fragments::frag_review.ne("moved").or(xml_fragments::frag_review.is_null()))
+            .filter(xml_fragments::sc_code.is_not_null())
+            .filter(xml_fragments::sc_code.ne(""))
+            .filter(xml_fragments::sc_sutta.is_null().or(xml_fragments::sc_sutta.eq("")))
+            .load(conn)
+            .unwrap_or_default()
+    } else {
+        xml_fragments::table
+            .select((
+                xml_fragments::id,
+                xml_fragments::cst_file,
+                xml_fragments::frag_idx,
+                xml_fragments::sc_code,
+                xml_fragments::sc_sutta,
+                xml_fragments::frag_review,
+            ))
+            .filter(xml_fragments::frag_review.ne("moved").or(xml_fragments::frag_review.is_null()))
+            .filter(xml_fragments::frag_review.ne("checked").or(xml_fragments::frag_review.is_null()))
+            .filter(xml_fragments::sc_code.is_not_null())
+            .filter(xml_fragments::sc_code.ne(""))
+            .filter(xml_fragments::sc_sutta.is_null().or(xml_fragments::sc_sutta.eq("")))
+            .load(conn)
+            .unwrap_or_default()
+    };
 
     let mut errors = Vec::new();
     let mut auto_fixes = Vec::new();
 
-    for (id, cst_file, frag_idx, sc_code_opt, _) in results {
+    for (id, cst_file, frag_idx, sc_code_opt, _, frag_review) in results {
         let sc_code = sc_code_opt.unwrap_or_default();
 
         errors.push(ValidationError {
@@ -141,6 +198,7 @@ pub fn check_missing_sc_sutta(
             frag_idx,
             fragment_id: id,
             message: format!("Fragment with sc_code '{}' is missing sc_sutta title", sc_code),
+            frag_review,
         });
 
         // Try to find auto-fix from pali_titles cache
@@ -176,7 +234,10 @@ pub fn check_missing_sc_sutta(
 /// Finds Sutta fragments that need user attention - those with review status
 /// other than empty, "checked", or "moved". These typically include "in-progress"
 /// or "needs-review" which indicate fragments requiring user action.
-pub fn check_sutta_review_status(conn: &mut SqliteConnection) -> ValidationCheckResult {
+///
+/// This check always filters out "checked" and "moved" status regardless of the
+/// include_checked parameter, as these are considered valid/complete states.
+pub fn check_sutta_review_status(conn: &mut SqliteConnection, _include_checked: bool) -> ValidationCheckResult {
     let results: Vec<(i32, String, i32, Option<String>)> = xml_fragments::table
         .select((
             xml_fragments::id,
@@ -188,8 +249,8 @@ pub fn check_sutta_review_status(conn: &mut SqliteConnection) -> ValidationCheck
         .filter(
             xml_fragments::frag_review.is_not_null()
                 .and(xml_fragments::frag_review.ne(""))
-                .and(xml_fragments::frag_review.ne("checked"))
                 .and(xml_fragments::frag_review.ne("moved"))
+                .and(xml_fragments::frag_review.ne("checked"))
         )
         .load(conn)
         .unwrap_or_default();
@@ -197,18 +258,19 @@ pub fn check_sutta_review_status(conn: &mut SqliteConnection) -> ValidationCheck
     let errors: Vec<ValidationError> = results
         .into_iter()
         .map(|(id, cst_file, frag_idx, frag_review)| {
-            let status = frag_review.unwrap_or_else(|| "unknown".to_string());
+            let status = frag_review.clone().unwrap_or_else(|| "unknown".to_string());
             ValidationError {
                 cst_file,
                 frag_idx,
                 fragment_id: id,
                 message: format!("Sutta fragment needs attention (status: '{}')", status),
+                frag_review,
             }
         })
         .collect();
 
     ValidationCheckResult {
-        name: "Sutta Review Status".to_string(),
+        name: "Status Needs Attention".to_string(),
         description: "Sutta fragments that need user attention (in-progress, needs-review, etc.)".to_string(),
         auto_fixable: false,
         errors,
@@ -221,11 +283,16 @@ pub fn check_sutta_review_status(conn: &mut SqliteConnection) -> ValidationCheck
 /// Uses the same reconstruction procedure as the regeneration process:
 /// calls `reconstruct_xml_from_db` for each file and reports any failures.
 /// Reports the problematic cst_file and first frag_idx when reconstruction fails.
+///
+/// Always include all fragments for reconstruction validation.
+/// The frag_review = 'moved' fragments are empty, they don't need to be filtered,
+/// so we are not filtering on any frag_review fragment types.
 pub fn check_xml_reconstruction(
     conn: &mut SqliteConnection,
     db_path: &Path,
+    _include_checked: bool,
 ) -> ValidationCheckResult {
-    // Get all unique cst_file values
+    // Get all unique cst_file values - always include checked for reconstruction validation
     let cst_files: Vec<String> = xml_fragments::table
         .select(xml_fragments::cst_file)
         .distinct()
@@ -238,15 +305,15 @@ pub fn check_xml_reconstruction(
     // Test reconstruction for each file using the same method as regeneration
     for cst_file in cst_files {
         // Get first fragment for error reporting
-        let first_fragment: Option<(i32, i32)> = xml_fragments::table
-            .select((xml_fragments::id, xml_fragments::frag_idx))
+        let first_fragment: Option<(i32, i32, Option<String>)> = xml_fragments::table
+            .select((xml_fragments::id, xml_fragments::frag_idx, xml_fragments::frag_review))
             .filter(xml_fragments::cst_file.eq(&cst_file))
             .order_by(xml_fragments::frag_idx)
             .first(conn)
             .optional()
             .unwrap_or(None);
 
-        if let Some((fragment_id, frag_idx)) = first_fragment {
+        if let Some((fragment_id, frag_idx, frag_review)) = first_fragment {
             // Attempt reconstruction using the same function used during regeneration
             match reconstruct_xml_from_db(db_path, &cst_file) {
                 Ok(_reconstructed_xml) => {
@@ -259,6 +326,7 @@ pub fn check_xml_reconstruction(
                         frag_idx,
                         fragment_id,
                         message: format!("XML reconstruction failed: {}", e),
+                        frag_review,
                     });
                 }
             }
@@ -358,11 +426,15 @@ fn format_sutta_range(start: u32, end: u32) -> String {
 ///
 /// Only Sutta type fragments are checked. Null/empty sc_code values are skipped
 /// (checked by check_missing_sc_code).
-pub fn check_sc_code_sequence(conn: &mut SqliteConnection) -> ValidationCheckResult {
-    // Get distinct cst_file values
+///
+/// Fragments with frag_review = 'moved' are excluded. If include_checked is false,
+/// fragments with frag_review = 'checked' are also excluded.
+pub fn check_sc_code_sequence(conn: &mut SqliteConnection, include_checked: bool) -> ValidationCheckResult {
+    // Get distinct cst_file values - always exclude moved, include checked for sequence checking
     let cst_files: Vec<String> = xml_fragments::table
         .select(xml_fragments::cst_file)
         .distinct()
+        .filter(xml_fragments::frag_review.ne("moved").or(xml_fragments::frag_review.is_null()))
         .order_by(xml_fragments::cst_file)
         .load(conn)
         .unwrap_or_default();
@@ -371,21 +443,24 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection) -> ValidationCheckRes
 
     for cst_file in cst_files {
         // Get Sutta fragments for this file, ordered by frag_idx
-        let fragments: Vec<(i32, i32, Option<String>)> = xml_fragments::table
+        // Always include checked fragments for sequence validation
+        let fragments: Vec<(i32, i32, Option<String>, Option<String>)> = xml_fragments::table
             .select((
                 xml_fragments::id,
                 xml_fragments::frag_idx,
                 xml_fragments::sc_code,
+                xml_fragments::frag_review,
             ))
             .filter(xml_fragments::cst_file.eq(&cst_file))
             .filter(xml_fragments::frag_type.eq("Sutta"))
+            .filter(xml_fragments::frag_review.ne("moved").or(xml_fragments::frag_review.is_null()))
             .order_by(xml_fragments::frag_idx)
             .load(conn)
             .unwrap_or_default();
 
         let mut prev_parsed: Option<ParsedScCode> = None;
 
-        for (id, frag_idx, sc_code_opt) in fragments {
+        for (id, frag_idx, sc_code_opt, frag_review) in fragments {
             // Skip null/empty sc_code values
             let sc_code = match &sc_code_opt {
                 Some(code) if !code.is_empty() => code,
@@ -401,6 +476,7 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection) -> ValidationCheckRes
                         frag_idx,
                         fragment_id: id,
                         message: format!("Cannot parse sc_code '{}' format", sc_code),
+                        frag_review,
                     });
                     continue;
                 }
@@ -418,6 +494,7 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection) -> ValidationCheckRes
                             "Nikaya changed from '{}' to '{}' - expected same nikaya within file",
                             prev.nikaya, parsed.nikaya
                         ),
+                        frag_review: None,
                     });
                     prev_parsed = Some(parsed);
                     continue;
@@ -440,6 +517,7 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection) -> ValidationCheckRes
                                         prev.nikaya, prev_group, format_sutta_range(prev.sutta_start, prev.sutta_end),
                                         parsed.nikaya, curr_group, format_sutta_range(parsed.sutta_start, parsed.sutta_end)
                                     ),
+                                    frag_review,
                                 });
                             }
                         } else if *curr_group == prev_group + 1 {
@@ -453,6 +531,7 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection) -> ValidationCheckRes
                                         "Group changed from {} to {} but sutta starts at {} instead of 1",
                                         prev_group, curr_group, parsed.sutta_start
                                     ),
+                                    frag_review,
                                 });
                             }
                         } else {
@@ -465,22 +544,24 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection) -> ValidationCheckRes
                                     "Group jump from {} to {} - expected step of 1",
                                     prev_group, curr_group
                                 ),
+                                frag_review,
                             });
                         }
                     }
                     // Neither has groups (e.g., dn1 -> dn2)
                     (None, None) => {
                         if parsed.sutta_start != prev.sutta_end + 1 {
-                            errors.push(ValidationError {
-                                cst_file: cst_file.clone(),
-                                frag_idx,
-                                fragment_id: id,
-                                message: format!(
-                                    "Sutta number jump from {}{} to {}{} - expected step of 1",
-                                    prev.nikaya, format_sutta_range(prev.sutta_start, prev.sutta_end),
-                                    parsed.nikaya, format_sutta_range(parsed.sutta_start, parsed.sutta_end)
-                                ),
-                            });
+                        errors.push(ValidationError {
+                            cst_file: cst_file.clone(),
+                            frag_idx,
+                            fragment_id: id,
+                            message: format!(
+                                "Sutta number jump from {}{} to {}{} - expected step of 1",
+                                prev.nikaya, format_sutta_range(prev.sutta_start, prev.sutta_end),
+                                parsed.nikaya, format_sutta_range(parsed.sutta_start, parsed.sutta_end)
+                            ),
+                            frag_review,
+                        });
                         }
                     }
                     // Mixing grouped and non-grouped formats
@@ -492,6 +573,7 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection) -> ValidationCheckRes
                             message: format!(
                                 "Inconsistent sc_code format: mixing grouped and non-grouped formats"
                             ),
+                            frag_review,
                         });
                     }
                 }
@@ -501,11 +583,21 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection) -> ValidationCheckRes
         }
     }
 
+    // Filter out errors from checked fragments if include_checked is false
+    let final_errors: Vec<ValidationError> = if include_checked {
+        errors
+    } else {
+        errors
+            .into_iter()
+            .filter(|e| e.frag_review.as_ref() != Some(&"checked".to_string()))
+            .collect()
+    };
+
     ValidationCheckResult {
         name: "sc_code Sequence".to_string(),
         description: "Validates that sc_code values increase gradually (step of 1) within each file".to_string(),
         auto_fixable: false,
-        errors,
+        errors: final_errors,
         auto_fixes: vec![],
     }
 }
@@ -515,18 +607,21 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection) -> ValidationCheckRes
 /// Finds fragments where cst_code or sc_code values are not unique within the same cst_file.
 /// Only non-empty values are checked for uniqueness.
 /// Fragments with frag_review = 'moved' are excluded as they are essentially deleted.
+/// Fragments with frag_review = 'checked' are always included as the 'checked' status fragments should still have unique cst_code and sc_code values.
 /// Header type fragments are excluded as they don't require unique codes.
-pub fn check_code_uniqueness(conn: &mut SqliteConnection) -> ValidationCheckResult {
+pub fn check_code_uniqueness(conn: &mut SqliteConnection, _include_checked: bool) -> ValidationCheckResult {
     let mut errors = Vec::new();
 
     // Check cst_code uniqueness within each file
     // Query fragments with non-empty cst_code, excluding moved and Header fragments
-    let cst_code_fragments: Vec<(i32, String, i32, Option<String>)> = xml_fragments::table
+    // Always include checked fragments for uniqueness checking
+    let cst_code_fragments: Vec<(i32, String, i32, Option<String>, Option<String>)> = xml_fragments::table
         .select((
             xml_fragments::id,
             xml_fragments::cst_file,
             xml_fragments::frag_idx,
             xml_fragments::cst_code,
+            xml_fragments::frag_review,
         ))
         .filter(xml_fragments::cst_code.is_not_null())
         .filter(xml_fragments::cst_code.ne(""))
@@ -536,20 +631,20 @@ pub fn check_code_uniqueness(conn: &mut SqliteConnection) -> ValidationCheckResu
         .unwrap_or_default();
 
     // Group by (cst_file, cst_code) to find duplicates within each file
-    let mut cst_code_map: HashMap<(String, String), Vec<(i32, i32)>> = HashMap::new();
-    for (id, cst_file, frag_idx, cst_code_opt) in cst_code_fragments {
+    let mut cst_code_map: HashMap<(String, String), Vec<(i32, i32, Option<String>)>> = HashMap::new();
+    for (id, cst_file, frag_idx, cst_code_opt, frag_review) in cst_code_fragments {
         if let Some(cst_code) = cst_code_opt {
             cst_code_map
                 .entry((cst_file, cst_code))
                 .or_insert_with(Vec::new)
-                .push((id, frag_idx));
+                .push((id, frag_idx, frag_review));
         }
     }
 
     // Report duplicates for cst_code
     for ((cst_file, code), fragments) in &cst_code_map {
         if fragments.len() > 1 {
-            for (id, frag_idx) in fragments {
+            for (id, frag_idx, frag_review) in fragments {
                 errors.push(ValidationError {
                     cst_file: cst_file.clone(),
                     frag_idx: *frag_idx,
@@ -559,6 +654,7 @@ pub fn check_code_uniqueness(conn: &mut SqliteConnection) -> ValidationCheckResu
                         code,
                         fragments.len()
                     ),
+                    frag_review: frag_review.clone(),
                 });
             }
         }
@@ -566,12 +662,14 @@ pub fn check_code_uniqueness(conn: &mut SqliteConnection) -> ValidationCheckResu
 
     // Check sc_code uniqueness within each file
     // Query fragments with non-empty sc_code, excluding moved and Header fragments
-    let sc_code_fragments: Vec<(i32, String, i32, Option<String>)> = xml_fragments::table
+    // Always include checked fragments for uniqueness checking
+    let sc_code_fragments: Vec<(i32, String, i32, Option<String>, Option<String>)> = xml_fragments::table
         .select((
             xml_fragments::id,
             xml_fragments::cst_file,
             xml_fragments::frag_idx,
             xml_fragments::sc_code,
+            xml_fragments::frag_review,
         ))
         .filter(xml_fragments::sc_code.is_not_null())
         .filter(xml_fragments::sc_code.ne(""))
@@ -581,20 +679,20 @@ pub fn check_code_uniqueness(conn: &mut SqliteConnection) -> ValidationCheckResu
         .unwrap_or_default();
 
     // Group by (cst_file, sc_code) to find duplicates within each file
-    let mut sc_code_map: HashMap<(String, String), Vec<(i32, i32)>> = HashMap::new();
-    for (id, cst_file, frag_idx, sc_code_opt) in sc_code_fragments {
+    let mut sc_code_map: HashMap<(String, String), Vec<(i32, i32, Option<String>)>> = HashMap::new();
+    for (id, cst_file, frag_idx, sc_code_opt, frag_review) in sc_code_fragments {
         if let Some(sc_code) = sc_code_opt {
             sc_code_map
                 .entry((cst_file, sc_code))
                 .or_insert_with(Vec::new)
-                .push((id, frag_idx));
+                .push((id, frag_idx, frag_review));
         }
     }
 
     // Report duplicates for sc_code
     for ((cst_file, code), fragments) in &sc_code_map {
         if fragments.len() > 1 {
-            for (id, frag_idx) in fragments {
+            for (id, frag_idx, frag_review) in fragments {
                 errors.push(ValidationError {
                     cst_file: cst_file.clone(),
                     frag_idx: *frag_idx,
@@ -604,6 +702,7 @@ pub fn check_code_uniqueness(conn: &mut SqliteConnection) -> ValidationCheckResu
                         code,
                         fragments.len()
                     ),
+                    frag_review: frag_review.clone(),
                 });
             }
         }
@@ -655,27 +754,53 @@ fn is_sc_code_range(sc_code: &str) -> bool {
 /// if the fragment has an sc_code, it should also be in range form (e.g., "sn12.93-103").
 ///
 /// This ensures consistency between CST and SC code formatting for range entries.
-pub fn check_cst_sc_range_consistency(conn: &mut SqliteConnection) -> ValidationCheckResult {
-    // Get Sutta fragments with non-empty cst_code and sc_code
-    let results: Vec<(i32, String, i32, Option<String>, Option<String>)> = xml_fragments::table
-        .select((
-            xml_fragments::id,
-            xml_fragments::cst_file,
-            xml_fragments::frag_idx,
-            xml_fragments::cst_code,
-            xml_fragments::sc_code,
-        ))
-        .filter(xml_fragments::frag_type.eq("Sutta"))
-        .filter(xml_fragments::cst_code.is_not_null())
-        .filter(xml_fragments::cst_code.ne(""))
-        .filter(xml_fragments::sc_code.is_not_null())
-        .filter(xml_fragments::sc_code.ne(""))
-        .load(conn)
-        .unwrap_or_default();
+///
+/// Fragments with frag_review = 'moved' are excluded. If include_checked is false,
+/// fragments with frag_review = 'checked' are also excluded.
+/// The frag_review = 'checked' items can be filtered at the initial collection stage because this validation doesn't rely on walking through items in sequence.
+pub fn check_cst_sc_range_consistency(conn: &mut SqliteConnection, include_checked: bool) -> ValidationCheckResult {
+    let results: Vec<(i32, String, i32, Option<String>, Option<String>, Option<String>)> = if include_checked {
+        xml_fragments::table
+            .select((
+                xml_fragments::id,
+                xml_fragments::cst_file,
+                xml_fragments::frag_idx,
+                xml_fragments::cst_code,
+                xml_fragments::sc_code,
+                xml_fragments::frag_review,
+            ))
+            .filter(xml_fragments::frag_type.eq("Sutta"))
+            .filter(xml_fragments::frag_review.ne("moved").or(xml_fragments::frag_review.is_null()))
+            .filter(xml_fragments::cst_code.is_not_null())
+            .filter(xml_fragments::cst_code.ne(""))
+            .filter(xml_fragments::sc_code.is_not_null())
+            .filter(xml_fragments::sc_code.ne(""))
+            .load(conn)
+            .unwrap_or_default()
+    } else {
+        xml_fragments::table
+            .select((
+                xml_fragments::id,
+                xml_fragments::cst_file,
+                xml_fragments::frag_idx,
+                xml_fragments::cst_code,
+                xml_fragments::sc_code,
+                xml_fragments::frag_review,
+            ))
+            .filter(xml_fragments::frag_type.eq("Sutta"))
+            .filter(xml_fragments::frag_review.ne("moved").or(xml_fragments::frag_review.is_null()))
+            .filter(xml_fragments::frag_review.ne("checked").or(xml_fragments::frag_review.is_null()))
+            .filter(xml_fragments::cst_code.is_not_null())
+            .filter(xml_fragments::cst_code.ne(""))
+            .filter(xml_fragments::sc_code.is_not_null())
+            .filter(xml_fragments::sc_code.ne(""))
+            .load(conn)
+            .unwrap_or_default()
+    };
 
     let errors: Vec<ValidationError> = results
         .into_iter()
-        .filter_map(|(id, cst_file, frag_idx, cst_code_opt, sc_code_opt)| {
+        .filter_map(|(id, cst_file, frag_idx, cst_code_opt, sc_code_opt, frag_review)| {
             let cst_code = cst_code_opt?;
             let sc_code = sc_code_opt?;
 
@@ -692,6 +817,7 @@ pub fn check_cst_sc_range_consistency(conn: &mut SqliteConnection) -> Validation
                         "cst_code '{}' is a range but sc_code '{}' is not a range",
                         cst_code, sc_code
                     ),
+                    frag_review,
                 })
             } else {
                 None
@@ -715,9 +841,15 @@ pub fn check_cst_sc_range_consistency(conn: &mut SqliteConnection) -> Validation
 ///
 /// This validation requires ArangoDB to be connected. If ArangoDB is not available,
 /// no errors will be reported (as we cannot verify existence).
+///
+/// Fragments with frag_review = 'moved' are excluded. If include_checked is false,
+/// fragments with frag_review = 'checked' are also excluded.
+/// The frag_review = 'checked' items can be filtered at the initial collection stage because this validation doesn't rely on walking through items in sequence.
+/// Header type fragments are excluded as they don't require valid codes.
 pub fn check_sc_code_not_in_arangodb(
     conn: &mut SqliteConnection,
     pali_titles: Option<&HashMap<String, String>>,
+    include_checked: bool,
 ) -> ValidationCheckResult {
     // If ArangoDB is not connected, we can't check - return empty result
     let Some(titles) = pali_titles else {
@@ -731,21 +863,42 @@ pub fn check_sc_code_not_in_arangodb(
     };
 
     // Get all unique sc_codes from the database with their fragment info
-    let results: Vec<(i32, String, i32, Option<String>)> = xml_fragments::table
-        .select((
-            xml_fragments::id,
-            xml_fragments::cst_file,
-            xml_fragments::frag_idx,
-            xml_fragments::sc_code,
-        ))
-        .filter(xml_fragments::sc_code.is_not_null())
-        .filter(xml_fragments::sc_code.ne(""))
-        .load(conn)
-        .unwrap_or_default();
+    let results: Vec<(i32, String, i32, Option<String>, Option<String>)> = if include_checked {
+        xml_fragments::table
+            .select((
+                xml_fragments::id,
+                xml_fragments::cst_file,
+                xml_fragments::frag_idx,
+                xml_fragments::sc_code,
+                xml_fragments::frag_review,
+            ))
+            .filter(xml_fragments::frag_type.ne("Header"))
+            .filter(xml_fragments::frag_review.ne("moved").or(xml_fragments::frag_review.is_null()))
+            .filter(xml_fragments::sc_code.is_not_null())
+            .filter(xml_fragments::sc_code.ne(""))
+            .load(conn)
+            .unwrap_or_default()
+    } else {
+        xml_fragments::table
+            .select((
+                xml_fragments::id,
+                xml_fragments::cst_file,
+                xml_fragments::frag_idx,
+                xml_fragments::sc_code,
+                xml_fragments::frag_review,
+            ))
+            .filter(xml_fragments::frag_type.ne("Header"))
+            .filter(xml_fragments::frag_review.ne("moved").or(xml_fragments::frag_review.is_null()))
+            .filter(xml_fragments::frag_review.ne("checked").or(xml_fragments::frag_review.is_null()))
+            .filter(xml_fragments::sc_code.is_not_null())
+            .filter(xml_fragments::sc_code.ne(""))
+            .load(conn)
+            .unwrap_or_default()
+    };
 
     let errors: Vec<ValidationError> = results
         .into_iter()
-        .filter_map(|(id, cst_file, frag_idx, sc_code_opt)| {
+        .filter_map(|(id, cst_file, frag_idx, sc_code_opt, frag_review)| {
             let sc_code = sc_code_opt?;
 
             // Extract base sc_code (without colon suffix, e.g., "dn1" from "dn1:1.2")
@@ -761,6 +914,7 @@ pub fn check_sc_code_not_in_arangodb(
                         "sc_code '{}' (base: '{}') does not exist in ArangoDB",
                         sc_code, base_code
                     ),
+                    frag_review,
                 })
             } else {
                 None
@@ -780,51 +934,55 @@ pub fn check_sc_code_not_in_arangodb(
 /// Run all validation checks and return results
 ///
 /// Returns a HashMap where keys are check identifiers and values are the results.
+///
+/// If `include_checked` is false (default), fragments with `frag_review = 'checked'`
+/// will be excluded from validation checks (similar to how `frag_review = 'moved'` is excluded).
 pub fn run_all_validations(
     conn: &mut SqliteConnection,
     db_path: &Path,
     pali_titles: Option<&HashMap<String, String>>,
+    include_checked: bool,
 ) -> HashMap<String, ValidationCheckResult> {
     let mut results = HashMap::new();
 
     results.insert(
         "missing_sc_code".to_string(),
-        check_missing_sc_code(conn),
+        check_missing_sc_code(conn, include_checked),
     );
 
     results.insert(
         "missing_sc_sutta".to_string(),
-        check_missing_sc_sutta(conn, pali_titles),
+        check_missing_sc_sutta(conn, pali_titles, include_checked),
     );
 
     results.insert(
         "sutta_review_status".to_string(),
-        check_sutta_review_status(conn),
+        check_sutta_review_status(conn, include_checked),
     );
 
     results.insert(
         "xml_reconstruction".to_string(),
-        check_xml_reconstruction(conn, db_path),
+        check_xml_reconstruction(conn, db_path, include_checked),
     );
 
     results.insert(
         "sc_code_sequence".to_string(),
-        check_sc_code_sequence(conn),
+        check_sc_code_sequence(conn, include_checked),
     );
 
     results.insert(
         "code_uniqueness".to_string(),
-        check_code_uniqueness(conn),
+        check_code_uniqueness(conn, include_checked),
     );
 
     results.insert(
         "cst_sc_range_consistency".to_string(),
-        check_cst_sc_range_consistency(conn),
+        check_cst_sc_range_consistency(conn, include_checked),
     );
 
     results.insert(
         "sc_code_not_in_arangodb".to_string(),
-        check_sc_code_not_in_arangodb(conn, pali_titles),
+        check_sc_code_not_in_arangodb(conn, pali_titles, include_checked),
     );
 
     results
@@ -952,11 +1110,11 @@ mod tests {
         }
 
         // Run validation
-        let result = check_sutta_review_status(&mut conn);
+        let result = check_sutta_review_status(&mut conn, false);
 
         // Should have no errors for valid statuses
         assert_eq!(result.errors.len(), 0, "Should have no errors for valid review statuses");
-        assert_eq!(result.name, "Sutta Review Status");
+        assert_eq!(result.name, "Status Needs Attention");
     }
 
     #[test]
@@ -1035,7 +1193,7 @@ mod tests {
         }
 
         // Run validation
-        let result = check_sutta_review_status(&mut conn);
+        let result = check_sutta_review_status(&mut conn, false);
 
         // Should report 2 errors (in-progress and needs-review)
         assert_eq!(result.errors.len(), 2, "Should have 2 errors for fragments needing attention");
@@ -1083,7 +1241,7 @@ mod tests {
             .expect("Failed to insert fragment");
 
         // Run validation
-        let result = check_sutta_review_status(&mut conn);
+        let result = check_sutta_review_status(&mut conn, false);
 
         // Should have no errors - only Sutta fragments are checked
         assert_eq!(result.errors.len(), 0, "Should ignore non-Sutta fragments");
@@ -1146,7 +1304,7 @@ mod tests {
         }
 
         // Run validation
-        let result = check_xml_reconstruction(&mut conn, db_path);
+        let result = check_xml_reconstruction(&mut conn, db_path, false);
 
         // Should have no errors
         if result.errors.len() > 0 {
@@ -1197,7 +1355,7 @@ mod tests {
             .expect("Failed to insert fragment");
 
         // Run validation
-        let result = check_xml_reconstruction(&mut conn, db_path);
+        let result = check_xml_reconstruction(&mut conn, db_path, false);
 
         // Should succeed with minimal valid content
         assert_eq!(result.errors.len(), 0, "Should have no errors for minimal valid content");
@@ -1236,7 +1394,7 @@ mod tests {
             .expect("Failed to insert fragment");
 
         // Run validation
-        let _result = check_xml_reconstruction(&mut conn, db_path);
+        let _result = check_xml_reconstruction(&mut conn, db_path, false);
 
         // The reconstruction function should handle this gracefully
         // It may or may not fail depending on the implementation
@@ -1301,7 +1459,7 @@ mod tests {
         }
 
         // Run validation
-        let _result = check_xml_reconstruction(&mut conn, db_path);
+        let _result = check_xml_reconstruction(&mut conn, db_path, false);
 
         // The reconstruction function should handle this gracefully
         // Gaps in line positions don't necessarily mean reconstruction will fail
@@ -1436,7 +1594,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_sc_code_sequence(&mut conn);
+        let result = check_sc_code_sequence(&mut conn, false);
         assert_eq!(result.errors.len(), 0, "Valid sequence should have no errors");
     }
 
@@ -1476,7 +1634,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_sc_code_sequence(&mut conn);
+        let result = check_sc_code_sequence(&mut conn, false);
         assert_eq!(result.errors.len(), 1, "Should detect sutta number jump");
         assert!(result.errors[0].message.contains("jump"), "Error should mention jump");
     }
@@ -1510,7 +1668,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_sc_code_sequence(&mut conn);
+        let result = check_sc_code_sequence(&mut conn, false);
         assert_eq!(result.errors.len(), 1, "Should detect group not starting at 1");
         assert!(result.errors[0].message.contains("starts at 2 instead of 1"),
             "Error should mention sutta not starting at 1");
@@ -1545,7 +1703,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_sc_code_sequence(&mut conn);
+        let result = check_sc_code_sequence(&mut conn, false);
         assert_eq!(result.errors.len(), 1, "Should detect group jump");
         assert!(result.errors[0].message.contains("Group jump"),
             "Error should mention group jump");
@@ -1602,7 +1760,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_sc_code_sequence(&mut conn);
+        let result = check_sc_code_sequence(&mut conn, false);
         assert_eq!(result.errors.len(), 0, "Null values and non-Sutta fragments should be skipped");
     }
 
@@ -1642,7 +1800,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_sc_code_sequence(&mut conn);
+        let result = check_sc_code_sequence(&mut conn, false);
         assert_eq!(result.errors.len(), 0, "Valid sequence without groups should have no errors");
     }
 
@@ -1682,7 +1840,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_sc_code_sequence(&mut conn);
+        let result = check_sc_code_sequence(&mut conn, false);
         assert_eq!(result.errors.len(), 0, "Valid sequence with ranges should have no errors");
     }
 
@@ -1726,7 +1884,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_code_uniqueness(&mut conn);
+        let result = check_code_uniqueness(&mut conn, false);
         assert_eq!(result.errors.len(), 0, "Unique codes should have no errors");
         assert_eq!(result.name, "Code Uniqueness");
     }
@@ -1760,7 +1918,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_code_uniqueness(&mut conn);
+        let result = check_code_uniqueness(&mut conn, false);
         assert_eq!(result.errors.len(), 2, "Should report both fragments with duplicate cst_code");
         assert!(result.errors.iter().all(|e| e.message.contains("Duplicate cst_code '1'")),
             "All errors should mention duplicate cst_code");
@@ -1795,7 +1953,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_code_uniqueness(&mut conn);
+        let result = check_code_uniqueness(&mut conn, false);
         assert_eq!(result.errors.len(), 2, "Should report both fragments with duplicate sc_code");
         assert!(result.errors.iter().all(|e| e.message.contains("Duplicate sc_code 'dn1'")),
             "All errors should mention duplicate sc_code");
@@ -1830,7 +1988,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_code_uniqueness(&mut conn);
+        let result = check_code_uniqueness(&mut conn, false);
         assert_eq!(result.errors.len(), 0, "Moved fragments should be excluded from uniqueness check");
     }
 
@@ -1870,7 +2028,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_code_uniqueness(&mut conn);
+        let result = check_code_uniqueness(&mut conn, false);
         assert_eq!(result.errors.len(), 0, "Empty/null codes should not be reported as duplicates");
     }
 
@@ -1910,7 +2068,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_code_uniqueness(&mut conn);
+        let result = check_code_uniqueness(&mut conn, false);
         assert_eq!(result.errors.len(), 0, "Header fragments should be excluded from uniqueness check");
     }
 
@@ -1944,7 +2102,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_code_uniqueness(&mut conn);
+        let result = check_code_uniqueness(&mut conn, false);
         assert_eq!(result.errors.len(), 0, "Same codes in different files should be allowed");
     }
 
@@ -1984,7 +2142,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_code_uniqueness(&mut conn);
+        let result = check_code_uniqueness(&mut conn, false);
         // Only 2 errors for the duplicates within test.xml, not 3
         assert_eq!(result.errors.len(), 2, "Only duplicates within same file should be reported");
 
@@ -2047,7 +2205,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_cst_sc_range_consistency(&mut conn);
+        let result = check_cst_sc_range_consistency(&mut conn, false);
         assert_eq!(result.errors.len(), 0, "Both ranges should be valid");
     }
 
@@ -2073,7 +2231,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_cst_sc_range_consistency(&mut conn);
+        let result = check_cst_sc_range_consistency(&mut conn, false);
         assert_eq!(result.errors.len(), 0, "Both single values should be valid");
     }
 
@@ -2099,7 +2257,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_cst_sc_range_consistency(&mut conn);
+        let result = check_cst_sc_range_consistency(&mut conn, false);
         assert_eq!(result.errors.len(), 1, "Should report range mismatch");
         assert!(result.errors[0].message.contains("sn2.1.9.2-12"),
             "Error should mention the cst_code");
@@ -2136,7 +2294,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_cst_sc_range_consistency(&mut conn);
+        let result = check_cst_sc_range_consistency(&mut conn, false);
         assert_eq!(result.errors.len(), 0, "Null codes should be skipped");
     }
 
@@ -2162,7 +2320,7 @@ mod tests {
                 .expect("Failed to insert fragment");
         }
 
-        let result = check_cst_sc_range_consistency(&mut conn);
+        let result = check_cst_sc_range_consistency(&mut conn, false);
         assert_eq!(result.errors.len(), 0, "Header fragments should be ignored");
     }
 }

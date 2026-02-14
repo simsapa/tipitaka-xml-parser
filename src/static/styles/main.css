@@ -378,7 +378,17 @@ body, html {
 
 /* Validation modal wider */
 #validation-modal .modal-card {
-    max-width: 900px;
+    width: 1200px;
+    max-width: 1200px;
+    max-height: 95vh;
+    height: 90vh;
+    flex-direction: column;
+}
+
+#validation-modal .modal-card-body {
+    flex: 1;
+    overflow-y: auto;
+    max-height: none;
 }
 
 /* Auto-fix confirmation modal wider */
@@ -740,7 +750,8 @@ textarea {
 
 .validation-container {
     display: flex;
-    height: 500px;
+    flex: 1;
+    min-height: 0;
 }
 
 .validation-checks-panel {
@@ -748,6 +759,7 @@ textarea {
     border-right: 1px solid #dbdbdb;
     display: flex;
     flex-direction: column;
+    min-height: 0;
 }
 
 .validation-header {
@@ -812,6 +824,7 @@ textarea {
     display: flex;
     flex-direction: column;
     min-width: 0;
+    min-height: 0;
 }
 
 .validation-results-header {
@@ -870,7 +883,7 @@ textarea {
 .result-location {
     font-family: monospace;
     font-size: 0.8rem;
-    color: #3273dc;
+    color:  #5a99ff;
 }
 
 .result-message {

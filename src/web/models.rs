@@ -210,6 +210,19 @@ pub type PaliTitlesResponse = HashMap<String, String>;
 
 use crate::web::validation::ValidationCheckResult;
 
+/// Request to run validation checks
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ValidationRunRequest {
+    /// Whether to include fragments with frag_review = 'checked' in validation.
+    /// When false (default), checked fragments are excluded similar to 'moved' fragments.
+    #[serde(default = "default_false")]
+    pub include_checked: bool,
+}
+
+fn default_false() -> bool {
+    false
+}
+
 /// Response for running all validation checks
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ValidationRunResponse {

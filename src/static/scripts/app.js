@@ -1499,7 +1499,13 @@ async function runValidation() {
     btn.disabled = true;
 
     try {
-        const response = await fetch('/api/validation/run', { method: 'POST' });
+        const checkbox = document.getElementById('include-checked-fragments');
+        const includeChecked = checkbox ? checkbox.checked : false;
+        const response = await fetch('/api/validation/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ include_checked: includeChecked })
+        });
         if (!response.ok) throw new Error('Validation request failed');
 
         const data = await response.json();
@@ -1750,10 +1756,16 @@ function renderAllValidationResults() {
     // Build results HTML
     let html = '';
     for (const error of allErrors) {
+        const reviewStatus = error.frag_review === 'checked' 
+            ? '<span class="result-review-status" style="color: #48c774; font-weight: bold; font-size: 0.75rem;">checked</span>' 
+            : '';
         html += `
             <div class="validation-result-item">
                 <div class="result-info">
-                    <span class="result-location">${error.cst_file} #${error.frag_idx} (${error.checkName})</span>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span class="result-location">${error.cst_file} #${error.frag_idx} (${error.checkName})</span>
+                        ${reviewStatus}
+                    </div>
                     <span class="result-message">${error.message}</span>
                 </div>
                 <div class="result-actions">
@@ -1827,10 +1839,16 @@ function renderValidationResults(checkId) {
     // Build results HTML
     let html = '';
     for (const error of filteredErrors) {
+        const reviewStatus = error.frag_review === 'checked' 
+            ? '<span class="result-review-status" style="color: #48c774; font-weight: bold; font-size: 0.75rem;">checked</span>' 
+            : '';
         html += `
             <div class="validation-result-item">
                 <div class="result-info">
-                    <span class="result-location">${error.cst_file} #${error.frag_idx}</span>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span class="result-location">${error.cst_file} #${error.frag_idx}</span>
+                        ${reviewStatus}
+                    </div>
                     <span class="result-message">${error.message}</span>
                 </div>
                 <div class="result-actions">
@@ -1974,6 +1992,11 @@ function setupValidationModal() {
         if (selectedCheckType) {
             renderValidationResults(selectedCheckType);
         }
+    });
+
+    // Include checked fragments checkbox - re-run validation when changed
+    document.getElementById('include-checked-fragments').addEventListener('change', () => {
+        runValidation();
     });
 
     // Clear validation selection button

@@ -880,7 +880,7 @@ fn derive_sc_code_from_previous(cst_code: &str, previous_sc_code: &str) -> Optio
 }
 
 /// Derive sc_code using parsed components
-fn derive_sc_code_with_components(cst_code: &str, cst_sutta: i32, _cst_samyutta: i32, prev_components: &ScCodeComponents) -> Option<String> {
+fn derive_sc_code_with_components(_cst_code: &str, cst_sutta: i32, _cst_samyutta: i32, prev_components: &ScCodeComponents) -> Option<String> {
     match prev_components.prefix.as_str() {
         "sn" => {
             let prev_samyutta = prev_components.samyutta?;

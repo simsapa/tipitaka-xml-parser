@@ -574,7 +574,7 @@
     <!-- Validation Modal -->
     <div class="modal" id="validation-modal">
         <div class="modal-background"></div>
-        <div class="modal-card" style="width: 900px; max-height: 90vh;">
+        <div class="modal-card" style="width: 1200px; max-height: 95vh;">
             <header class="modal-card-head">
                 <p class="modal-card-title">Database Validation</p>
                 <button class="delete" aria-label="close" id="validation-modal-close"></button>
@@ -602,7 +602,7 @@
                                 <span class="tag is-light check-badge" id="badge-missing_sc_sutta">-</span>
                             </div>
                             <div class="validation-check-item" data-check-id="sutta_review_status">
-                                <span class="check-name">Sutta Review Status</span>
+                                <span class="check-name">Status Needs Attention</span>
                                 <span class="tag is-light check-badge" id="badge-sutta_review_status">-</span>
                             </div>
                             <div class="validation-check-item" data-check-id="xml_reconstruction">
@@ -640,6 +640,10 @@
                                 <button class="button is-small is-light" id="reset-file-filter-btn" title="Reset file filter">
                                     Reset
                                 </button>
+                                <label class="checkbox ml-3" style="font-size: 0.85rem;">
+                                    <input type="checkbox" id="include-checked-fragments">
+                                    Include checked fragments
+                                </label>
                             </div>
                             <button class="button is-warning is-small" id="auto-fix-btn" style="display: none;">
                                 Auto-Fix All
