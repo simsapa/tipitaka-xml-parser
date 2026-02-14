@@ -212,6 +212,66 @@ pub fn parse_into_fragments(
                             // the FIRST sutta of the new samyutta, not as a separate fragment.
                             // IMPORTANT: We also defer entering the hierarchy level, so the previous sutta
                             // fragment gets the correct (old) group levels when it's closed.
+
+                            // If there's already a pending samyutta that was never consumed by a subhead,
+                            // flush it now: close the current fragment at the OLD pending position, enter
+                            // the old samyutta hierarchy, and start a new fragment. This handles samyuttas
+                            // that have no <p rend="subhead"> (e.g. sn3_5, sn3_6 in s0303a.att.xml).
+                            if let Some((old_pos, old_line, old_char)) = pending_samyutta_div_pos.take() {
+                                // Close current fragment at the old pending samyutta position
+                                if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) =
+                                    (current_fragment_start, current_frag_type.as_ref()) {
+                                    if matches!(frag_type, FragmentType::Sutta) && frag_start_pos < old_pos {
+                                        let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
+                                            xml_content,
+                                            old_pos,
+                                            old_line,
+                                            old_char,
+                                            cst_file,
+                                            fragments.len(),
+                                            frag_start_pos,
+                                            frag_start_line,
+                                            frag_start_char,
+                                            overrides.correction_overrides.as_ref(),
+                                            overrides.adjustments.as_ref(),
+                                        )?;
+
+                                        let content_xml = xml_content[frag_start_pos..end_pos].to_string();
+                                        if collapsed || !content_xml.trim().is_empty() {
+                                            fragments.push(XmlFragment {
+                                                nikaya: nikaya_structure.nikaya.clone(),
+                                                frag_type: frag_type.clone(),
+                                                content_xml,
+                                                start_line: frag_start_line,
+                                                end_line,
+                                                start_char: frag_start_char,
+                                                end_char,
+                                                group_levels: current_fragment_group_levels.clone(),
+                                                cst_file: cst_file.to_string(),
+                                                frag_idx: fragments.len(),
+                                                frag_review: None,
+                                                cst_code: None,
+                                                cst_vagga: None,
+                                                cst_sutta: None,
+                                                cst_paranum: None,
+                                                sc_code: None,
+                                                sc_sutta: None,
+                                            });
+                                        }
+
+                                        // Enter the old pending samyutta hierarchy before starting new fragment
+                                        if let Some((samyutta_title, sam_id, sam_number)) = pending_samyutta_info.take() {
+                                            hierarchy.enter_level(GroupType::Samyutta, samyutta_title, sam_id, sam_number);
+                                        }
+
+                                        // Start new fragment at the old samyutta position
+                                        current_fragment_start = Some((end_pos, end_line, end_char));
+                                        current_frag_type = Some(FragmentType::Sutta);
+                                        current_fragment_group_levels = hierarchy.get_current_levels();
+                                    }
+                                }
+                            }
+
                             pending_samyutta_div_pos = Some((event_start_pos, event_start_line, event_start_char));
                             pending_samyutta_info = Some((String::new(), id.clone(), number));
                             // DON'T close the current fragment here - it will be closed when the next
@@ -545,9 +605,15 @@ pub fn parse_into_fragments(
                     let is_commentary = cst_file.ends_with(".att.xml") || cst_file.ends_with(".tik.xml");
 
                     let is_sutta_commentary = if is_commentary {
-                        // In commentary files, only treat it as a sutta if it ends with "suttavaṇṇanā"
-                        // or "suttādivaṇṇanā" (grouped commentaries for multiple suttas)
+                        // In commentary files, only treat it as a sutta if it ends with a known
+                        // sutta commentary suffix. Variants:
+                        // - "suttavaṇṇanā" (single sutta commentary)
+                        // - "suttādivaṇṇanā" (grouped commentaries, e.g. "5-7. Paṭhamajanasuttādivaṇṇanā")
+                        // - "suttadvayavaṇṇanā" (pair of suttas, e.g. "3-4. Saṃyojanasuttadvayavaṇṇanā")
+                        // - "suttavaṇṇṇanā" (typo with triple ṇ in source XML, e.g. s0302t.tik.xml line 4025)
                         text.ends_with("suttavaṇṇanā") || text.ends_with("suttādivaṇṇanā")
+                            || text.ends_with("suttadvayavaṇṇanā")
+                            || text.ends_with("suttavaṇṇṇanā")
                     } else {
                         // In base text files, any numbered subhead is a sutta
                         is_numbered

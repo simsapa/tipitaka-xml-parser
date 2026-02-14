@@ -834,6 +834,33 @@ pub fn check_cst_sc_range_consistency(conn: &mut SqliteConnection, include_check
     }
 }
 
+/// Expand a range sc_code into individual codes
+/// e.g., "sn1.55-57" -> ["sn1.55", "sn1.56", "sn1.57"]
+fn expand_sc_code_range(sc_code: &str) -> Vec<String> {
+    // First remove any colon suffix
+    let base = sc_code.split(':').next().unwrap_or(sc_code);
+    
+    // Check if it's a range (contains '-')
+    if let Some(dash_pos) = base.find('-') {
+        let prefix = &base[..dash_pos];
+        let suffix = &base[dash_pos + 1..];
+        
+        // Try to parse the numbers
+        if let Some(period_pos) = prefix.rfind('.') {
+            let num_part = &prefix[period_pos + 1..];
+            if let (Ok(start), Ok(end)) = (num_part.parse::<u32>(), suffix.parse::<u32>()) {
+                let prefix_part = &prefix[..period_pos + 1];
+                return (start..=end)
+                    .map(|n| format!("{}{}", prefix_part, n))
+                    .collect();
+            }
+        }
+    }
+    
+    // Not a range, return as-is
+    vec![sc_code.to_string()]
+}
+
 /// Check for sc_code values that don't exist in ArangoDB
 ///
 /// Finds Sutta fragments where sc_code is set but the base code (without :suffix)
@@ -905,20 +932,46 @@ pub fn check_sc_code_not_in_arangodb(
             let base_code = sc_code.split(':').next().unwrap_or(&sc_code);
 
             // Check if the base code exists in ArangoDB
-            if !titles.contains_key(base_code) {
-                Some(ValidationError {
-                    cst_file,
-                    frag_idx,
-                    fragment_id: id,
-                    message: format!(
-                        "sc_code '{}' (base: '{}') does not exist in ArangoDB",
-                        sc_code, base_code
-                    ),
-                    frag_review,
-                })
-            } else {
-                None
+            if titles.contains_key(base_code) {
+                return None;
             }
+
+            // Base code not found - check if it's a range and expand
+            let expanded_codes = expand_sc_code_range(base_code);
+            
+            // Filter out codes that exist in ArangoDB
+            let missing_codes: Vec<String> = expanded_codes
+                .into_iter()
+                .filter(|code| !titles.contains_key(code))
+                .collect();
+
+            if missing_codes.is_empty() {
+                // All expanded codes exist
+                return None;
+            }
+
+            // Build error message
+            let message = if missing_codes.len() == 1 {
+                format!(
+                    "sc_code '{}' not found in ArangoDB",
+                    missing_codes[0]
+                )
+            } else {
+                format!(
+                    "sc_code '{}' not found in ArangoDB (expanded from '{}', missing: {})",
+                    missing_codes[0], 
+                    base_code,
+                    missing_codes.join(", ")
+                )
+            };
+
+            Some(ValidationError {
+                cst_file,
+                frag_idx,
+                fragment_id: id,
+                message,
+                frag_review,
+            })
         })
         .collect();
 
