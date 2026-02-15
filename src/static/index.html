@@ -58,7 +58,7 @@
                 <div class="column" id="left-panel" style="flex: 0 0 500px;">
                     <div class="box" style="height: 100%;">
                         <!-- Menu Button -->
-                        <div class="level mb-2">
+                        <div class="level mb-2" style="padding-bottom: 0.5rem;">
                             <div class="level-left">
                                 <div class="dropdown" id="menu-dropdown">
                                     <div class="dropdown-trigger">
@@ -88,7 +88,7 @@
                         
                         <!-- File List -->
                         <div class="panel-section" id="file-list-section">
-                            <h2 class="subtitle is-6">XML Files</h2>
+                            <!-- <h2 class="subtitle is-6">XML Files</h2> -->
                             <div class="panel-list" id="file-list">
                                 <!-- Files will be populated by JavaScript -->
                             </div>
@@ -96,7 +96,7 @@
                         
                         <!-- Fragment List -->
                         <div class="panel-section" id="fragment-list-section">
-                            <h2 class="subtitle is-6">Fragments</h2>
+                            <!-- <h2 class="subtitle is-6">Fragments</h2> -->
                             <div class="panel-list" id="fragment-list">
                                 <!-- Fragments will be populated by JavaScript -->
                             </div>
@@ -104,8 +104,13 @@
                         
                         <!-- Metadata Form -->
                         <div class="panel-section" id="metadata-section">
-                            <h2 class="subtitle is-6">Fragment Metadata</h2>
-                            <div class="columns is-multiline is-mobile">
+                            <h2 class="subtitle is-6">
+                                <span>Fragment Metadata</span>
+                                <button class="collapse-toggle collapsed" aria-label="Toggle metadata visibility">
+                                    <span class="icon is-small">▶</span>
+                                </button>
+                            </h2>
+                            <div class="columns is-multiline is-mobile collapsed">
                                 <!-- Column 1 -->
                                 <div class="column is-half">
                                     <div class="field">

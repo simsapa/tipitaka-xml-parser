@@ -57,9 +57,13 @@ body, html {
 
 /* Panel sections in left panel */
 .panel-section {
-    margin-bottom: 1.5rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid #dbdbdb;
+    margin-bottom: 1rem;
+    padding-bottom: 0;
+}
+
+.panel-section h2.subtitle {
+    margin-bottom: 0.8rem;
+    padding-bottom: 0;
 }
 
 .panel-section:last-child {
@@ -73,11 +77,11 @@ body, html {
 }
 
 #file-list.panel-list {
-    max-height: 200px;
+    max-height: 300px;
 }
 
 #fragment-list.panel-list {
-    max-height: 400px;
+    max-height: 500px;
 }
 
 /* File and fragment list items */
@@ -355,6 +359,46 @@ body, html {
 #metadata-section .select select {
     height: 2rem;
     font-size: 0.875rem;
+}
+
+/* Metadata collapse toggle */
+#metadata-section .collapse-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0 0.25rem;
+    margin-left: 0.5rem;
+    color: inherit;
+    font-size: 0.75rem;
+    line-height: 1;
+    vertical-align: middle;
+    transition: transform 0.2s ease;
+}
+
+#metadata-section .collapse-toggle:hover {
+    color: var(--primary-color, #3273dc);
+}
+
+#metadata-section .subtitle {
+    cursor: pointer;
+}
+
+#metadata-section .collapse-toggle .icon.is-small {
+    font-style: normal;
+}
+
+#metadata-section .columns {
+    transition: opacity 0.2s ease, max-height 0.2s ease, margin 0.2s ease;
+    overflow: hidden;
+    max-height: 500px;
+    opacity: 1;
+}
+
+#metadata-section .columns.collapsed {
+    max-height: 0;
+    opacity: 0;
+    margin-top: 0;
+    margin-bottom: 0;
 }
 
 /* Modal styling */

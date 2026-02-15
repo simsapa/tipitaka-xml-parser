@@ -804,6 +804,22 @@ async function moveFragmentTo(direction) {
 
 // Setup event listeners for buttons
 function setupEventListeners() {
+    // Metadata section collapse toggle
+    const metadataSection = document.getElementById('metadata-section');
+    const collapseToggle = metadataSection.querySelector('.collapse-toggle');
+    const metadataColumns = metadataSection.querySelector('.columns');
+    const metadataSubtitle = metadataSection.querySelector('.subtitle');
+
+    function toggleCollapse() {
+        metadataColumns.classList.toggle('collapsed');
+        collapseToggle.classList.toggle('collapsed');
+        const icon = collapseToggle.querySelector('.icon');
+        icon.textContent = collapseToggle.classList.contains('collapsed') ? '▶' : '▼';
+    }
+
+    collapseToggle.addEventListener('click', toggleCollapse);
+    metadataSubtitle.addEventListener('click', toggleCollapse);
+
     // Event delegation for review status dropdowns in fragment list
     document.getElementById('fragment-list').addEventListener('change', function(e) {
         if (e.target.classList.contains('review-dropdown')) {
