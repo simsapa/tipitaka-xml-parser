@@ -623,24 +623,11 @@ pub fn apply_sc_overrides(
 /// # Returns
 /// Derived SC code if derivation is possible
 fn derive_sc_code_from_context(cst_code: &str, context: &ScCodeComponents) -> Option<String> {
-    // Extract the sutta number from cst_code
-    // CST codes have format like: sn1.5.1.2 (book.samyutta.vagga.sutta)
-    // Or range: sn1.5.1.11-20 (book.samyutta.vagga.start-end)
-    // We need to extract the sutta number and combine with context
-
-    // Check if cst_code has a range (e.g., "11-20")
-    let (cst_code_base, is_range) = if let Some(dash_pos) = cst_code.rfind('-') {
-        let base_part = &cst_code[..dash_pos];
-        // Check if the dash is part of a range (followed by digits)
-        if base_part.rfind('.').map_or(false, |pos| {
-            base_part[pos+1..].chars().all(|c| c.is_ascii_digit())
-        }) {
-            (base_part.to_string(), true)
-        } else {
-            (cst_code.to_string(), false)
-        }
-    } else {
-        (cst_code.to_string(), false)
+    // Extract base cst_code and optional range end
+    // e.g., "sn1.5.1.11-20" -> ("sn1.5.1.11", Some(20))
+    let (cst_code_base, range_end) = match parse_cst_code_range(cst_code) {
+        Some((base, end)) => (base, Some(end)),
+        None => (cst_code, None),
     };
 
     let parts: Vec<&str> = cst_code_base.split('.').collect();
@@ -653,13 +640,8 @@ fn derive_sc_code_from_context(cst_code: &str, context: &ScCodeComponents) -> Op
                 // Try to get the sutta number from the last part of cst_code
                 if parts.len() >= 4 {
                     if let Ok(sutta) = parts[3].parse::<i32>() {
-                        if is_range {
-                            // Extract end number from original cst_code
-                            if let Some(end_part) = cst_code.rsplit('-').next() {
-                                if let Ok(end_sutta) = end_part.parse::<i32>() {
-                                    return Some(format!("sn{}.{}-{}", samyutta, sutta, end_sutta));
-                                }
-                            }
+                        if let Some(end_sutta) = range_end {
+                            return Some(format!("sn{}.{}-{}", samyutta, sutta, end_sutta));
                         }
                         return Some(format!("sn{}.{}", samyutta, sutta));
                     }
@@ -682,12 +664,8 @@ fn derive_sc_code_from_context(cst_code: &str, context: &ScCodeComponents) -> Op
             if let Some(nipata) = context.nipata {
                 if parts.len() >= 4 {
                     if let Ok(sutta) = parts[3].parse::<i32>() {
-                        if is_range {
-                            if let Some(end_part) = cst_code.rsplit('-').next() {
-                                if let Ok(end_sutta) = end_part.parse::<i32>() {
-                                    return Some(format!("an{}.{}-{}", nipata, sutta, end_sutta));
-                                }
-                            }
+                        if let Some(end_sutta) = range_end {
+                            return Some(format!("an{}.{}-{}", nipata, sutta, end_sutta));
                         }
                         return Some(format!("an{}.{}", nipata, sutta));
                     }
@@ -838,18 +816,15 @@ pub fn propagate_sc_codes_from_previous(
         };
 
         if let Some(derived_sc) = derive_sc_code_from_previous(&current_cst_code, &previous_sc_code) {
+            let is_range = is_cst_code_range(&current_cst_code);
+
             // Check if cst_code is a range - if so, convert derived sc_code to range
-            let sc_code_to_assign = if is_cst_code_range(&current_cst_code) {
+            let sc_code_to_assign = if is_range {
                 convert_sc_code_to_range(&derived_sc, &current_cst_code)
             } else {
                 derived_sc.clone()
             };
 
-            // If cst_code is a range, use sc_code_to_assign directly (with range)
-            // and try to find the title from pali_titles
-            // Otherwise, use the normal lookup flow
-            let is_range = is_cst_code_range(&current_cst_code);
-            
             if is_range {
                 // For range cst_codes, use the derived range sc_code directly
                 // and try to get title from pali_titles
@@ -899,20 +874,10 @@ pub fn propagate_sc_codes_from_previous(
 /// - New group started (sn15.20 → sn16.1)
 /// - Handles range sc_codes (e.g., sn12.93-103)
 fn derive_sc_code_from_previous(cst_code: &str, previous_sc_code: &str) -> Option<String> {
-    // Extract base cst_code (handle ranges like "sn3.8.1.11-20" -> "sn3.8.1.11")
-    // Also extract the range end if present
-    let (cst_code_base, range_end) = if let Some(dash_pos) = cst_code.rfind('-') {
-        let base_part = &cst_code[..dash_pos];
-        if base_part.rsplit('.').next().map_or(false, |s| s.chars().all(|c| c.is_ascii_digit())) {
-            // Extract range end number
-            let end_str = &cst_code[dash_pos + 1..];
-            let end = end_str.parse::<i32>().ok();
-            (base_part.to_string(), end)
-        } else {
-            (cst_code.to_string(), None)
-        }
-    } else {
-        (cst_code.to_string(), None)
+    // Extract base cst_code and range end (e.g., "sn3.8.1.11-20" -> ("sn3.8.1.11", Some(20)))
+    let (cst_code_base, range_end) = match parse_cst_code_range(cst_code) {
+        Some((base, end)) => (base.to_string(), Some(end)),
+        None => (cst_code.to_string(), None),
     };
 
     let cst_parts: Vec<&str> = cst_code_base.split('.').collect();
@@ -947,7 +912,7 @@ fn derive_sc_code_with_components(_cst_code: &str, cst_sutta: i32, _cst_samyutta
 
             // If cst_sutta is 1 and previous sutta was > 1 (or we have a range),
             // it means a new samyutta started in cst_code
-            if cst_sutta == 1 && (prev_sutta > 1 || prev_sutta > 0) {
+            if cst_sutta == 1 && prev_sutta > 0 {
                 // Increment the sc samyutta by 1 for the new cst samyutta
                 // If there's a range end, include it
                 if let Some(end) = range_end {
@@ -977,7 +942,7 @@ fn derive_sc_code_with_components(_cst_code: &str, cst_sutta: i32, _cst_samyutta
             let prev_sutta = prev_components.sutta?;
 
             // If cst_sutta is 1 and previous sutta was > 1, new nipata
-            if cst_sutta == 1 && (prev_sutta > 1 || prev_sutta > 0) {
+            if cst_sutta == 1 && prev_sutta > 0 {
                 // If there's a range end, include it
                 if let Some(end) = range_end {
                     return Some(format!("an{}.{}-{}", prev_nipata + 1, cst_sutta, end));
@@ -1102,40 +1067,50 @@ fn lookup_range_cst_code(
     Some((range_sc_code, sc_sutta.clone()))
 }
 
+/// Parse a cst_code range like "sn3.2.3.1-11" into (base, range_end).
+///
+/// Returns `Some(("sn3.2.3.1", 11))` for "sn3.2.3.1-11", or `None` if not a range.
+/// The base is the part before the dash, and range_end is the number after the dash.
+/// Only recognizes ranges where the last segment before the dash is numeric
+/// (e.g., "sn3.2.3.1-11" is a range, but "sn-foo" is not).
+pub fn parse_cst_code_range(cst_code: &str) -> Option<(&str, i32)> {
+    let dash_pos = cst_code.rfind('-')?;
+    let base_part = &cst_code[..dash_pos];
+    let end_str = &cst_code[dash_pos + 1..];
+
+    // Verify the last segment before the dash is numeric
+    let last_segment = base_part.rsplit('.').next()?;
+    if !last_segment.chars().all(|c| c.is_ascii_digit()) || last_segment.is_empty() {
+        return None;
+    }
+
+    let range_end = end_str.parse::<i32>().ok()?;
+    Some((base_part, range_end))
+}
+
 /// Check if a cst_code is a range (e.g., "sn3.2.3.1-11")
 pub fn is_cst_code_range(cst_code: &str) -> bool {
-    if let Some(dash_pos) = cst_code.rfind('-') {
-        let base_part = &cst_code[..dash_pos];
-        return base_part.rsplit('.').next()
-            .map_or(false, |s| s.chars().all(|c| c.is_ascii_digit()));
-    }
-    false
+    parse_cst_code_range(cst_code).is_some()
 }
 
 /// Convert an sc_code to range format based on cst_code range.
 /// e.g., cst_code "sn3.2.3.1-11" with sc_code "sn23.23" -> "sn23.23-33"
 fn convert_sc_code_to_range(sc_code: &str, cst_code: &str) -> String {
-    // Extract the end sutta number from cst_code range (e.g., "1-11" -> 11)
-    if let Some(dash_pos) = cst_code.rfind('-') {
-        let end_str = &cst_code[dash_pos + 1..];
-        if let Ok(end_sutta) = end_str.parse::<i32>() {
-            // Get the base sc_code (without range)
-            let base_sc = sc_code.split('-').next().unwrap_or(sc_code);
-            // Calculate the range based on the difference in cst_code
-            if let Some(dash_pos2) = cst_code.rfind('-') {
-                let start_str = &cst_code[..dash_pos2];
-                if let Some(start_pos) = start_str.rfind('.') {
-                    let start_sutta: i32 = start_str[start_pos + 1..].parse().unwrap_or(1);
-                    let range_size = end_sutta - start_sutta;
-                    if range_size > 0 {
-                        // Extract the prefix and start number from sc_code
-                        if let Some(dot_pos) = base_sc.rfind('.') {
-                            let prefix = &base_sc[..dot_pos + 1];
-                            let start_num: i32 = base_sc[dot_pos + 1..].parse().unwrap_or(1);
-                            let new_end = start_num + range_size;
-                            return format!("{}{}-{}", prefix, start_num, new_end);
-                        }
-                    }
+    // Use parse_cst_code_range to extract (base, end_sutta) from cst_code
+    if let Some((base_cst, end_sutta)) = parse_cst_code_range(cst_code) {
+        // Get the base sc_code (without range)
+        let base_sc = sc_code.split('-').next().unwrap_or(sc_code);
+        // Extract start sutta from the last segment of the cst base
+        if let Some(start_pos) = base_cst.rfind('.') {
+            let start_sutta: i32 = base_cst[start_pos + 1..].parse().unwrap_or(1);
+            let range_size = end_sutta - start_sutta;
+            if range_size > 0 {
+                // Extract the prefix and start number from sc_code
+                if let Some(dot_pos) = base_sc.rfind('.') {
+                    let prefix = &base_sc[..dot_pos + 1];
+                    let start_num: i32 = base_sc[dot_pos + 1..].parse().unwrap_or(1);
+                    let new_end = start_num + range_size;
+                    return format!("{}{}-{}", prefix, start_num, new_end);
                 }
             }
         }
@@ -1443,43 +1418,7 @@ pub fn extract_sutta_title_from_content(content: &str) -> Option<String> {
 /// Handles both single numbers and ranges like "2-11" by checking each part is numeric.
 /// Also handles cases where there's no space after the number (e.g., "9.Khayadhammasuttaṃ").
 pub fn is_numbered_sutta_subhead(text: &str) -> bool {
-    // First try the standard format: "number. title" or "number-number. title"
-    let result = text.split_whitespace()
-        .next()
-        .and_then(|first_word| first_word.strip_suffix('.'))
-        .map_or(false, |num_part| {
-            num_part.split('-').all(|part| !part.is_empty() && part.chars().all(|c| c.is_numeric()))
-        });
-
-    if result {
-        return true;
-    }
-
-    // Fallback: try to extract "number." from the beginning without requiring space
-    // Pattern: digits (optionally with hyphen and more digits), followed by dot
-    // This handles "9.Khayadhammasuttaṃ" -> true
-    let text_bytes = text.as_bytes();
-    let mut end_pos = 0;
-
-    for (i, &b) in text_bytes.iter().enumerate() {
-        if b.is_ascii_digit() || b == b'-' {
-            end_pos = i + 1;
-        } else if b == b'.' {
-            // Found the dot after the number
-            if end_pos > 0 {
-                let num_str = &text[..end_pos];
-                if num_str.split('-').all(|part| !part.is_empty() && part.chars().all(|c| c.is_numeric())) {
-                    return true;
-                }
-            }
-            break;
-        } else {
-            // Non-digit, non-hyphen, non-dot character - stop
-            break;
-        }
-    }
-
-    false
+    extract_number_from_title(text).is_some()
 }
 
 use std::collections::HashMap;
