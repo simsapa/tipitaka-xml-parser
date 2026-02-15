@@ -382,6 +382,20 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         fresh: bool,
     },
+
+    /// Convert XML files to test data (UTF-8 normalized files)
+    ///
+    /// Reads configuration from web-ui-config.toml (or specified config file) and converts
+    /// each XML file to UTF-8 normalized format in the specified data folder.
+    TipitakaXmlToTestData {
+        /// Optional path to config file (defaults to web-ui-config.toml in current directory)
+        #[arg(long, value_name = "CONFIG_PATH")]
+        config: Option<PathBuf>,
+
+        /// Path to the data folder (defaults to tests/data/)
+        #[arg(long, value_name = "DATA_FOLDER")]
+        data_folder: Option<PathBuf>,
+    },
 }
 
 fn main() {
@@ -677,6 +691,86 @@ fn main() {
             };
 
             run_regenerate()
+        }
+
+        Commands::TipitakaXmlToTestData { config, data_folder } => {
+            use tipitaka_xml_parser::web;
+            use tipitaka_xml_parser::encoding::read_xml_file;
+            use std::fs;
+
+            let run_tipitaka_xml_to_test_data = || -> Result<(), String> {
+                let settings = if let Some(config_path) = &config {
+                    web::load_settings_from_path(config_path)
+                        .map_err(|e| format!("Failed to load config from {:?}: {}", config_path, e))?
+                } else {
+                    web::load_or_create_default_settings()
+                        .map_err(|e| format!("Failed to load settings: {}", e))?
+                };
+
+                if settings.xml_dir.is_empty() {
+                    return Err("XML directory not configured. Please configure web-ui-config.toml or run with --config flag.".to_string());
+                }
+                if settings.xml_filenames.is_empty() {
+                    return Err("No XML filenames configured. Please configure web-ui-config.toml or run with --config flag.".to_string());
+                }
+
+                let data_folder = data_folder.unwrap_or_else(|| PathBuf::from("tests/data"));
+
+                if !data_folder.exists() {
+                    return Err(format!("Data folder does not exist: {:?}", data_folder));
+                }
+
+                let xml_dir = PathBuf::from(&settings.xml_dir);
+
+                println!("Converting XML files to test data...");
+                println!("  XML directory: {:?}", xml_dir);
+                println!("  Data folder: {:?}", data_folder);
+                println!("  XML files: {} files", settings.xml_filenames.len());
+                println!();
+
+                let mut errors = 0;
+
+                for (idx, xml_filename) in settings.xml_filenames.iter().enumerate() {
+                    let input_xml_path = xml_dir.join(xml_filename);
+                    let output_path = data_folder.join(xml_filename);
+
+                    println!("[{}/{}] Processing: {}", idx + 1, settings.xml_filenames.len(), xml_filename);
+
+                    if !input_xml_path.exists() {
+                        eprintln!("  ERROR: Input XML file does not exist: {:?}", input_xml_path);
+                        errors += 1;
+                        continue;
+                    }
+
+                    match read_xml_file(&input_xml_path) {
+                        Ok(output_text) => {
+                            match fs::write(&output_path, output_text) {
+                                Ok(()) => {
+                                    println!("  Wrote: {:?}", output_path);
+                                }
+                                Err(e) => {
+                                    eprintln!("  ERROR: Failed to write output file {:?}: {}", output_path, e);
+                                    errors += 1;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("  ERROR: Failed to read XML file {:?}: {}", input_xml_path, e);
+                            errors += 1;
+                        }
+                    }
+                }
+
+                println!();
+                if errors > 0 {
+                    Err(format!("Completed with {} errors", errors))
+                } else {
+                    println!("Successfully converted {} XML files to test data.", settings.xml_filenames.len());
+                    Ok(())
+                }
+            };
+
+            run_tipitaka_xml_to_test_data()
         }
     };
 
