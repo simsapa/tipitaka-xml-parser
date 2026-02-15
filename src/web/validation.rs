@@ -21,6 +21,7 @@ use serde::{Serialize, Deserialize};
 
 use crate::fragments_schema::xml_fragments;
 use crate::fragment_reconstructor::reconstruct_xml_from_db;
+use crate::parsers::helpers::is_cst_code_range;
 
 /// A validation error found during a check
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -724,16 +725,6 @@ pub fn check_code_uniqueness(conn: &mut SqliteConnection, _include_checked: bool
 }
 
 /// Check if a cst_code is in range format (e.g., "sn2.1.9.2-12")
-///
-/// A cst_code is considered a range if the last numeric segment contains a dash.
-fn is_cst_code_range(cst_code: &str) -> bool {
-    // Split by '.' and check if the last segment contains a dash (e.g., "2-12")
-    if let Some(last_segment) = cst_code.rsplit('.').next() {
-        return last_segment.contains('-');
-    }
-    false
-}
-
 /// Check if an sc_code is in range format (e.g., "sn12.93-103")
 ///
 /// An sc_code is considered a range if the last numeric segment contains a dash.

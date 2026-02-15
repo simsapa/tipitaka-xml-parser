@@ -587,16 +587,23 @@ pub fn apply_sc_overrides(
             // Derive sc_code from cst_code using propagated context
             if let Some(ref cst_code) = subsequent.cst_code {
                 if let Some(derived_sc) = derive_sc_code_from_context(cst_code, &components) {
+                    // Check if cst_code is a range - if so, convert derived sc_code to range
+                    let sc_code_to_assign = if is_cst_code_range(cst_code) {
+                        convert_sc_code_to_range(&derived_sc, cst_code)
+                    } else {
+                        derived_sc.clone()
+                    };
+
                     // Only assign sc_code if it exists in ArangoDB
                     // Try in order: exact match -> range match -> non-range base
                     if let Some(titles_cache) = pali_titles {
-                        if let Some((sc_code_to_use, title)) = find_sc_code_in_pali_titles(&derived_sc, titles_cache) {
-                            fragments[subsequent_idx].sc_code = Some(sc_code_to_use);
+                        if let Some((sc_code_found, title)) = find_sc_code_in_pali_titles(&sc_code_to_assign, titles_cache) {
+                            fragments[subsequent_idx].sc_code = Some(sc_code_found);
                             fragments[subsequent_idx].sc_sutta = Some(title);
                         }
                     } else {
                         // No ArangoDB, just assign the derived sc_code without title lookup
-                        fragments[subsequent_idx].sc_code = Some(derived_sc.clone());
+                        fragments[subsequent_idx].sc_code = Some(sc_code_to_assign);
                     }
                 }
             }
@@ -831,18 +838,54 @@ pub fn propagate_sc_codes_from_previous(
         };
 
         if let Some(derived_sc) = derive_sc_code_from_previous(&current_cst_code, &previous_sc_code) {
-            // Only assign sc_code if it exists in ArangoDB
-            // Try in order: exact match -> range match -> non-range base
-            if let Some(titles_cache) = pali_titles {
-                if let Some((sc_code_to_use, title)) = find_sc_code_in_pali_titles(&derived_sc, titles_cache) {
-                    fragments[i].sc_code = Some(sc_code_to_use.clone());
-                    fragments[i].sc_sutta = Some(title);
+            // Check if cst_code is a range - if so, convert derived sc_code to range
+            let sc_code_to_assign = if is_cst_code_range(&current_cst_code) {
+                convert_sc_code_to_range(&derived_sc, &current_cst_code)
+            } else {
+                derived_sc.clone()
+            };
+
+            // If cst_code is a range, use sc_code_to_assign directly (with range)
+            // and try to find the title from pali_titles
+            // Otherwise, use the normal lookup flow
+            let is_range = is_cst_code_range(&current_cst_code);
+            
+            if is_range {
+                // For range cst_codes, use the derived range sc_code directly
+                // and try to get title from pali_titles
+                if let Some(titles_cache) = pali_titles {
+                    // Try to find title - first try the range, then try base
+                    if let Some(title) = titles_cache.get(&sc_code_to_assign) {
+                        fragments[i].sc_code = Some(sc_code_to_assign.clone());
+                        fragments[i].sc_sutta = Some(title.clone());
+                    } else {
+                        // Try base
+                        let base = sc_code_to_assign.split('-').next().unwrap_or(&sc_code_to_assign);
+                        if let Some(title) = titles_cache.get(base) {
+                            fragments[i].sc_code = Some(sc_code_to_assign.clone());
+                            fragments[i].sc_sutta = Some(title.clone());
+                        }
+                    }
+                } else {
+                    // No ArangoDB, fall back to TSV lookup
+                    if let Some((_, sc_sutta)) = tsv_map.get(&current_cst_code) {
+                        fragments[i].sc_code = Some(sc_code_to_assign);
+                        fragments[i].sc_sutta = Some(sc_sutta.clone());
+                    }
                 }
             } else {
-                // No ArangoDB, fall back to TSV lookup
-                if let Some((_, sc_sutta)) = tsv_map.get(&derived_sc) {
-                    fragments[i].sc_code = Some(derived_sc.clone());
-                    fragments[i].sc_sutta = Some(sc_sutta.clone());
+                // Non-range: use normal lookup
+                if let Some(titles_cache) = pali_titles {
+                    if let Some((sc_code_found, title)) = find_sc_code_in_pali_titles(&sc_code_to_assign, titles_cache) {
+                        fragments[i].sc_code = Some(sc_code_found.clone());
+                        fragments[i].sc_sutta = Some(title);
+                    }
+                } else {
+                    // No ArangoDB, fall back to TSV lookup
+                    if let Some((_, sc_sutta)) = tsv_map.get(&current_cst_code) {
+                        fragments[i].sc_code = Some(sc_code_to_assign);
+                        fragments[i].sc_sutta = Some(sc_sutta.clone());
+                    }
                 }
             }
         }
@@ -1060,7 +1103,7 @@ fn lookup_range_cst_code(
 }
 
 /// Check if a cst_code is a range (e.g., "sn3.2.3.1-11")
-fn is_cst_code_range(cst_code: &str) -> bool {
+pub fn is_cst_code_range(cst_code: &str) -> bool {
     if let Some(dash_pos) = cst_code.rfind('-') {
         let base_part = &cst_code[..dash_pos];
         return base_part.rsplit('.').next()
