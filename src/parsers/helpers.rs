@@ -1421,6 +1421,58 @@ pub fn is_numbered_sutta_subhead(text: &str) -> bool {
     extract_number_from_title(text).is_some()
 }
 
+/// Check if a `<p rend="subhead">` title text represents a sutta boundary.
+///
+/// This distinguishes actual sutta commentaries from subsections within a sutta.
+///
+/// # Mūla (base text) files
+///
+/// Any numbered subhead is a sutta boundary (e.g. "1. ", "10. ", "2-11. ").
+/// Checked via [`is_numbered_sutta_subhead`].
+///
+/// # Commentary / sub-commentary files (.att.xml, .tik.xml)
+///
+/// The title must end with a known sutta commentary suffix, OR be a numbered
+/// subhead ending in `vaṇṇanā`. The numbering distinguishes sutta-level titles
+/// from section-level titles (e.g. unnumbered "Nidānavaṇṇanā" is a section
+/// header, not a sutta).
+///
+/// Some sutta commentary titles omit "sutta" from the name entirely, e.g.
+/// "1. Adantaaguttavaṇṇanā" in s0304a.att.xml (the sutta is simply called
+/// "Adantaagutta" in the source XML). These are caught by the numbered +
+/// `vaṇṇanā` check.
+///
+/// Known sutta commentary suffixes (matched regardless of numbering):
+/// - `"suttavaṇṇanā"` — single sutta commentary (e.g. "1. Sabbasuttavaṇṇanā")
+/// - `"suttādivaṇṇanā"` — grouped commentaries (e.g. "5-7. Paṭhamajanasuttādivaṇṇanā")
+/// - `"suttadvayavaṇṇanā"` — pair of suttas (e.g. "3-4. Saṃyojanasuttadvayavaṇṇanā")
+/// - `"suttavaṇṇṇanā"` — typo with triple ṇ in source XML (e.g. s0302t.tik.xml line 4025)
+pub fn is_sutta_subhead(text: &str, nikaya: &str, cst_file: &str) -> bool {
+    let is_commentary = cst_file.ends_with(".att.xml") || cst_file.ends_with(".tik.xml");
+
+    if is_commentary {
+        // Known sutta commentary suffixes (all nikayas)
+        let has_sutta_suffix = text.ends_with("suttavaṇṇanā")
+            || text.ends_with("suttādivaṇṇanā")
+            || text.ends_with("suttadvayavaṇṇanā")
+            || text.ends_with("suttavaṇṇṇanā"); // triple ṇ typo
+
+        // SN only: numbered subhead ending in vaṇṇanā — catches cases where the
+        // source XML omits "sutta" from the name (e.g. "1. Adantaaguttavaṇṇanā"
+        // in s0304a.att.xml). This is NOT safe for MN/AN where numbered vaṇṇanā
+        // subheads can be subsections within a sutta (e.g. "1. Desanāhāravaṇṇanā"
+        // in s0201t.tik.xml).
+        let is_numbered_vannana = nikaya == "samyutta"
+            && is_numbered_sutta_subhead(text)
+            && (text.ends_with("vaṇṇanā") || text.ends_with("vaṇṇṇanā"));
+
+        has_sutta_suffix || is_numbered_vannana
+    } else {
+        // In base text files, any numbered subhead is a sutta
+        is_numbered_sutta_subhead(text)
+    }
+}
+
 use std::collections::HashMap;
 
 // ============== FragmentBoundaryDetector ==============

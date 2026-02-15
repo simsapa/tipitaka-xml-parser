@@ -825,9 +825,50 @@ pub fn check_cst_sc_range_consistency(conn: &mut SqliteConnection, include_check
     }
 }
 
+/// Check if an sc_code exists in the titles HashMap, either as an exact match
+/// or by falling within a range key.
+///
+/// For example, sc_code "sn12.72" would match:
+/// - Exact key "sn12.72"
+/// - Range key "sn12.72-81" (because 72 falls within 72..=81)
+/// - Range key "sn12.65-72" (because 72 falls within 65..=72)
+pub fn sc_code_exists_in_titles(code: &str, titles: &HashMap<String, String>) -> bool {
+    // First try exact match
+    if titles.contains_key(code) {
+        return true;
+    }
+
+    // Parse the code into prefix and number, e.g. "sn12.72" -> ("sn12.", 72)
+    if let Some(period_pos) = code.rfind('.') {
+        let prefix = &code[..period_pos + 1];
+        let num_str = &code[period_pos + 1..];
+        if let Ok(num) = num_str.parse::<u32>() {
+            // Check all range keys that share the same prefix
+            for key in titles.keys() {
+                if !key.starts_with(prefix) {
+                    continue;
+                }
+                let suffix = &key[prefix.len()..];
+                // Check if this key is a range like "72-81"
+                if let Some(dash_pos) = suffix.find('-') {
+                    let start_str = &suffix[..dash_pos];
+                    let end_str = &suffix[dash_pos + 1..];
+                    if let (Ok(start), Ok(end)) = (start_str.parse::<u32>(), end_str.parse::<u32>()) {
+                        if num >= start && num <= end {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    false
+}
+
 /// Expand a range sc_code into individual codes
 /// e.g., "sn1.55-57" -> ["sn1.55", "sn1.56", "sn1.57"]
-fn expand_sc_code_range(sc_code: &str) -> Vec<String> {
+pub fn expand_sc_code_range(sc_code: &str) -> Vec<String> {
     // First remove any colon suffix
     let base = sc_code.split(':').next().unwrap_or(sc_code);
     
@@ -922,18 +963,18 @@ pub fn check_sc_code_not_in_arangodb(
             // Extract base sc_code (without colon suffix, e.g., "dn1" from "dn1:1.2")
             let base_code = sc_code.split(':').next().unwrap_or(&sc_code);
 
-            // Check if the base code exists in ArangoDB
-            if titles.contains_key(base_code) {
+            // Check if the base code exists in ArangoDB (exact or within a range)
+            if sc_code_exists_in_titles(base_code, titles) {
                 return None;
             }
 
             // Base code not found - check if it's a range and expand
             let expanded_codes = expand_sc_code_range(base_code);
-            
-            // Filter out codes that exist in ArangoDB
+
+            // Filter out codes that exist in ArangoDB (exact or within a range)
             let missing_codes: Vec<String> = expanded_codes
                 .into_iter()
-                .filter(|code| !titles.contains_key(code))
+                .filter(|code| !sc_code_exists_in_titles(code, titles))
                 .collect();
 
             if missing_codes.is_empty() {

@@ -26,7 +26,7 @@ use crate::parsers::helpers::{
     impl_xml_parser,
     FragmentBoundaryDetector,
     derive_cst_fields as derive_cst_fields_shared,
-    is_numbered_sutta_subhead,
+    is_sutta_subhead,
 };
 
 /// General XML parser implementation
@@ -530,20 +530,7 @@ pub fn parse_into_fragments(
 
                 // Check if this text is for a pending subhead (MN/SN style)
                 if let Some((subhead_pos, subhead_line, subhead_char)) = pending_subhead_check.take() {
-                    // Check if text starts with a numbered sutta marker (e.g., "1. ", "10. ", "2-11. ")
-                    let is_numbered = is_numbered_sutta_subhead(&text);
-
-                    // For commentary/sub-commentary files, also check if it ends with "suttavaṇṇanā"
-                    // to distinguish actual sutta commentaries from subsections
-                    let is_commentary = cst_file.ends_with(".att.xml") || cst_file.ends_with(".tik.xml");
-
-                    let is_sutta_commentary = if is_commentary {
-                        // In commentary files, only treat it as a sutta if it ends with "suttavaṇṇanā"
-                        text.ends_with("suttavaṇṇanā")
-                    } else {
-                        // In base text files, any numbered subhead is a sutta
-                        is_numbered
-                    };
+                    let is_sutta_commentary = is_sutta_subhead(&text, &nikaya_structure.nikaya, cst_file);
 
                     if is_sutta_commentary {
                         // This is a sutta boundary!

@@ -180,26 +180,26 @@ fn test_s0303t_tik_range_cst_code_propagation() {
         true,  // Enable populate_sc_fields
     ).expect("Failed to parse fragments");
 
-    // Find frag_idx 95 (the first fragment of "1-10. Cakkhusuttādivaṇṇanā")
-    let frag_95 = fragments.iter().find(|f| f.frag_idx == 95);
-    assert!(frag_95.is_some(), "Should find frag_idx 95");
-    let frag_95 = frag_95.unwrap();
-    
-    println!("frag_idx 95:");
-    println!("  cst_code: {:?}", frag_95.cst_code);
-    println!("  sc_code: {:?}", frag_95.sc_code);
-    
+    // Find the fragment containing "1-10. Cakkhusuttādivaṇṇanā"
+    let cakkhu_frag = fragments.iter().find(|f| f.content_xml.contains("Cakkhusuttādivaṇṇanā"));
+    assert!(cakkhu_frag.is_some(), "Should find fragment containing Cakkhusuttādivaṇṇanā");
+    let cakkhu_frag = cakkhu_frag.unwrap();
+
+    println!("Cakkhusuttādivaṇṇanā fragment (frag_idx {}):", cakkhu_frag.frag_idx);
+    println!("  cst_code: {:?}", cakkhu_frag.cst_code);
+    println!("  sc_code: {:?}", cakkhu_frag.sc_code);
+
     // Verify cst_code is correctly parsed as a range
-    assert_eq!(frag_95.cst_code, Some("sn3.4.1.1-10".to_string()), 
-        "frag_idx 95 should have cst_code sn3.4.1.1-10");
-    
+    assert_eq!(cakkhu_frag.cst_code, Some("sn3.4.1.1-10".to_string()),
+        "Cakkhusuttādivaṇṇanā fragment should have cst_code sn3.4.1.1-10");
+
     // Verify sc_code is in range format (sn25.1-10)
     // This requires pali_titles from ArangoDB to be available
-    if frag_95.sc_code.is_none() {
+    if cakkhu_frag.sc_code.is_none() {
         println!("NOTE: sc_code is None because ArangoDB pali_titles not available in test");
     } else {
-        let sc_code = frag_95.sc_code.as_ref().unwrap();
-        assert!(sc_code.contains('-'), 
-            "frag_idx 95 should have sc_code with range (e.g., sn25.1-10), got: {}", sc_code);
+        let sc_code = cakkhu_frag.sc_code.as_ref().unwrap();
+        assert!(sc_code.contains('-'),
+            "Cakkhusuttādivaṇṇanā fragment should have sc_code with range (e.g., sn25.1-10), got: {}", sc_code);
     }
 }

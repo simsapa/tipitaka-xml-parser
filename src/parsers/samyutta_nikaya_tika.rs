@@ -16,7 +16,7 @@ use crate::parsers::helpers::{
     impl_xml_parser,
     FragmentBoundaryDetector,
     derive_cst_fields as derive_cst_fields_shared,
-    is_numbered_sutta_subhead,
+    is_sutta_subhead,
 };
 
 pub struct SamyuttaNikayaTika;
@@ -596,28 +596,7 @@ pub fn parse_into_fragments(
 
                 // Check if this text is for a pending subhead (MN/SN style)
                 if let Some((subhead_pos, subhead_line, subhead_char)) = pending_subhead_check.take() {
-                    // Check if text starts with a numbered sutta marker (e.g., "1. ", "10. ", "2-11. ")
-                    let is_numbered = is_numbered_sutta_subhead(&text);
-
-                    // For commentary/sub-commentary files, also check if it ends with "suttavaṇṇanā"
-                    // or "suttādivaṇṇanā" (used for grouped commentaries like "5-7. Paṭhamajanasuttādivaṇṇanā")
-                    // to distinguish actual sutta commentaries from subsections
-                    let is_commentary = cst_file.ends_with(".att.xml") || cst_file.ends_with(".tik.xml");
-
-                    let is_sutta_commentary = if is_commentary {
-                        // In commentary files, only treat it as a sutta if it ends with a known
-                        // sutta commentary suffix. Variants:
-                        // - "suttavaṇṇanā" (single sutta commentary)
-                        // - "suttādivaṇṇanā" (grouped commentaries, e.g. "5-7. Paṭhamajanasuttādivaṇṇanā")
-                        // - "suttadvayavaṇṇanā" (pair of suttas, e.g. "3-4. Saṃyojanasuttadvayavaṇṇanā")
-                        // - "suttavaṇṇṇanā" (typo with triple ṇ in source XML, e.g. s0302t.tik.xml line 4025)
-                        text.ends_with("suttavaṇṇanā") || text.ends_with("suttādivaṇṇanā")
-                            || text.ends_with("suttadvayavaṇṇanā")
-                            || text.ends_with("suttavaṇṇṇanā")
-                    } else {
-                        // In base text files, any numbered subhead is a sutta
-                        is_numbered
-                    };
+                    let is_sutta_commentary = is_sutta_subhead(&text, &nikaya_structure.nikaya, cst_file);
 
                     if is_sutta_commentary {
                         // This is a sutta boundary!
