@@ -1198,6 +1198,20 @@ function updateReparseButtonsState() {
 
 // Start regeneration process
 async function startRegeneration(useReferenceDb) {
+    // Check ArangoDB connection status before starting
+    if (!window.arangoConnected) {
+        const proceed = confirm(
+            "WARNING: ArangoDB connection is not available.\n\n" +
+            "Without ArangoDB, sc_sutta titles will NOT be populated for fragments " +
+            "with sc_code values. The regeneration will still work, but some data " +
+            "will be missing.\n\n" +
+            "Do you want to continue anyway?"
+        );
+        if (!proceed) {
+            return;
+        }
+    }
+
     // Set operation in progress and disable buttons
     isOperationInProgress = true;
     updateReparseButtonsState();
@@ -1263,6 +1277,20 @@ async function startRegeneration(useReferenceDb) {
 
 // Reparse a single file using current DB as reference
 async function reparseFile(cstFile) {
+    // Check ArangoDB connection status before starting
+    if (!window.arangoConnected) {
+        const proceed = confirm(
+            "WARNING: ArangoDB connection is not available.\n\n" +
+            "Without ArangoDB, sc_sutta titles will NOT be populated for fragments " +
+            "with sc_code values. The reparse will still work, but some data " +
+            "will be missing.\n\n" +
+            "Do you want to continue anyway?"
+        );
+        if (!proceed) {
+            return;
+        }
+    }
+
     // Show confirmation dialog
     if (!confirm(`Reparse file "${cstFile}"?\n\nThis will re-parse the XML file using the current database as reference, preserving checked fragment overrides and review status.`)) {
         return;

@@ -591,6 +591,7 @@ fn main() {
             use tipitaka_xml_parser::web;
             use tipitaka_xml_parser::regenerate::{RegenerateConfig, regenerate_fragments_db};
             use tipitaka_xml_parser::logger;
+            use std::io::{self, Write};
 
             // use_reference_db is true by default, unless --fresh is specified
             let use_reference_db = !fresh;
@@ -611,17 +612,49 @@ fn main() {
                 // Generate default paths
                 web::generate_default_paths(&mut settings);
 
-                // Try to load Pali titles from ArangoDB
+                // Check ArangoDB connection status and try to load Pali titles
                 let pali_titles = match tokio::runtime::Runtime::new() {
                     Ok(runtime) => {
-                        match runtime.block_on(async { web::arangodb::get_pali_titles().await }) {
-                            Ok(titles) => {
-                                logger::info(&format!("Loaded {} Pali titles from ArangoDB", titles.len()));
-                                Some(titles)
+                        // First check connection status
+                        let (connected, error) = runtime.block_on(async { web::arangodb::check_connection_status().await });
+
+                        if !connected {
+                            // ArangoDB not available - warn user and ask for confirmation
+                            println!();
+                            println!("WARNING: ArangoDB connection is not available.");
+                            if let Some(err) = error {
+                                println!("  Error: {}", err);
                             }
-                            Err(e) => {
-                                logger::warn(&format!("Failed to load Pali titles from ArangoDB: {}", e));
-                                None
+                            println!();
+                            println!("Without ArangoDB, sc_sutta titles will NOT be populated for fragments");
+                            println!("with sc_code values. The regeneration will still work, but some data");
+                            println!("will be missing.");
+                            println!();
+                            print!("Do you want to continue anyway? [y/N]: ");
+                            io::stdout().flush().map_err(|e| format!("Failed to flush stdout: {}", e))?;
+
+                            let mut input = String::new();
+                            io::stdin().read_line(&mut input)
+                                .map_err(|e| format!("Failed to read input: {}", e))?;
+
+                            let input = input.trim().to_lowercase();
+                            if input != "y" && input != "yes" {
+                                println!("Regeneration cancelled.");
+                                return Err("Regeneration cancelled by user".to_string());
+                            }
+                            println!();
+                            None
+                        } else {
+                            // ArangoDB is available - fetch Pali titles
+                            match runtime.block_on(async { web::arangodb::get_pali_titles().await }) {
+                                Ok(titles) => {
+                                    logger::info(&format!("Loaded {} Pali titles from ArangoDB", titles.len()));
+                                    Some(titles)
+                                }
+                                Err(e) => {
+                                    logger::warn(&format!("Failed to load Pali titles from ArangoDB: {}", e));
+                                    None
+                                }
                             }
                         }
                     }
