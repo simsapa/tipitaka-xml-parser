@@ -732,6 +732,7 @@ pub fn propagate_sc_codes_from_previous(
     for i in 1..fragments.len() {
         let current_cst_code = fragments[i].cst_code.clone();
         let previous_sc_code = fragments[i - 1].sc_code.clone();
+        let previous_cst_code = fragments[i - 1].cst_code.clone();
 
         if fragments[i].sc_code.is_some() {
             continue;
@@ -747,7 +748,7 @@ pub fn propagate_sc_codes_from_previous(
             None => continue,
         };
 
-        if let Some(derived_sc) = derive_sc_code_from_previous(&current_cst_code, &previous_sc_code) {
+        if let Some(derived_sc) = derive_sc_code_from_previous(&current_cst_code, &previous_sc_code, previous_cst_code.as_deref()) {
             let is_range = is_cst_code_range(&current_cst_code);
 
             // Check if cst_code is a range - if so, convert derived sc_code to range
@@ -805,7 +806,7 @@ pub fn propagate_sc_codes_from_previous(
 /// - Only sutta number incremented (sn15.20 → sn15.21)
 /// - New group started (sn15.20 → sn16.1)
 /// - Handles range sc_codes (e.g., sn12.93-103)
-fn derive_sc_code_from_previous(cst_code: &str, previous_sc_code: &str) -> Option<String> {
+fn derive_sc_code_from_previous(cst_code: &str, previous_sc_code: &str, previous_cst_code: Option<&str>) -> Option<String> {
     // Extract base cst_code and range end (e.g., "sn3.8.1.11-20" -> ("sn3.8.1.11", Some(20)))
     let (cst_code_base, range_end) = match parse_cst_code_range(cst_code) {
         Some((base, end)) => (base.to_string(), Some(end)),
@@ -822,31 +823,69 @@ fn derive_sc_code_from_previous(cst_code: &str, previous_sc_code: &str) -> Optio
     let cst_samyutta: i32 = cst_parts[1].parse().ok()?;
     let cst_sutta: i32 = cst_parts[3].parse().ok()?;
 
+    // Extract previous cst_samyutta if available
+    let prev_cst_samyutta = previous_cst_code.and_then(|prev_cst| {
+        let prev_base = match parse_cst_code_range(prev_cst) {
+            Some((base, _)) => base.to_string(),
+            None => prev_cst.to_string(),
+        };
+        let prev_parts: Vec<&str> = prev_base.split('.').collect();
+        if prev_parts.len() >= 4 {
+            prev_parts[1].parse::<i32>().ok()
+        } else {
+            None
+        }
+    });
+
     // First try to parse as a regular sc_code
     if let Some(prev_components) = parse_sc_code(previous_sc_code) {
-        return derive_sc_code_with_components(cst_code, cst_sutta, cst_samyutta, &prev_components, range_end);
+        return derive_sc_code_with_components(cst_code, cst_sutta, cst_samyutta, &prev_components, range_end, prev_cst_samyutta);
     }
 
     // If regular parse fails, try to handle range sc_code (e.g., "sn12.93-103")
     if let Some(range_components) = parse_range_sc_code(previous_sc_code) {
-        return derive_sc_code_with_components(cst_code, cst_sutta, cst_samyutta, &range_components, range_end);
+        return derive_sc_code_with_components(cst_code, cst_sutta, cst_samyutta, &range_components, range_end, prev_cst_samyutta);
     }
 
     None
 }
 
 /// Derive sc_code using parsed components
-fn derive_sc_code_with_components(_cst_code: &str, cst_sutta: i32, _cst_samyutta: i32, prev_components: &ScCodeComponents, range_end: Option<i32>) -> Option<String> {
+///
+/// `prev_cst_samyutta` is the CST samyutta number from the previous fragment's cst_code.
+/// When available, it provides a reliable way to detect samyutta boundaries
+/// (comparing CST samyutta numbers) instead of relying solely on sutta number heuristics.
+fn derive_sc_code_with_components(_cst_code: &str, cst_sutta: i32, cst_samyutta: i32, prev_components: &ScCodeComponents, range_end: Option<i32>, prev_cst_samyutta: Option<i32>) -> Option<String> {
     match prev_components.prefix.as_str() {
         "sn" => {
             let prev_samyutta = prev_components.samyutta?;
             let prev_sutta = prev_components.sutta?;
 
-            // If cst_sutta is 1 and previous sutta was > 1 (or we have a range),
-            // it means a new samyutta started in cst_code
+            // If we have CST samyutta info from both fragments, use it to detect
+            // actual samyutta boundaries. This is more reliable than sutta number
+            // heuristics, especially when the previous SC code is a range (e.g.,
+            // sn39.1-15) where the range end can confuse the sutta comparison.
+            if let Some(prev_cst_sam) = prev_cst_samyutta {
+                if prev_cst_sam == cst_samyutta {
+                    // Same CST samyutta - continue incrementing sutta
+                    let new_sutta = prev_sutta + 1;
+                    if let Some(end) = range_end {
+                        return Some(format!("sn{}.{}-{}", prev_samyutta, new_sutta, new_sutta + end - cst_sutta));
+                    }
+                    return Some(format!("sn{}.{}", prev_samyutta, new_sutta));
+                } else {
+                    // CST samyutta changed - new SC samyutta, always start at sutta 1.
+                    // The CST sutta number doesn't correspond to the SC sutta number
+                    // at samyutta boundaries (e.g., tika sn3.5.1.5 → sn26.1, not sn26.5).
+                    if let Some(end) = range_end {
+                        return Some(format!("sn{}.{}-{}", prev_samyutta + 1, 1, end));
+                    }
+                    return Some(format!("sn{}.1", prev_samyutta + 1));
+                }
+            }
+
+            // Fallback: original heuristic when no CST samyutta info available
             if cst_sutta == 1 && prev_sutta > 0 {
-                // Increment the sc samyutta by 1 for the new cst samyutta
-                // If there's a range end, include it
                 if let Some(end) = range_end {
                     return Some(format!("sn{}.{}-{}", prev_samyutta + 1, cst_sutta, end));
                 }
@@ -854,13 +893,11 @@ fn derive_sc_code_with_components(_cst_code: &str, cst_sutta: i32, _cst_samyutta
             }
 
             if cst_sutta == prev_sutta + 1 {
-                // If there's a range end, include it
                 if let Some(end) = range_end {
                     return Some(format!("sn{}.{}-{}", prev_samyutta, cst_sutta, end));
                 }
                 Some(format!("sn{}.{}", prev_samyutta, cst_sutta))
             } else if cst_sutta == 1 || cst_sutta < prev_sutta {
-                // If there's a range end, include it
                 if let Some(end) = range_end {
                     return Some(format!("sn{}.{}-{}", prev_samyutta + 1, 1, end));
                 }
@@ -1903,24 +1940,59 @@ mod tests {
         // Should derive to sn30.1 (increment samyutta by 1)
 
         // From range sc_code sn29.11-20 to cst_code sn3.10.1.1 should give sn30.1
-        let result = derive_sc_code_from_previous("sn3.10.1.1", "sn29.11-20");
+        // (prev cst samyutta was 9, now 10 → new samyutta)
+        let result = derive_sc_code_from_previous("sn3.10.1.1", "sn29.11-20", Some("sn3.9.1.5"));
         assert!(result.is_some(), "Should derive sc_code for new samyutta");
         assert_eq!(result.unwrap(), "sn30.1");
 
         // From range sc_code sn29.21-50 to cst_code sn3.10.1.1 should give sn30.1
-        let result = derive_sc_code_from_previous("sn3.10.1.1", "sn29.21-50");
+        let result = derive_sc_code_from_previous("sn3.10.1.1", "sn29.21-50", Some("sn3.9.1.5"));
         assert!(result.is_some(), "Should derive sc_code for new samyutta");
         assert_eq!(result.unwrap(), "sn30.1");
 
         // From range sc_code sn30.17-46 to cst_code sn3.10.1.1 should give sn31.1
-        let result = derive_sc_code_from_previous("sn3.10.1.1", "sn30.17-46");
+        // (prev cst samyutta was 9, now 10 → new samyutta; but prev SC samyutta is 30)
+        let result = derive_sc_code_from_previous("sn3.10.1.1", "sn30.17-46", Some("sn3.9.1.5"));
         assert!(result.is_some(), "Should derive sc_code for new samyutta");
         assert_eq!(result.unwrap(), "sn31.1");
 
         // From sn30.1 to sn3.10.1.2 should give sn30.2 (same samyutta, increment sutta)
-        let result = derive_sc_code_from_previous("sn3.10.1.2", "sn30.1");
+        let result = derive_sc_code_from_previous("sn3.10.1.2", "sn30.1", Some("sn3.10.1.1"));
         assert!(result.is_some(), "Should derive sc_code for same samyutta");
         assert_eq!(result.unwrap(), "sn30.2");
+    }
+
+    #[test]
+    fn test_derive_sc_code_from_previous_same_samyutta_with_range() {
+        // Bug fix: sn4.5.1.2 after sn39.1-15 should give sn39.16, not sn40.1
+        // because CST samyutta is still 5 (same as previous sn4.5.1.1)
+        let result = derive_sc_code_from_previous("sn4.5.1.2", "sn39.1-15", Some("sn4.5.1.1"));
+        assert!(result.is_some(), "Should derive sc_code for same samyutta after range");
+        assert_eq!(result.unwrap(), "sn39.16", "Should continue in sn39, not jump to sn40");
+
+        // And then sn4.6.1.1 after sn39.16 should give sn40.1
+        // because CST samyutta changed from 5 to 6
+        let result = derive_sc_code_from_previous("sn4.6.1.1", "sn39.16", Some("sn4.5.1.2"));
+        assert!(result.is_some(), "Should derive sc_code for new samyutta");
+        assert_eq!(result.unwrap(), "sn40.1", "Should start new samyutta sn40");
+    }
+
+    #[test]
+    fn test_derive_sc_code_from_previous_no_prev_cst_code() {
+        // Without previous cst_code, should fall back to original heuristic
+        let result = derive_sc_code_from_previous("sn3.10.1.1", "sn29.11-20", None);
+        assert!(result.is_some(), "Should derive sc_code with fallback heuristic");
+        assert_eq!(result.unwrap(), "sn30.1");
+    }
+
+    #[test]
+    fn test_derive_sc_code_from_previous_tika_new_samyutta_non_one_sutta() {
+        // Tika: sn3.5.1.5 after sn25.1-10 (prev cst samyutta 4 → 5)
+        // CST samyutta changed, so new SC samyutta. SC sutta should always be 1,
+        // even though CST sutta is 5.
+        let result = derive_sc_code_from_previous("sn3.5.1.5", "sn25.1-10", Some("sn3.4.1.1-10"));
+        assert!(result.is_some(), "Should derive sc_code for tika new samyutta");
+        assert_eq!(result.unwrap(), "sn26.1", "New samyutta should start at sutta 1, not cst_sutta");
     }
 
     #[test]
