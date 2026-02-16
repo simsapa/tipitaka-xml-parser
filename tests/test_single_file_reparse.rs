@@ -121,7 +121,6 @@ fn test_reparse_preserves_correction_overrides() {
 
     // Re-parse with checked overrides
     let overrides = ParserOverrides {
-        adjustments: None,
         correction_overrides: Some(correction_overrides),
         pali_titles: None,
     };
@@ -247,7 +246,6 @@ fn test_reparse_restores_all_review_statuses() {
 
     // Re-parse and export
     let overrides = ParserOverrides {
-        adjustments: None,
         correction_overrides: Some(correction_overrides),
         pali_titles: None,
     };

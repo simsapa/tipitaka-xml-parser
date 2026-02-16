@@ -19,7 +19,7 @@
 use std::fs;
 use tipitaka_xml_parser::{
     nikaya_detector::detect_nikaya_structure,
-    parsers::samyutta_nikaya_atthakatha::parse_into_fragments,
+    parsers::samyutta_nikaya_commentary::parse_into_fragments,
     types::ParserOverrides,
 };
 

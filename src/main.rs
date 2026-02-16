@@ -17,24 +17,10 @@ fn parse_tipitaka_xml(
     reference_fragments_db: Option<&Path>,
     dry_run: bool,
 ) -> Result<(), String> {
-    use tipitaka_xml_parser::{
-        TipitakaImporter,
-        load_fragment_adjustments,
-    };
+    use tipitaka_xml_parser::TipitakaImporter;
     use tipitaka_xml_parser::types::ParserOverrides;
     use tipitaka_xml_parser::fragment_exporter::extract_all_correction_overrides;
     use std::fs;
-
-    // Load fragment adjustments from embedded TSV
-    let adjustments = match load_fragment_adjustments() {
-        Ok(adj) => {
-            logger::info(&format!("Loaded {} fragment adjustments", adj.len()));
-            Some(adj)
-        }
-        Err(e) => {
-            return Err(format!("Failed to load fragment adjustments: {}", e));
-        }
-    };
 
     // Extract correction overrides from reference database if provided
     let correction_overrides = if let Some(ref_db_path) = reference_fragments_db {
@@ -57,10 +43,9 @@ fn parse_tipitaka_xml(
         None
     };
 
-    // Build ParserOverrides combining adjustments and correction overrides
+    // Build ParserOverrides
     // Note: pali_titles is None in CLI mode; could be enhanced to fetch from ArangoDB
     let overrides = ParserOverrides {
-        adjustments,
         correction_overrides,
         pali_titles: None,
     };

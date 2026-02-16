@@ -36,7 +36,7 @@ pub mod web;
 mod test_tsv_validation;
 
 // Re-export main types for convenience
-pub use types::{FragmentType, GroupType, GroupLevel, XmlFragment, FragmentAdjustment, FragmentKey, FragmentAdjustments, ParserError, load_fragment_adjustments};
+pub use types::{FragmentType, GroupType, GroupLevel, XmlFragment, FragmentKey, ParserError};
 pub use nikaya_structure::NikayaStructure;
 pub use nikaya_detector::detect_nikaya_structure;
 pub use xml_parser::parse_into_fragments;

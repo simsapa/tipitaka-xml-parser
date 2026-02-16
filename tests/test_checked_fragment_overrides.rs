@@ -1,16 +1,16 @@
 //! Integration tests for CorrectionFragmentOverrides
 //!
-//! Tests that CorrectionFragmentOverrides take precedence over FragmentAdjustments
+//! Tests that CorrectionFragmentOverrides work correctly
 //! and that SC code parsing and propagation work correctly.
 
 use tipitaka_xml_parser::nikaya_detector::detect_nikaya_structure;
 use tipitaka_xml_parser::parse_into_fragments;
 use tipitaka_xml_parser::types::{
-    CorrectionFragmentOverride, CorrectionFragmentOverrides, FragmentAdjustment, FragmentAdjustments,
+    CorrectionFragmentOverride, CorrectionFragmentOverrides,
     FragmentKey, FragmentType, ParserOverrides,
 };
 
-/// Test that CorrectionFragmentOverrides take precedence over FragmentAdjustments
+/// Test that CorrectionFragmentOverrides are applied correctly
 #[test]
 fn test_correction_overrides_precedence() {
     // Create a simple XML sample
@@ -68,7 +68,6 @@ fn test_correction_overrides_precedence() {
     );
 
     let overrides = ParserOverrides {
-        adjustments: None,
         correction_overrides: Some(correction_overrides),
         pali_titles: None,
     };
@@ -309,7 +308,6 @@ fn test_boundary_override_from_checked_fragment() {
     );
 
     let overrides = ParserOverrides {
-        adjustments: None,
         correction_overrides: Some(correction_overrides),
         pali_titles: None,
     };
@@ -340,12 +338,9 @@ fn test_boundary_override_from_checked_fragment() {
     );
 }
 
-/// Test that checked boundary overrides take precedence over TSV adjustments
-///
-/// When both CorrectionFragmentOverrides and FragmentAdjustments have boundary values
-/// for the same fragment, the checked override should win.
+/// Test that correction boundary overrides are applied during parsing
 #[test]
-fn test_boundary_override_precedence() {
+fn test_boundary_override_applied() {
     let xml = r#"<?xml version="1.0"?>
 <TEI.2>
 <teiHeader></teiHeader>
@@ -380,36 +375,19 @@ fn test_boundary_override_precedence() {
 
     let original_end_line = sutta_frag.end_line;
 
-    // Create both adjustment and checked override with DIFFERENT values
-    // Both need to be valid (between start and original end)
     assert!(
         original_end_line > sutta_frag.start_line + 2,
         "Fragment must span enough lines for this test"
     );
 
-    // Adjustment sets end 2 lines before original, checked sets it 1 line before original
-    // Checked should win (closer to original end)
-    let adjustment_end_line = original_end_line - 2;
     let checked_end_line = original_end_line - 1;
 
-    // Create FragmentAdjustments (TSV)
-    let mut adjustments = FragmentAdjustments::new();
+    // Create CorrectionFragmentOverrides
+    let mut correction_overrides = CorrectionFragmentOverrides::new();
     let key = FragmentKey {
         cst_file: "test.xml".to_string(),
         frag_idx: sutta_frag.frag_idx,
     };
-    adjustments.insert(
-        key.clone(),
-        FragmentAdjustment {
-            cst_file: "test.xml".to_string(),
-            frag_idx: sutta_frag.frag_idx,
-            end_line: Some(adjustment_end_line),
-            end_char: Some(0),
-        },
-    );
-
-    // Create CorrectionFragmentOverrides
-    let mut correction_overrides = CorrectionFragmentOverrides::new();
     correction_overrides.insert(
         key,
         CorrectionFragmentOverride {
@@ -428,28 +406,23 @@ fn test_boundary_override_precedence() {
     );
 
     let overrides = ParserOverrides {
-        adjustments: Some(adjustments),
         correction_overrides: Some(correction_overrides),
         pali_titles: None,
     };
 
-    let fragments_with_both =
+    let fragments_with_override =
         parse_into_fragments(xml, &structure, "test.xml", &overrides, false).unwrap();
 
     // Find the overridden fragment
-    let overridden_frag = fragments_with_both
+    let overridden_frag = fragments_with_override
         .iter()
         .find(|f| f.frag_idx == sutta_frag.frag_idx)
         .expect("Should find the same fragment");
 
-    // The checked override value should win (not the adjustment value)
+    // The correction override value should be used
     assert_eq!(
         overridden_frag.end_line, checked_end_line,
-        "Checked override should take precedence over TSV adjustment"
-    );
-    assert_ne!(
-        overridden_frag.end_line, adjustment_end_line,
-        "TSV adjustment value should NOT be used when checked override exists"
+        "Correction override should set the boundary"
     );
 }
 
@@ -537,7 +510,6 @@ fn test_header_fragment_boundary_continuity_with_override() {
     );
 
     let overrides = ParserOverrides {
-        adjustments: None,
         correction_overrides: Some(correction_overrides),
         pali_titles: None,
     };
@@ -669,7 +641,6 @@ fn test_boundary_override_content_extraction() {
     );
 
     let overrides = ParserOverrides {
-        adjustments: None,
         correction_overrides: Some(correction_overrides),
         pali_titles: None,
     };

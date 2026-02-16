@@ -918,7 +918,7 @@ async fn reparse_file(
     use crate::nikaya_detector::detect_nikaya_structure;
     use crate::xml_parser::parse_into_fragments;
     use crate::fragment_exporter::{export_fragments_to_db, extract_correction_overrides};
-    use crate::types::{load_fragment_adjustments, ParserOverrides};
+    use crate::types::ParserOverrides;
 
     let cst_file = &request.cst_file;
     let mut output = String::new();
@@ -1009,21 +1009,8 @@ async fn reparse_file(
     };
     output.push_str(&format!("  Extracted {} correction overrides (includes frag_review status)\n\n", correction_overrides.len()));
 
-    // Step 3: Load FragmentAdjustments from embedded TSV
-    output.push_str("Step 3: Loading fragment adjustments from embedded TSV...\n");
-    let adjustments = match load_fragment_adjustments() {
-        Ok(adj) => {
-            output.push_str(&format!("  Loaded {} adjustments\n\n", adj.len()));
-            Some(adj)
-        }
-        Err(e) => {
-            output.push_str(&format!("  Warning: Failed to load adjustments: {} (continuing without)\n\n", e));
-            None
-        }
-    };
-
-    // Step 4: Fetch Pali titles from ArangoDB (for sc_sutta population)
-    output.push_str("Step 4: Fetching Pali titles from ArangoDB...\n");
+    // Step 3: Fetch Pali titles from ArangoDB (for sc_sutta population)
+    output.push_str("Step 3: Fetching Pali titles from ArangoDB...\n");
     let pali_titles = match arangodb::get_pali_titles().await {
         Ok(titles) => {
             output.push_str(&format!("  Loaded {} Pali titles from ArangoDB\n\n", titles.len()));
@@ -1036,17 +1023,16 @@ async fn reparse_file(
         }
     };
 
-    // Step 5: Construct ParserOverrides
-    output.push_str("Step 5: Constructing parser overrides...\n");
+    // Step 4: Construct ParserOverrides
+    output.push_str("Step 4: Constructing parser overrides...\n");
     let overrides = ParserOverrides {
-        adjustments,
         correction_overrides: if correction_overrides.is_empty() { None } else { Some(correction_overrides) },
         pali_titles,
     };
     output.push_str("  ParserOverrides constructed\n\n");
 
-    // Step 6: Read and parse the XML file
-    output.push_str("Step 6: Reading and parsing XML file...\n");
+    // Step 5: Read and parse the XML file
+    output.push_str("Step 5: Reading and parsing XML file...\n");
     let xml_path = Path::new(&settings.xml_dir).join(cst_file);
 
     if !xml_path.exists() {

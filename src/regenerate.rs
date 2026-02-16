@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, Context};
 
 use crate::logger;
-use crate::types::{ParserError, ParserOverrides, load_fragment_adjustments};
+use crate::types::{ParserError, ParserOverrides};
 use crate::fragment_exporter::extract_all_correction_overrides;
 use crate::{
     TipitakaImporter,
@@ -224,12 +224,6 @@ pub fn parse_tipitaka_xml_files(
     reference_fragments_db: Option<&Path>,
     pali_titles: Option<std::collections::HashMap<String, String>>,
 ) -> Result<usize> {
-    // Load fragment adjustments from embedded TSV
-    let adjustments = load_fragment_adjustments()
-        .context("Failed to load fragment adjustments")?;
-
-    logger::info(&format!("Loaded {} fragment adjustments", adjustments.len()));
-
     // Extract correction overrides from reference database if provided
     let correction_overrides = if let Some(ref_db_path) = reference_fragments_db {
         match extract_all_correction_overrides(ref_db_path) {
@@ -250,7 +244,6 @@ pub fn parse_tipitaka_xml_files(
 
     // Build ParserOverrides using the provided pali_titles
     let overrides = ParserOverrides {
-        adjustments: Some(adjustments),
         correction_overrides,
         pali_titles,
     };

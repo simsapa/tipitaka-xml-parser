@@ -20,10 +20,7 @@ use std::path::{Path, PathBuf};
 use std::fs;
 use tempfile::TempDir;
 
-use tipitaka_xml_parser::{
-    TipitakaImporter,
-    load_fragment_adjustments,
-};
+use tipitaka_xml_parser::TipitakaImporter;
 use tipitaka_xml_parser::types::ParserOverrides;
 use tipitaka_xml_parser::fragment_exporter::extract_all_correction_overrides;
 use tipitaka_xml_parser::web::models::AppSettings;
@@ -67,12 +64,6 @@ fn setup_regeneration() -> (TempDir, PathBuf, TipitakaImporter, AppSettings) {
 
     eprintln!("Loaded {} correction overrides from reference database", correction_overrides.len());
 
-    // Load fragment adjustments from embedded TSV
-    let adjustments = load_fragment_adjustments()
-        .expect("Failed to load fragment adjustments");
-
-    eprintln!("Loaded {} fragment adjustments", adjustments.len());
-
     // Try to fetch Pali titles from ArangoDB (may fail if ArangoDB not running)
     let pali_titles = tokio::runtime::Runtime::new()
         .expect("Failed to create tokio runtime")
@@ -92,7 +83,6 @@ fn setup_regeneration() -> (TempDir, PathBuf, TipitakaImporter, AppSettings) {
 
     // Build ParserOverrides
     let overrides = ParserOverrides {
-        adjustments: Some(adjustments),
         correction_overrides: Some(correction_overrides),
         pali_titles,
     };

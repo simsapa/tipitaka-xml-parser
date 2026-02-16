@@ -33,7 +33,6 @@ impl SamyuttaNikayaCommentary {
 /// * `xml_content` - The complete XML file content
 /// * `nikaya_structure` - The structure configuration for this nikaya
 /// * `cst_file` - Name of the XML file being parsed
-/// * `adjustments` - Optional fragment adjustments to apply
 /// * `populate_sc_fields` - Whether to populate SC fields from embedded TSV
 ///
 /// # Returns
@@ -131,7 +130,7 @@ pub fn parse_into_fragments(
                     if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) =
                         (current_fragment_start, current_frag_type.as_ref()) {
 
-                        // Apply adjustments if any
+                        // Apply overrides if any
                         let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                             xml_content,
                             current_pos,
@@ -143,7 +142,6 @@ pub fn parse_into_fragments(
                             frag_start_line,
                             frag_start_char,
                             overrides.correction_overrides.as_ref(),
-                            overrides.adjustments.as_ref(),
                         )?;
 
                         // Use adjusted end position as next fragment's start to ensure continuous boundaries
@@ -233,7 +231,6 @@ pub fn parse_into_fragments(
                                             frag_start_line,
                                             frag_start_char,
                                             overrides.correction_overrides.as_ref(),
-                                            overrides.adjustments.as_ref(),
                                         )?;
 
                                         let content_xml = xml_content[frag_start_pos..end_pos].to_string();
@@ -302,7 +299,6 @@ pub fn parse_into_fragments(
                                             frag_start_line,
                                             frag_start_char,
                                             overrides.correction_overrides.as_ref(),
-                                            overrides.adjustments.as_ref(),
                                         )?;
 
                                         // Create content with adjusted end position
@@ -331,7 +327,7 @@ pub fn parse_into_fragments(
                                 }
 
                                         // Start new fragment at the adjusted end position of the previous fragment
-                                        // This ensures no gap in XML reconstruction when adjustments are used
+                                        // This ensures no gap in XML reconstruction when overrides are used
                                         current_fragment_start = Some((end_pos, end_line, end_char));
                                         current_frag_type = Some(FragmentType::Sutta);
                                         // Note: we'll update group_levels AFTER entering the new level
@@ -407,7 +403,6 @@ pub fn parse_into_fragments(
                                                 frag_start_line,
                                                 frag_start_char,
                                                 overrides.correction_overrides.as_ref(),
-                                                overrides.adjustments.as_ref(),
                                             )?;
 
                                             let content_xml = xml_content[frag_start_pos..end_pos].to_string();
@@ -527,7 +522,7 @@ pub fn parse_into_fragments(
                         if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) =
                             (current_fragment_start, current_frag_type.as_ref()) {
 
-                            // Apply adjustments if any
+                            // Apply overrides if any
                             let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                                 xml_content,
                                 close_pos,
@@ -539,7 +534,6 @@ pub fn parse_into_fragments(
                                 frag_start_line,
                                 frag_start_char,
                                 overrides.correction_overrides.as_ref(),
-                                overrides.adjustments.as_ref(),
                             )?;
 
                             let content_xml = xml_content[frag_start_pos..end_pos].to_string();
@@ -678,7 +672,7 @@ pub fn parse_into_fragments(
                             if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) =
                                 (current_fragment_start, current_frag_type.as_ref()) {
 
-                                // Apply adjustments if any
+                                // Apply overrides if any
                                 let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                                     xml_content,
                                     close_pos,
@@ -690,7 +684,6 @@ pub fn parse_into_fragments(
                                     frag_start_line,
                                     frag_start_char,
                                     overrides.correction_overrides.as_ref(),
-                                    overrides.adjustments.as_ref(),
                                 )?;
 
                                 let content_xml = xml_content[frag_start_pos..end_pos].to_string();
@@ -822,7 +815,7 @@ pub fn parse_into_fragments(
                     if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) =
                         (current_fragment_start, current_frag_type.as_ref()) {
 
-                        // Apply adjustments if any
+                        // Apply overrides if any
                         let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
                             xml_content,
                             event_start_pos,
@@ -834,7 +827,6 @@ pub fn parse_into_fragments(
                             frag_start_line,
                             frag_start_char,
                             overrides.correction_overrides.as_ref(),
-                            overrides.adjustments.as_ref(),
                         )?;
 
                         // Include everything from start up to the adjusted end position
@@ -888,7 +880,7 @@ pub fn parse_into_fragments(
     if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) =
         (current_fragment_start, current_frag_type) {
 
-        // Apply adjustments if any
+        // Apply overrides if any
         let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
             xml_content,
             xml_content.len(),
@@ -900,7 +892,6 @@ pub fn parse_into_fragments(
             frag_start_line,
             frag_start_char,
             overrides.correction_overrides.as_ref(),
-            overrides.adjustments.as_ref(),
         )?;
 
         let content_xml = xml_content[frag_start_pos..end_pos].to_string();

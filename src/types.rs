@@ -84,18 +84,6 @@ pub struct XmlFragment {
     pub group_levels: Vec<GroupLevel>,
 }
 
-/// Manual adjustment for a specific fragment
-#[derive(Debug, Clone)]
-pub struct FragmentAdjustment {
-    pub cst_file: String,
-    /// Fragment index (0-indexed)
-    pub frag_idx: usize,
-    /// Override end line (1-indexed)
-    pub end_line: Option<usize>,
-    /// Override end character position (0-indexed)
-    pub end_char: Option<usize>,
-}
-
 /// Key for looking up fragment adjustments
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FragmentKey {
@@ -103,14 +91,10 @@ pub struct FragmentKey {
     pub frag_idx: usize,
 }
 
-/// Container for fragment adjustments loaded from TSV
-pub type FragmentAdjustments = HashMap<FragmentKey, FragmentAdjustment>;
-
 /// Override data from a corrected fragment in the database.
 ///
-/// This type supersedes `FragmentAdjustment` by including SC field overrides
-/// in addition to boundary overrides. Covers both "checked" fragments (with
-/// user-verified corrections) and "moved" fragments (collapsed to zero-width).
+/// Covers both "checked" fragments (with user-verified corrections) and
+/// "moved" fragments (collapsed to zero-width).
 ///
 /// During parsing:
 /// - If `collapse` is true, the fragment is made zero-width (end = start)
@@ -119,8 +103,6 @@ pub type FragmentAdjustments = HashMap<FragmentKey, FragmentAdjustment>;
 /// - SC field overrides (`sc_code`, `sc_sutta`) are applied in post-processing
 /// - User-corrected metadata (`cst_code`, `cst_vagga`, `cst_sutta`, `cst_paranum`) are applied in post-processing
 /// - Review status (`frag_review`) is applied in post-processing
-///
-/// `CorrectionFragmentOverrides` take precedence over `FragmentAdjustments`.
 #[derive(Debug, Clone, Default)]
 pub struct CorrectionFragmentOverride {
     /// If true, collapse this fragment to zero-width (for "moved" fragments).
@@ -157,18 +139,8 @@ pub type CorrectionFragmentOverrides = HashMap<FragmentKey, CorrectionFragmentOv
 /// Combined override configuration for parsing.
 ///
 /// This struct bundles all override types to simplify function signatures.
-/// During parsing, overrides are applied in this priority order:
-/// 1. `correction_overrides` - User corrections from the database (highest priority)
-/// 2. `adjustments` - Legacy TSV-based boundary adjustments (fallback)
-///
-/// When both exist for the same `(cst_file, frag_idx)`:
-/// - Check `correction_overrides` first; if found, use it
-/// - Only fall back to `adjustments` if no correction override exists
 #[derive(Debug, Clone, Default)]
 pub struct ParserOverrides {
-    /// Legacy fragment adjustments loaded from embedded TSV.
-    /// Contains boundary overrides (`end_line`, `end_char`) only.
-    pub adjustments: Option<FragmentAdjustments>,
     /// Correction fragment overrides extracted from the database.
     /// Contains both boundary and SC field overrides, plus collapse flag for moved fragments.
     pub correction_overrides: Option<CorrectionFragmentOverrides>,
@@ -249,107 +221,3 @@ impl ParserError {
     }
 }
 
-use anyhow::{Context, Result};
-
-// NOTE: Should remain private to limit relying on the data. Provide public
-// functions to access data derived from tsv.
-static ADJUST_FRAGMENTS_TSV: &str = include_str!("../assets/adjust-fragments.tsv");
-
-/// Load fragment adjustments from the embedded TSV data
-///
-/// The TSV data should have a header line with at least these fields:
-/// - cst_file: Name of the XML file
-/// - frag_idx: Fragment index (0-indexed)
-/// - end_line: (Optional) Override end line number (1-indexed)
-/// - end_char: (Optional) Override end character position (0-indexed)
-///
-/// # Returns
-/// HashMap mapping (cst_file, frag_idx) to FragmentAdjustment
-pub fn load_fragment_adjustments() -> Result<FragmentAdjustments> {
-    let mut lines = ADJUST_FRAGMENTS_TSV.lines();
-    
-    // Read header line
-    let header = lines.next()
-        .ok_or_else(|| anyhow::anyhow!("TSV data is empty"))?;
-    
-    // Parse header to find column indices
-    let columns: Vec<&str> = header.split('\t').collect();
-    let cst_file_idx = columns.iter().position(|&c| c == "cst_file")
-        .ok_or_else(|| anyhow::anyhow!("Missing 'cst_file' column in TSV header"))?;
-    let frag_idx_col = columns.iter().position(|&c| c == "frag_idx")
-        .ok_or_else(|| anyhow::anyhow!("Missing 'frag_idx' column in TSV header"))?;
-    let end_line_idx = columns.iter().position(|&c| c == "end_line");
-    let end_char_idx = columns.iter().position(|&c| c == "end_char");
-    
-    let mut adjustments = FragmentAdjustments::new();
-    
-    // Parse data lines
-    for (line_num, line) in lines.enumerate() {
-        // Skip empty lines
-        if line.trim().is_empty() {
-            continue;
-        }
-        
-        let fields: Vec<&str> = line.split('\t').collect();
-        
-        // Extract cst_file
-        let cst_file = fields.get(cst_file_idx)
-            .ok_or_else(|| anyhow::anyhow!("Missing cst_file field on line {}", line_num + 2))?
-            .trim()
-            .to_string();
-        
-        // Extract frag_idx
-        let frag_idx_str = fields.get(frag_idx_col)
-            .ok_or_else(|| anyhow::anyhow!("Missing frag_idx field on line {}", line_num + 2))?
-            .trim();
-        let frag_idx: usize = frag_idx_str.parse()
-            .with_context(|| format!("Invalid frag_idx '{}' on line {}", frag_idx_str, line_num + 2))?;
-        
-        // Extract end_line if present
-        let end_line = if let Some(idx) = end_line_idx {
-            fields.get(idx)
-                .and_then(|s| {
-                    let trimmed = s.trim();
-                    if trimmed.is_empty() {
-                        None
-                    } else {
-                        trimmed.parse::<usize>().ok()
-                    }
-                })
-        } else {
-            None
-        };
-        
-        // Extract end_char if present
-        let end_char = if let Some(idx) = end_char_idx {
-            fields.get(idx)
-                .and_then(|s| {
-                    let trimmed = s.trim();
-                    if trimmed.is_empty() {
-                        None
-                    } else {
-                        trimmed.parse::<usize>().ok()
-                    }
-                })
-        } else {
-            None
-        };
-        
-        // Create adjustment
-        let adjustment = FragmentAdjustment {
-            cst_file: cst_file.clone(),
-            frag_idx,
-            end_line,
-            end_char,
-        };
-        
-        let key = FragmentKey {
-            cst_file,
-            frag_idx,
-        };
-        
-        adjustments.insert(key, adjustment);
-    }
-    
-    Ok(adjustments)
-}
