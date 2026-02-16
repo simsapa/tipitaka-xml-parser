@@ -1,4 +1,4 @@
-//! Saṃyutta Nikāya Aṭṭhakathā (commentary) XML fragment parser
+//! Saṃyutta Nikāya Aṭṭhakathā (commentary) and Ṭīkā (sub-commentary) XML fragment parser
 
 use anyhow::{Result, Context};
 use quick_xml::events::Event;
@@ -19,11 +19,11 @@ use crate::parsers::helpers::{
     is_sutta_subhead,
 };
 
-pub struct SamyuttaNikayaAtthakatha;
+pub struct SamyuttaNikayaCommentary;
 
-impl SamyuttaNikayaAtthakatha {
+impl SamyuttaNikayaCommentary {
     pub fn new() -> Self {
-        SamyuttaNikayaAtthakatha
+        SamyuttaNikayaCommentary
     }
 }
 
@@ -216,7 +216,7 @@ pub fn parse_into_fragments(
                             // If there's already a pending samyutta that was never consumed by a subhead,
                             // flush it now: close the current fragment at the OLD pending position, enter
                             // the old samyutta hierarchy, and start a new fragment. This handles samyuttas
-                            // that have no <p rend="subhead"> (e.g. sn3_5, sn3_6 in s0303a.att.xml).
+                            // that have no <p rend="subhead"> (e.g. grouped commentaries such as sn3_5, sn3_6 in s0303a.att.xml).
                             if let Some((old_pos, old_line, old_char)) = pending_samyutta_div_pos.take() {
                                 // Close current fragment at the old pending samyutta position
                                 if let (Some((frag_start_pos, frag_start_line, frag_start_char)), Some(frag_type)) =
@@ -657,9 +657,13 @@ pub fn parse_into_fragments(
                                         // Fragment started after vagga title, can't use it as boundary
                                         pending_vagga_title_pos = None;
                                         pending_vagga_title_info = None; // Also clear the title info
-                                        // Fall through to use subhead position
-                                        (subhead_pos, subhead_line, subhead_char,
-                                         subhead_pos, subhead_line, subhead_char)
+                                        // Fall through to check vagga div position
+                                        if let Some((div_pos, div_line, div_char)) = pending_vagga_div_pos.take() {
+                                            (div_pos, div_line, div_char, div_pos, div_line, div_char)
+                                        } else {
+                                            (subhead_pos, subhead_line, subhead_char,
+                                            subhead_pos, subhead_line, subhead_char)
+                                        }
                                     }
                                 } else if let Some((div_pos, div_line, div_char)) = pending_vagga_div_pos.take() {
                                     // Use the vagga <div> position
@@ -944,7 +948,7 @@ pub fn parse_into_fragments(
     Ok(fragments)
 }
 
-impl_xml_parser!(SamyuttaNikayaAtthakatha);
+impl_xml_parser!(SamyuttaNikayaCommentary);
 
 #[cfg(test)]
 mod tests {
