@@ -52,7 +52,7 @@ fn test_reparse_idempotent() {
 
     // Compare key fields of each fragment
     for (f1, f2) in fragments1.iter().zip(fragments2.iter()) {
-        assert_eq!(f1.frag_idx, f2.frag_idx, "frag_idx should match");
+        assert_eq!(f1.frag_idx_code, f2.frag_idx_code, "frag_idx_code should match");
         assert_eq!(f1.frag_type, f2.frag_type, "frag_type should match");
         assert_eq!(f1.nikaya, f2.nikaya, "nikaya should match");
         assert_eq!(f1.cst_code, f2.cst_code, "cst_code should match");
@@ -61,8 +61,8 @@ fn test_reparse_idempotent() {
         assert_eq!(
             f1.content_xml.len(),
             f2.content_xml.len(),
-            "content_xml length should match for frag_idx {}",
-            f1.frag_idx
+            "content_xml length should match for frag_idx_code {}",
+            f1.frag_idx_code
         );
     }
 }
@@ -103,7 +103,7 @@ fn test_reparse_preserves_correction_overrides() {
     diesel::update(
         xml_fragments::table
             .filter(xml_fragments::cst_file.eq(cst_file))
-            .filter(xml_fragments::frag_idx.eq(1)),
+            .filter(xml_fragments::frag_idx_code.eq("1.0")),
     )
     .set((
         xml_fragments::frag_review.eq("checked"),
@@ -140,7 +140,7 @@ fn test_reparse_preserves_correction_overrides() {
     let (sc_code, sc_sutta, frag_review): (Option<String>, Option<String>, Option<String>) =
         xml_fragments::table
             .filter(xml_fragments::cst_file.eq(cst_file))
-            .filter(xml_fragments::frag_idx.eq(1))
+            .filter(xml_fragments::frag_idx_code.eq("1.0"))
             .select((
                 xml_fragments::sc_code,
                 xml_fragments::sc_sutta,
@@ -196,31 +196,31 @@ fn test_reparse_restores_all_review_statuses() {
     // Mark multiple fragments with different review statuses
     let mut conn = SqliteConnection::establish(db_path.to_str().unwrap()).unwrap();
 
-    // Mark frag_idx 1 as "checked"
+    // Mark frag_idx_code "1.0" as "checked"
     diesel::update(
         xml_fragments::table
             .filter(xml_fragments::cst_file.eq(cst_file))
-            .filter(xml_fragments::frag_idx.eq(1)),
+            .filter(xml_fragments::frag_idx_code.eq("1.0")),
     )
     .set(xml_fragments::frag_review.eq("checked"))
     .execute(&mut conn)
     .unwrap();
 
-    // Mark frag_idx 2 as "in-progress"
+    // Mark frag_idx_code "2.0" as "in-progress"
     diesel::update(
         xml_fragments::table
             .filter(xml_fragments::cst_file.eq(cst_file))
-            .filter(xml_fragments::frag_idx.eq(2)),
+            .filter(xml_fragments::frag_idx_code.eq("2.0")),
     )
     .set(xml_fragments::frag_review.eq("in-progress"))
     .execute(&mut conn)
     .unwrap();
 
-    // Mark frag_idx 3 as "needs-review"
+    // Mark frag_idx_code "3.0" as "needs-review"
     diesel::update(
         xml_fragments::table
             .filter(xml_fragments::cst_file.eq(cst_file))
-            .filter(xml_fragments::frag_idx.eq(3)),
+            .filter(xml_fragments::frag_idx_code.eq("3.0")),
     )
     .set(xml_fragments::frag_review.eq("needs-review"))
     .execute(&mut conn)
@@ -232,15 +232,15 @@ fn test_reparse_restores_all_review_statuses() {
 
     assert_eq!(review_status.len(), 3, "Should have 3 review statuses");
     assert_eq!(
-        review_status.get(&1).map(|s| s.as_str()),
+        review_status.get("1.0").map(|s| s.as_str()),
         Some("checked")
     );
     assert_eq!(
-        review_status.get(&2).map(|s| s.as_str()),
+        review_status.get("2.0").map(|s| s.as_str()),
         Some("in-progress")
     );
     assert_eq!(
-        review_status.get(&3).map(|s| s.as_str()),
+        review_status.get("3.0").map(|s| s.as_str()),
         Some("needs-review")
     );
 
@@ -263,7 +263,7 @@ fn test_reparse_restores_all_review_statuses() {
 
     let frag1_review: Option<String> = xml_fragments::table
         .filter(xml_fragments::cst_file.eq(cst_file))
-        .filter(xml_fragments::frag_idx.eq(1))
+        .filter(xml_fragments::frag_idx_code.eq("1.0"))
         .select(xml_fragments::frag_review)
         .first(&mut conn)
         .unwrap();
@@ -271,7 +271,7 @@ fn test_reparse_restores_all_review_statuses() {
 
     let frag2_review: Option<String> = xml_fragments::table
         .filter(xml_fragments::cst_file.eq(cst_file))
-        .filter(xml_fragments::frag_idx.eq(2))
+        .filter(xml_fragments::frag_idx_code.eq("2.0"))
         .select(xml_fragments::frag_review)
         .first(&mut conn)
         .unwrap();
@@ -279,7 +279,7 @@ fn test_reparse_restores_all_review_statuses() {
 
     let frag3_review: Option<String> = xml_fragments::table
         .filter(xml_fragments::cst_file.eq(cst_file))
-        .filter(xml_fragments::frag_idx.eq(3))
+        .filter(xml_fragments::frag_idx_code.eq("3.0"))
         .select(xml_fragments::frag_review)
         .first(&mut conn)
         .unwrap();

@@ -5,9 +5,9 @@
 
 use anyhow::{Result, Context};
 use diesel::prelude::*;
-use diesel::sqlite::SqliteConnection;
 use std::path::Path;
 
+use crate::fragment_exporter::establish_connection_and_migrate;
 use crate::types::{XmlFragment, FragmentType, GroupLevel};
 use crate::fragments_models::XmlFragmentRecord;
 
@@ -23,8 +23,7 @@ pub fn reconstruct_xml_from_db(
     db_path: &Path,
     cst_file: &str,
 ) -> Result<String> {
-    let mut conn = SqliteConnection::establish(db_path.to_str().unwrap())
-        .context("Failed to connect to fragments database")?;
+    let mut conn = establish_connection_and_migrate(db_path)?;
     
     // Get nikaya name for this filename
     let _nikaya = get_nikaya_by_filename(&mut conn, cst_file)?;
@@ -89,7 +88,7 @@ fn get_fragments_for_filename(
             end_char: row.end_char as usize,
             group_levels,
             cst_file: row.cst_file,
-            frag_idx: row.frag_idx as usize,
+            frag_idx_code: row.frag_idx_code.clone(),
             frag_review: row.frag_review,
             cst_code: row.cst_code,
             cst_vagga: row.cst_vagga,

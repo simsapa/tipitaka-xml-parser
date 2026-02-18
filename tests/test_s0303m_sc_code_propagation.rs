@@ -53,7 +53,7 @@ fn test_s0303m_sc_code_propagation_sn9_to_sn10() {
     ).expect("Failed to parse fragments");
 
     // Find frag_idx 275 (last fragment of sn3.9 with range)
-    let frag_275 = fragments.iter().find(|f| f.frag_idx == 275);
+    let frag_275 = fragments.iter().find(|f| f.frag_idx_code == "275.0");
     assert!(frag_275.is_some(), "Should find frag_idx 275");
     let frag_275 = frag_275.unwrap();
     
@@ -68,7 +68,7 @@ fn test_s0303m_sc_code_propagation_sn9_to_sn10() {
         "frag_idx 275 should have sc_code sn30.17-46");
 
     // Find frag_idx 276 (first fragment of sn3.10 - new samyutta)
-    let frag_276 = fragments.iter().find(|f| f.frag_idx == 276);
+    let frag_276 = fragments.iter().find(|f| f.frag_idx_code == "276.0");
     assert!(frag_276.is_some(), "Should find frag_idx 276");
     let frag_276 = frag_276.unwrap();
     
@@ -86,7 +86,7 @@ fn test_s0303m_sc_code_propagation_sn9_to_sn10() {
         "frag_idx 276 should have sc_sutta");
 
     // Find frag_idx 277 (second fragment of sn3.10)
-    let frag_277 = fragments.iter().find(|f| f.frag_idx == 277);
+    let frag_277 = fragments.iter().find(|f| f.frag_idx_code == "277.0");
     assert!(frag_277.is_some(), "Should find frag_idx 277");
     let frag_277 = frag_277.unwrap();
     
@@ -127,7 +127,7 @@ fn test_s0303m_range_cst_code_to_sc_code() {
 
     // Find frag_idx 182 (the first fragment of the range "1-11. Mārādisuttaekādasakaṃ")
     // This is in vagga "3. Āyācanavaggo" of samyutta "2. Rādhasaṃyuttaṃ"
-    let frag_182 = fragments.iter().find(|f| f.frag_idx == 182);
+    let frag_182 = fragments.iter().find(|f| f.frag_idx_code == "182.0");
     assert!(frag_182.is_some(), "Should find frag_idx 182");
     let frag_182 = frag_182.unwrap();
     
@@ -185,7 +185,7 @@ fn test_s0303t_tik_range_cst_code_propagation() {
     assert!(cakkhu_frag.is_some(), "Should find fragment containing Cakkhusuttādivaṇṇanā");
     let cakkhu_frag = cakkhu_frag.unwrap();
 
-    println!("Cakkhusuttādivaṇṇanā fragment (frag_idx {}):", cakkhu_frag.frag_idx);
+    println!("Cakkhusuttādivaṇṇanā fragment (frag_idx_code {}):", cakkhu_frag.frag_idx_code);
     println!("  cst_code: {:?}", cakkhu_frag.cst_code);
     println!("  sc_code: {:?}", cakkhu_frag.sc_code);
 

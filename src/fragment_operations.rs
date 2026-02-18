@@ -32,7 +32,7 @@ pub enum Direction {
 /// # Arguments
 /// * `conn` - Database connection
 /// * `cst_file` - The XML file identifier
-/// * `current_idx` - The current fragment index
+/// * `current_frag_idx_code` - The current fragment's frag_idx_code (e.g., "21.0")
 /// * `direction` - Direction to search (Prev or Next)
 ///
 /// # Returns
@@ -42,43 +42,88 @@ pub enum Direction {
 pub fn find_target_fragment(
     conn: &mut SqliteConnection,
     cst_file: &str,
-    current_idx: i32,
+    current_frag_idx_code: &str,
     direction: Direction,
 ) -> Result<Option<XmlFragmentRecord>> {
-    let mut search_idx = match direction {
-        Direction::Prev => current_idx - 1,
-        Direction::Next => current_idx + 1,
+    // Load all fragments for this file and sort them by frag_idx_code
+    let all_fragments: Vec<XmlFragmentRecord> = xml_fragments::table
+        .filter(xml_fragments::cst_file.eq(cst_file))
+        .load(conn)
+        .context("Failed to load fragments for file")?;
+
+    // Sort by frag_idx_code using version-style comparison
+    let mut sorted_fragments = all_fragments;
+    sorted_fragments.sort_by(|a, b| compare_frag_idx_code(&a.frag_idx_code, &b.frag_idx_code));
+
+    // Find current fragment's position in sorted list
+    let current_pos = sorted_fragments
+        .iter()
+        .position(|f| f.frag_idx_code == current_frag_idx_code);
+
+    let current_pos = match current_pos {
+        Some(pos) => pos,
+        None => return Ok(None), // Current fragment not found
     };
-    
+
+    // Search in the specified direction
+    let mut search_pos = match direction {
+        Direction::Prev => {
+            if current_pos == 0 {
+                return Ok(None); // Already at boundary
+            }
+            current_pos - 1
+        }
+        Direction::Next => current_pos + 1,
+    };
+
     loop {
-        // Try to load fragment at search_idx
-        let fragment: Option<XmlFragmentRecord> = xml_fragments::table
-            .filter(xml_fragments::cst_file.eq(cst_file))
-            .filter(xml_fragments::frag_idx.eq(search_idx))
-            .first(conn)
-            .optional()
-            .context("Failed to query for target fragment")?;
-        
-        match fragment {
-            None => {
-                // No fragment at this index, we've reached the boundary
-                return Ok(None);
-            }
-            Some(frag) => {
-                // Check if this fragment is moved
-                if frag.frag_review.as_deref() == Some("moved") {
-                    // Skip this fragment and continue searching
-                    search_idx = match direction {
-                        Direction::Prev => search_idx - 1,
-                        Direction::Next => search_idx + 1,
-                    };
-                } else {
-                    // Found a non-moved fragment
-                    return Ok(Some(frag));
+        if search_pos >= sorted_fragments.len() {
+            return Ok(None); // Reached boundary
+        }
+
+        let frag = &sorted_fragments[search_pos];
+
+        // Check if this fragment is moved
+        if frag.frag_review.as_deref() == Some("moved") {
+            // Skip this fragment and continue searching
+            match direction {
+                Direction::Prev => {
+                    if search_pos == 0 {
+                        return Ok(None);
+                    }
+                    search_pos -= 1;
                 }
-            }
+                Direction::Next => {
+                    search_pos += 1;
+                }
+            };
+        } else {
+            // Found a non-moved fragment
+            return Ok(Some(frag.clone()));
         }
     }
+}
+
+/// Compare two frag_idx_code strings using version-style comparison
+/// e.g., "2.0" < "2.1" < "10.0" < "10.1"
+fn compare_frag_idx_code(a: &str, b: &str) -> std::cmp::Ordering {
+    parse_frag_idx_code(a).cmp(&parse_frag_idx_code(b))
+}
+
+/// Parse a frag_idx_code string into (major, minor) tuple
+/// e.g., "5.0" -> (5, 0), "10.3" -> (10, 3)
+pub fn parse_frag_idx_code(s: &str) -> (usize, usize) {
+    let parts: Vec<&str> = s.split('.').collect();
+    let major = parts.first().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let minor = parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(0);
+    (major, minor)
+}
+
+/// Increment the major version of a frag_idx_code string
+/// e.g., "5.0" -> "6.0", "10.3" -> "11.0"
+pub fn increment_frag_idx_code(s: &str) -> String {
+    let (major, _) = parse_frag_idx_code(s);
+    format!("{}.0", major + 1)
 }
 
 /// Move fragment content to an adjacent fragment
@@ -93,7 +138,7 @@ pub fn find_target_fragment(
 /// # Arguments
 /// * `conn` - Database connection
 /// * `cst_file` - The XML file identifier
-/// * `frag_idx` - The fragment index to move
+/// * `frag_idx_code` - The fragment index code to move (e.g., "21.0")
 /// * `direction` - Direction to move (Prev or Next)
 ///
 /// # Returns
@@ -102,19 +147,19 @@ pub fn find_target_fragment(
 pub fn move_fragment_content(
     conn: &mut SqliteConnection,
     cst_file: &str,
-    frag_idx: i32,
+    frag_idx_code: &str,
     direction: Direction,
 ) -> Result<(XmlFragmentRecord, XmlFragmentRecord)> {
     conn.transaction::<_, anyhow::Error, _>(|conn| {
         // Load the current fragment
         let current_fragment: XmlFragmentRecord = xml_fragments::table
             .filter(xml_fragments::cst_file.eq(cst_file))
-            .filter(xml_fragments::frag_idx.eq(frag_idx))
+            .filter(xml_fragments::frag_idx_code.eq(frag_idx_code))
             .first(conn)
             .context("Failed to load current fragment")?;
-        
+
         // Find the target fragment (skipping any moved fragments)
-        let target_fragment = find_target_fragment(conn, cst_file, frag_idx, direction)?
+        let target_fragment = find_target_fragment(conn, cst_file, frag_idx_code, direction)?
             .ok_or_else(|| anyhow!(
                 "Cannot move to {}: no valid target fragment found (boundary reached or all adjacent fragments are moved)",
                 match direction {

@@ -262,12 +262,12 @@ fn test_s0201m_first_sutta_fragment() {
         first_sutta_fragment.cst_sutta
     );
     
-    // Verify frag_idx
+    // Verify frag_idx_code
     assert_eq!(
-        first_sutta_fragment.frag_idx,
-        1,
-        "Fragment should have frag_idx 1, got: {}",
-        first_sutta_fragment.frag_idx
+        first_sutta_fragment.frag_idx_code,
+        "1.0",
+        "Fragment should have frag_idx_code '1.0', got: {}",
+        first_sutta_fragment.frag_idx_code
     );
 }
 
@@ -306,12 +306,12 @@ fn test_s0201a_att_vagga_zero_fragment() {
         intro_fragment.cst_code
     );
     
-    // Verify frag_idx
+    // Verify frag_idx_code
     assert_eq!(
-        intro_fragment.frag_idx,
-        1,
-        "Fragment should have frag_idx 1, got: {}",
-        intro_fragment.frag_idx
+        intro_fragment.frag_idx_code,
+        "1.0",
+        "Fragment should have frag_idx_code '1.0', got: {}",
+        intro_fragment.frag_idx_code
     );
     
     // Verify that fragment 2 has the correct cst_code for the first real sutta

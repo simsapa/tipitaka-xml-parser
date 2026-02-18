@@ -45,7 +45,7 @@ fn test_s0301a_att_samyutta_boundary() {
         .expect("Should find first sutta of samyutta 2 (sc_code sn2.1)");
 
     println!("First sutta of samyutta 2:");
-    println!("  frag_idx: {}", first_sutta_samyutta_2.frag_idx);
+    println!("  frag_idx_code: {}", first_sutta_samyutta_2.frag_idx_code);
     println!("  cst_code: {:?}", first_sutta_samyutta_2.cst_code);
     println!("  sc_code: {:?}", first_sutta_samyutta_2.sc_code);
     println!("  cst_vagga: {:?}", first_sutta_samyutta_2.cst_vagga);
@@ -77,7 +77,7 @@ fn test_s0301a_att_samyutta_boundary() {
                                     frag.content_xml.contains("rend=\"bodytext\"");
             assert!(has_sutta_content,
                 "Fragment {} with samyutta header should also contain sutta content.\n\
-                 Content:\n{}", frag.frag_idx, frag.content_xml);
+                 Content:\n{}", frag.frag_idx_code, frag.content_xml);
         }
     }
 }

@@ -145,9 +145,9 @@ fn test_each_sutta_fragment_has_at_most_one_sutta_marker() {
             let (count, matched) = count_sutta_markers(&frag.content_xml, nikaya, text_type, filename);
             if count > 1 {
                 let msg = format!(
-                    "FAIL: {} frag_idx={} has {} sutta markers (lines {}-{}):\n{}",
+                    "FAIL: {} frag_idx_code={} has {} sutta markers (lines {}-{}):\n{}",
                     filename,
-                    frag.frag_idx,
+                    frag.frag_idx_code,
                     count,
                     frag.start_line,
                     frag.end_line,

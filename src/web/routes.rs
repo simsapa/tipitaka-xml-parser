@@ -22,9 +22,9 @@ use crate::web::arangodb;
 use crate::web::validation;
 use crate::fragments_schema::xml_fragments;
 use crate::fragments_models::{
-    XmlFragmentRecord, UpdateFragmentMetadata, UpdateFragmentBoundary, UpdateFragmentIndex, NewXmlFragment
+    XmlFragmentRecord, UpdateFragmentMetadata, UpdateFragmentBoundary, UpdateFragmentIndexCode, NewXmlFragment
 };
-use crate::fragment_operations::{Direction, move_fragment_content};
+use crate::fragment_operations::{Direction, move_fragment_content, find_target_fragment, increment_frag_idx_code};
 
 /// Serve the main index.html page
 #[get("/")]
@@ -115,7 +115,7 @@ fn get_file_fragments(
     
     let results: Vec<XmlFragmentRecord> = xml_fragments::table
         .filter(xml_fragments::cst_file.eq(&filename))
-        .order_by(xml_fragments::frag_idx)
+        .order_by(xml_fragments::frag_idx_code)
         .load(&mut conn)
         .map_err(|e| format!("Query failed: {}", e))?;
     
@@ -123,7 +123,7 @@ fn get_file_fragments(
         .into_iter()
         .map(|r| FragmentListItem {
             id: r.id,
-            frag_idx: r.frag_idx,
+            frag_idx_code: r.frag_idx_code,
             frag_type: r.frag_type,
             frag_review: r.frag_review,
             cst_code: r.cst_code,
@@ -155,13 +155,13 @@ fn get_fragment_detail(
     let prev_fragment: Option<AdjacentFragment> = find_target_fragment(
         &mut conn,
         &current.cst_file,
-        current.frag_idx,
+        &current.frag_idx_code,
         Direction::Prev,
     )
         .map_err(|e| format!("Failed to find previous fragment: {}", e))?
         .map(|r| AdjacentFragment {
             id: r.id,
-            frag_idx: r.frag_idx,
+            frag_idx_code: r.frag_idx_code,
             frag_type: r.frag_type,
             content_xml: r.content_xml,
             cst_code: r.cst_code,
@@ -175,13 +175,13 @@ fn get_fragment_detail(
     let next_fragment: Option<AdjacentFragment> = find_target_fragment(
         &mut conn,
         &current.cst_file,
-        current.frag_idx,
+        &current.frag_idx_code,
         Direction::Next,
     )
         .map_err(|e| format!("Failed to find next fragment: {}", e))?
         .map(|r| AdjacentFragment {
             id: r.id,
-            frag_idx: r.frag_idx,
+            frag_idx_code: r.frag_idx_code,
             frag_type: r.frag_type,
             content_xml: r.content_xml,
             cst_code: r.cst_code,
@@ -194,7 +194,7 @@ fn get_fragment_detail(
     let detail = FragmentDetail {
         id: current.id,
         cst_file: current.cst_file,
-        frag_idx: current.frag_idx,
+        frag_idx_code: current.frag_idx_code,
         frag_type: current.frag_type,
         frag_review: current.frag_review,
         nikaya: current.nikaya,
@@ -250,7 +250,7 @@ fn update_fragment_metadata(
     
     let fragment_item = FragmentListItem {
         id: updated.id,
-        frag_idx: updated.frag_idx,
+        frag_idx_code: updated.frag_idx_code,
         frag_type: updated.frag_type,
         frag_review: updated.frag_review,
         cst_code: updated.cst_code,
@@ -278,20 +278,18 @@ fn adjust_fragment_boundary(
             .first(conn)?;
         
         // Determine which fragment to adjust (previous or next)
-        let (target_fragment, other_fragment): (XmlFragmentRecord, XmlFragmentRecord) = 
+        let (target_fragment, other_fragment): (XmlFragmentRecord, XmlFragmentRecord) =
             if request.direction == "prev" {
                 // Adjusting boundary with previous fragment
-                let prev: XmlFragmentRecord = xml_fragments::table
-                    .filter(xml_fragments::cst_file.eq(&current.cst_file))
-                    .filter(xml_fragments::frag_idx.eq(current.frag_idx - 1))
-                    .first(conn)?;
+                let prev = find_target_fragment(conn, &current.cst_file, &current.frag_idx_code, Direction::Prev)
+                    .map_err(|e| diesel::result::Error::QueryBuilderError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))))?
+                    .ok_or_else(|| diesel::result::Error::NotFound)?;
                 (prev, current)
             } else {
                 // Adjusting boundary with next fragment
-                let next: XmlFragmentRecord = xml_fragments::table
-                    .filter(xml_fragments::cst_file.eq(&current.cst_file))
-                    .filter(xml_fragments::frag_idx.eq(current.frag_idx + 1))
-                    .first(conn)?;
+                let next = find_target_fragment(conn, &current.cst_file, &current.frag_idx_code, Direction::Next)
+                    .map_err(|e| diesel::result::Error::QueryBuilderError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))))?
+                    .ok_or_else(|| diesel::result::Error::NotFound)?;
                 (current, next)
             };
         
@@ -457,12 +455,9 @@ fn delete_fragment(
         
         // Always try to merge with the PREVIOUS fragment first (if it exists)
         // This ensures that when we delete a fragment, its content goes to the one before it
-        let prev_fragment: Option<XmlFragmentRecord> = xml_fragments::table
-            .filter(xml_fragments::cst_file.eq(&fragment_to_delete.cst_file))
-            .filter(xml_fragments::frag_idx.eq(fragment_to_delete.frag_idx - 1))
-            .first(conn)
-            .optional()?;
-        
+        let prev_fragment = find_target_fragment(conn, &fragment_to_delete.cst_file, &fragment_to_delete.frag_idx_code, Direction::Prev)
+            .map_err(|e| diesel::result::Error::QueryBuilderError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))))?;
+
         if let Some(prev_frag) = prev_fragment {
             // Extend the previous fragment's end boundary to include the deleted fragment
             let merge_update = UpdateFragmentBoundary {
@@ -473,18 +468,15 @@ fn delete_fragment(
                 // Combine content: previous first, then deleted
                 content_xml: format!("{}\n{}", prev_frag.content_xml, fragment_to_delete.content_xml),
             };
-            
+
             diesel::update(xml_fragments::table.find(prev_frag.id))
                 .set(&merge_update)
                 .execute(conn)?;
         } else {
             // If no previous fragment, merge with the next fragment
-            let next_fragment: Option<XmlFragmentRecord> = xml_fragments::table
-                .filter(xml_fragments::cst_file.eq(&fragment_to_delete.cst_file))
-                .filter(xml_fragments::frag_idx.eq(fragment_to_delete.frag_idx + 1))
-                .first(conn)
-                .optional()?;
-            
+            let next_fragment = find_target_fragment(conn, &fragment_to_delete.cst_file, &fragment_to_delete.frag_idx_code, Direction::Next)
+                .map_err(|e| diesel::result::Error::QueryBuilderError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))))?;
+
             if let Some(next_frag) = next_fragment {
                 // Extend the next fragment's start boundary to include the deleted fragment
                 let merge_update = UpdateFragmentBoundary {
@@ -495,31 +487,19 @@ fn delete_fragment(
                     // Combine content: deleted first, then next
                     content_xml: format!("{}\n{}", fragment_to_delete.content_xml, next_frag.content_xml),
                 };
-                
+
                 diesel::update(xml_fragments::table.find(next_frag.id))
                     .set(&merge_update)
                     .execute(conn)?;
             }
         }
-        
+
         // Delete the fragment
         diesel::delete(xml_fragments::table.find(fragment_id))
             .execute(conn)?;
-        
-        // Update frag_idx for all subsequent fragments in the same file
-        let subsequent: Vec<XmlFragmentRecord> = xml_fragments::table
-            .filter(xml_fragments::cst_file.eq(&fragment_to_delete.cst_file))
-            .filter(xml_fragments::frag_idx.gt(fragment_to_delete.frag_idx))
-            .load(conn)?;
-        
-        for frag in subsequent {
-            let update = UpdateFragmentIndex {
-                frag_idx: frag.frag_idx - 1,
-            };
-            diesel::update(xml_fragments::table.find(frag.id))
-                .set(&update)
-                .execute(conn)?;
-        }
+
+        // Note: With frag_idx_code (string identifiers like "21.0"), we don't need to
+        // reindex subsequent fragments. The codes are stable identifiers.
         
         Ok(())
     }).map_err(|e| format!("Delete transaction failed: {}", e))?;
@@ -552,14 +532,14 @@ fn move_fragment(
     let (current_fragment, target_fragment) = move_fragment_content(
         &mut conn,
         &request.xml_file,
-        request.frag_idx,
+        &request.frag_idx_code,
         direction,
     ).map_err(|e| format!("Move operation failed: {}", e))?;
     
     // Map XmlFragmentRecord to FragmentListItem DTOs
     let current_item = FragmentListItem {
         id: current_fragment.id,
-        frag_idx: current_fragment.frag_idx,
+        frag_idx_code: current_fragment.frag_idx_code,
         frag_type: current_fragment.frag_type,
         frag_review: current_fragment.frag_review,
         cst_code: current_fragment.cst_code,
@@ -568,7 +548,7 @@ fn move_fragment(
     
     let target_item = FragmentListItem {
         id: target_fragment.id,
-        frag_idx: target_fragment.frag_idx,
+        frag_idx_code: target_fragment.frag_idx_code,
         frag_type: target_fragment.frag_type,
         frag_review: target_fragment.frag_review,
         cst_code: target_fragment.cst_code,
@@ -601,28 +581,31 @@ fn create_fragment(
         
         if direction == "prev" {
             // Create a new fragment BEFORE the current one
-            // 1. Increment frag_idx for current and all subsequent fragments
+            // Save original frag_idx_code before any modifications
+            let original_frag_idx_code = current.frag_idx_code.clone();
+
+            // 1. Increment frag_idx_code for current and all subsequent fragments
             let to_update: Vec<XmlFragmentRecord> = xml_fragments::table
                 .filter(xml_fragments::cst_file.eq(&current.cst_file))
-                .filter(xml_fragments::frag_idx.ge(current.frag_idx))
+                .filter(xml_fragments::frag_idx_code.ge(&original_frag_idx_code))
                 .load(conn)?;
-            
+
             for frag in to_update {
-                let update = UpdateFragmentIndex {
-                    frag_idx: frag.frag_idx + 1,
+                let update = UpdateFragmentIndexCode {
+                    frag_idx_code: increment_frag_idx_code(&frag.frag_idx_code),
                 };
                 diesel::update(xml_fragments::table.find(frag.id))
                     .set(&update)
                     .execute(conn)?;
             }
-            
-            // 2. Create new fragment at current's original frag_idx
+
+            // 2. Create new fragment at current's original frag_idx_code
             // Split the current fragment's content in half (approximately)
             let midpoint_line = (current.start_line + current.end_line) / 2;
-            
+
             let new_fragment = NewXmlFragment {
                 cst_file: &current.cst_file,
-                frag_idx: current.frag_idx,
+                frag_idx_code: &original_frag_idx_code,
                 frag_type: "Sutta",
                 frag_review: None,
                 nikaya: &current.nikaya,
@@ -648,7 +631,7 @@ fn create_fragment(
             // Get the ID of the newly created fragment
             let new_frag: XmlFragmentRecord = xml_fragments::table
                 .filter(xml_fragments::cst_file.eq(&current.cst_file))
-                .filter(xml_fragments::frag_idx.eq(current.frag_idx))
+                .filter(xml_fragments::frag_idx_code.eq(current.frag_idx_code))
                 .first(conn)?;
             
             // Update the (now next) current fragment's start boundary
@@ -666,27 +649,28 @@ fn create_fragment(
             Ok(new_frag.id)
         } else {
             // Create a new fragment AFTER the current one
-            // 1. Increment frag_idx for all subsequent fragments
+            // 1. Increment frag_idx_code for all subsequent fragments
             let to_update: Vec<XmlFragmentRecord> = xml_fragments::table
                 .filter(xml_fragments::cst_file.eq(&current.cst_file))
-                .filter(xml_fragments::frag_idx.gt(current.frag_idx))
+                .filter(xml_fragments::frag_idx_code.gt(&current.frag_idx_code))
                 .load(conn)?;
-            
+
             for frag in to_update {
-                let update = UpdateFragmentIndex {
-                    frag_idx: frag.frag_idx + 1,
+                let update = UpdateFragmentIndexCode {
+                    frag_idx_code: increment_frag_idx_code(&frag.frag_idx_code),
                 };
                 diesel::update(xml_fragments::table.find(frag.id))
                     .set(&update)
                     .execute(conn)?;
             }
-            
+
             // 2. Create new fragment after current
+            let new_frag_idx_code = increment_frag_idx_code(&current.frag_idx_code);
             let midpoint_line = (current.start_line + current.end_line) / 2;
-            
+
             let new_fragment = NewXmlFragment {
                 cst_file: &current.cst_file,
-                frag_idx: current.frag_idx + 1,
+                frag_idx_code: &new_frag_idx_code,
                 frag_type: "Sutta",
                 frag_review: None,
                 nikaya: &current.nikaya,
@@ -712,7 +696,7 @@ fn create_fragment(
             // Get the ID of the newly created fragment
             let new_frag: XmlFragmentRecord = xml_fragments::table
                 .filter(xml_fragments::cst_file.eq(&current.cst_file))
-                .filter(xml_fragments::frag_idx.eq(current.frag_idx + 1))
+                .filter(xml_fragments::frag_idx_code.eq(&new_frag_idx_code))
                 .first(conn)?;
             
             // Update current fragment's end boundary

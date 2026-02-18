@@ -52,8 +52,9 @@ pub struct XmlFragment {
     pub nikaya: String,
     /// Source XML filename for tracking which file this fragment came from.
     pub cst_file: String,
-    /// Index of this fragment in the list of fragments parsed from the XML file (0-indexed)
-    pub frag_idx: usize,
+    /// Fragment index code in "major.minor" format (e.g., "0.0", "21.1").
+    /// Generated fragments have minor=0; inserted fragments have minor>0.
+    pub frag_idx_code: String,
     /// Type of this fragment
     pub frag_type: FragmentType,
     /// Comments on the review status of this fragment
@@ -88,7 +89,8 @@ pub struct XmlFragment {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FragmentKey {
     pub cst_file: String,
-    pub frag_idx: usize,
+    /// Fragment index code in "major.minor" format (e.g., "0.0", "21.1")
+    pub frag_idx_code: String,
 }
 
 /// Override data from a corrected fragment in the database.

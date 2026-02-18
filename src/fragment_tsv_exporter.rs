@@ -6,10 +6,10 @@
 
 use anyhow::{Result, Context};
 use diesel::prelude::*;
-use diesel::sqlite::SqliteConnection;
 use std::path::Path;
 use std::io::Write;
 
+use crate::fragment_exporter::establish_connection_and_migrate;
 use crate::fragments_schema::xml_fragments;
 
 /// Fragment data for TSV export (excludes id, content_xml, content_html, created_at)
@@ -19,8 +19,8 @@ use crate::fragments_schema::xml_fragments;
 pub struct FragmentTsvRecord {
     #[diesel(select_expression = xml_fragments::cst_file)]
     pub cst_file: String,
-    #[diesel(select_expression = xml_fragments::frag_idx)]
-    pub frag_idx: i32,
+    #[diesel(select_expression = xml_fragments::frag_idx_code)]
+    pub frag_idx_code: String,
     #[diesel(select_expression = xml_fragments::frag_type)]
     pub frag_type: String,
     #[diesel(select_expression = xml_fragments::frag_review)]
@@ -62,16 +62,15 @@ pub struct FragmentTsvRecord {
 /// # Returns
 /// Number of rows exported or error
 pub fn export_fragments_to_tsv(db_path: &Path, output_path: &Path) -> Result<usize> {
-    // Connect to database
-    let mut conn = SqliteConnection::establish(db_path.to_str().unwrap())
-        .context("Failed to connect to fragments database")?;
+    // Connect to database and run migrations
+    let mut conn = establish_connection_and_migrate(db_path)?;
     
     // Query all fragments with only the fields we want
     use crate::fragments_schema::xml_fragments::dsl;
     
     let fragments: Vec<FragmentTsvRecord> = dsl::xml_fragments
         .select(FragmentTsvRecord::as_select())
-        .order((dsl::cst_file.asc(), dsl::frag_idx.asc()))
+        .order((dsl::cst_file.asc(), dsl::frag_idx_code.asc()))
         .load(&mut conn)
         .context("Failed to query fragments")?;
     
@@ -82,7 +81,7 @@ pub fn export_fragments_to_tsv(db_path: &Path, output_path: &Path) -> Result<usi
     
     // Write header
     writeln!(writer, "{}", 
-        "cst_file\tfrag_idx\tfrag_type\tfrag_review\tnikaya\tcst_code\tsc_code\tcst_vagga\tcst_sutta\tcst_paranum\tsc_sutta\tstart_line\tstart_char\tend_line\tend_char\tgroup_levels"
+        "cst_file\tfrag_idx_code\tfrag_type\tfrag_review\tnikaya\tcst_code\tsc_code\tcst_vagga\tcst_sutta\tcst_paranum\tsc_sutta\tstart_line\tstart_char\tend_line\tend_char\tgroup_levels"
     ).context("Failed to write TSV header")?;
     
     // Write rows
@@ -90,7 +89,7 @@ pub fn export_fragments_to_tsv(db_path: &Path, output_path: &Path) -> Result<usi
     for frag in fragments {
         writeln!(writer, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             escape_tsv_field(&frag.cst_file),
-            frag.frag_idx,
+            frag.frag_idx_code,
             escape_tsv_field(&frag.frag_type),
             frag.frag_review.as_deref().unwrap_or(""),
             escape_tsv_field(&frag.nikaya),
@@ -174,7 +173,7 @@ mod tests {
         
         // Check header
         assert!(lines[0].contains("cst_file"));
-        assert!(lines[0].contains("frag_idx"));
+        assert!(lines[0].contains("frag_idx_code"));
         assert!(lines[0].contains("frag_type"));
         assert!(!lines[0].contains("content_xml"));
         assert!(!lines[0].contains("content_html"));

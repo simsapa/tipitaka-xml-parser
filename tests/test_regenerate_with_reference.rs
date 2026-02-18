@@ -256,64 +256,64 @@ fn verify_s0301m_sc_code_propagation(db_path: &Path) {
         .expect("Failed to connect to database");
 
     // Query fragments 162-172 from s0301m.mul.xml
-    let fragments: Vec<(i32, Option<String>, Option<String>)> = xml_fragments::table
+    let fragments: Vec<(String, Option<String>, Option<String>)> = xml_fragments::table
         .filter(xml_fragments::cst_file.eq("s0301m.mul.xml"))
-        .filter(xml_fragments::frag_idx.ge(162))
-        .filter(xml_fragments::frag_idx.le(172))
-        .select((xml_fragments::frag_idx, xml_fragments::sc_code, xml_fragments::sc_sutta))
-        .order_by(xml_fragments::frag_idx.asc())
+        .filter(xml_fragments::frag_idx_code.ge("162.0"))
+        .filter(xml_fragments::frag_idx_code.le("172.0"))
+        .select((xml_fragments::frag_idx_code, xml_fragments::sc_code, xml_fragments::sc_sutta))
+        .order_by(xml_fragments::frag_idx_code.asc())
         .load(&mut conn)
         .expect("Failed to query fragments");
 
     eprintln!("\nVerifying sc_code and sc_sutta propagation for s0301m.mul.xml:");
-    for (frag_idx, sc_code, sc_sutta) in &fragments {
-        eprintln!("  frag_idx {}: sc_code = {:?}, sc_sutta = {:?}", frag_idx, sc_code, sc_sutta);
+    for (frag_idx_code, sc_code, sc_sutta) in &fragments {
+        eprintln!("  frag_idx_code {}: sc_code = {:?}, sc_sutta = {:?}", frag_idx_code, sc_code, sc_sutta);
     }
 
-    // Verify frag_idx 162 has sc_code "sn5.1"
-    let frag_162 = fragments.iter().find(|(idx, _, _)| *idx == 162)
+    // Verify frag_idx_code "162.0" has sc_code "sn5.1"
+    let frag_162 = fragments.iter().find(|(idx, _, _)| idx == "162.0")
         .expect("Fragment 162 not found");
     assert_eq!(
         frag_162.1.as_deref(),
         Some("sn5.1"),
-        "frag_idx 162 should have sc_code 'sn5.1' from checked override"
+        "frag_idx_code 162.0 should have sc_code 'sn5.1' from checked override"
     );
 
-    // Verify frag_idx 163-171 have non-null sc_code values (should be propagated)
-    for frag_idx in 163..=171 {
-        let frag = fragments.iter().find(|(idx, _, _)| *idx == frag_idx)
+    // Verify frag_idx_code "163.0"-"171.0" have non-null sc_code values (should be propagated)
+    for frag_idx in ["163.0", "164.0", "165.0", "166.0", "167.0", "168.0", "169.0", "170.0", "171.0"] {
+        let frag = fragments.iter().find(|(idx, _, _)| idx == frag_idx)
             .expect(&format!("Fragment {} not found", frag_idx));
         assert!(
             frag.1.is_some(),
-            "frag_idx {} should have sc_code filled in after regeneration (was null before), got: {:?}",
+            "frag_idx_code {} should have sc_code filled in after regeneration (was null before), got: {:?}",
             frag_idx,
             frag.1
         );
     }
 
-    // Verify frag_idx 172 has sc_code "sn6.1"
-    let frag_172 = fragments.iter().find(|(idx, _, _)| *idx == 172)
+    // Verify frag_idx_code "172.0" has sc_code "sn6.1"
+    let frag_172 = fragments.iter().find(|(idx, _, _)| idx == "172.0")
         .expect("Fragment 172 not found");
     assert_eq!(
         frag_172.1.as_deref(),
         Some("sn6.1"),
-        "frag_idx 172 should have sc_code 'sn6.1'"
+        "frag_idx_code 172.0 should have sc_code 'sn6.1'"
     );
 
     eprintln!("✓ sc_code propagation verified successfully");
 
     // Verify that all fragments with sc_code also have sc_sutta titles
     eprintln!("\nVerifying sc_sutta titles are populated:");
-    for (frag_idx, sc_code, sc_sutta) in &fragments {
+    for (frag_idx_code, sc_code, sc_sutta) in &fragments {
         if sc_code.is_some() {
             assert!(
                 sc_sutta.is_some() && !sc_sutta.as_ref().unwrap().is_empty(),
-                "frag_idx {} has sc_code {:?} but sc_sutta is missing or empty: {:?}",
-                frag_idx,
+                "frag_idx_code {} has sc_code {:?} but sc_sutta is missing or empty: {:?}",
+                frag_idx_code,
                 sc_code,
                 sc_sutta
             );
-            eprintln!("  ✓ frag_idx {}: sc_sutta = {:?}", frag_idx, sc_sutta);
+            eprintln!("  ✓ frag_idx_code {}: sc_sutta = {:?}", frag_idx_code, sc_sutta);
         }
     }
 
@@ -334,30 +334,30 @@ fn verify_s0101m_frag_14_type(db_path: &Path) {
         .expect("Failed to connect to database");
 
     // Query fragment 14 from s0101m.mul.xml
-    let fragment: Option<(i32, String)> = xml_fragments::table
+    let fragment: Option<(String, String)> = xml_fragments::table
         .filter(xml_fragments::cst_file.eq("s0101m.mul.xml"))
-        .filter(xml_fragments::frag_idx.eq(14))
-        .select((xml_fragments::frag_idx, xml_fragments::frag_type))
+        .filter(xml_fragments::frag_idx_code.eq("14.0"))
+        .select((xml_fragments::frag_idx_code, xml_fragments::frag_type))
         .first(&mut conn)
         .optional()
         .expect("Failed to query fragment");
 
     match fragment {
-        Some((frag_idx, frag_type)) => {
-            eprintln!("\nVerifying s0101m.mul.xml frag_idx 14:");
-            eprintln!("  frag_idx {}: frag_type = {:?}", frag_idx, frag_type);
+        Some((frag_idx_code, frag_type)) => {
+            eprintln!("\nVerifying s0101m.mul.xml frag_idx_code 14.0:");
+            eprintln!("  frag_idx_code {}: frag_type = {:?}", frag_idx_code, frag_type);
 
             assert_eq!(
                 frag_type,
                 "Header",
-                "s0101m.mul.xml frag_idx 14 should remain 'Header' type (has 'checked' override), but got '{}'",
+                "s0101m.mul.xml frag_idx_code 14.0 should remain 'Header' type (has 'checked' override), but got '{}'",
                 frag_type
             );
 
-            eprintln!("✓ s0101m.mul.xml frag_idx 14 type verified as 'Header'");
+            eprintln!("✓ s0101m.mul.xml frag_idx_code 14.0 type verified as 'Header'");
         }
         None => {
-            panic!("s0101m.mul.xml frag_idx 14 not found in database");
+            panic!("s0101m.mul.xml frag_idx_code 14.0 not found in database");
         }
     }
 }
@@ -388,22 +388,22 @@ fn verify_first_last_fragments_are_headers(db_path: &Path) {
     let mut errors: Vec<String> = Vec::new();
 
     for cst_file in &files {
-        // Get the minimum and maximum frag_idx for this file
-        let min_max: Option<(i32, i32)> = xml_fragments::table
+        // Get the minimum and maximum frag_idx_code for this file
+        let min_max: Option<(String, String)> = xml_fragments::table
             .filter(xml_fragments::cst_file.eq(cst_file))
             .select((
-                diesel::dsl::sql::<diesel::sql_types::Integer>("MIN(frag_idx)"),
-                diesel::dsl::sql::<diesel::sql_types::Integer>("MAX(frag_idx)"),
+                diesel::dsl::sql::<diesel::sql_types::Text>("MIN(frag_idx_code)"),
+                diesel::dsl::sql::<diesel::sql_types::Text>("MAX(frag_idx_code)"),
             ))
             .first(&mut conn)
             .optional()
-            .expect(&format!("Failed to query min/max frag_idx for {}", cst_file));
+            .expect(&format!("Failed to query min/max frag_idx_code for {}", cst_file));
 
-        if let Some((min_frag_idx, max_frag_idx)) = min_max {
+        if let Some((min_frag_idx_code, max_frag_idx_code)) = min_max {
             // Query the first fragment type
             let first_frag_type: String = xml_fragments::table
                 .filter(xml_fragments::cst_file.eq(cst_file))
-                .filter(xml_fragments::frag_idx.eq(min_frag_idx))
+                .filter(xml_fragments::frag_idx_code.eq(&min_frag_idx_code))
                 .select(xml_fragments::frag_type)
                 .first(&mut conn)
                 .expect(&format!("Failed to query first fragment for {}", cst_file));
@@ -411,7 +411,7 @@ fn verify_first_last_fragments_are_headers(db_path: &Path) {
             // Query the last fragment type
             let last_frag_type: String = xml_fragments::table
                 .filter(xml_fragments::cst_file.eq(cst_file))
-                .filter(xml_fragments::frag_idx.eq(max_frag_idx))
+                .filter(xml_fragments::frag_idx_code.eq(&max_frag_idx_code))
                 .select(xml_fragments::frag_type)
                 .first(&mut conn)
                 .expect(&format!("Failed to query last fragment for {}", cst_file));
@@ -419,8 +419,8 @@ fn verify_first_last_fragments_are_headers(db_path: &Path) {
             // Check first fragment
             if first_frag_type != "Header" {
                 let msg = format!(
-                    "{}: first fragment (frag_idx {}) is '{}', expected 'Header'",
-                    cst_file, min_frag_idx, first_frag_type
+                    "{}: first fragment (frag_idx_code {}) is '{}', expected 'Header'",
+                    cst_file, min_frag_idx_code, first_frag_type
                 );
                 eprintln!("  ✗ {}", msg);
                 errors.push(msg);
@@ -429,15 +429,15 @@ fn verify_first_last_fragments_are_headers(db_path: &Path) {
             // Check last fragment
             if last_frag_type != "Header" {
                 let msg = format!(
-                    "{}: last fragment (frag_idx {}) is '{}', expected 'Header'",
-                    cst_file, max_frag_idx, last_frag_type
+                    "{}: last fragment (frag_idx_code {}) is '{}', expected 'Header'",
+                    cst_file, max_frag_idx_code, last_frag_type
                 );
                 eprintln!("  ✗ {}", msg);
                 errors.push(msg);
             }
 
             if first_frag_type == "Header" && last_frag_type == "Header" {
-                eprintln!("  ✓ {}: first={}, last={}", cst_file, min_frag_idx, max_frag_idx);
+                eprintln!("  ✓ {}: first={}, last={}", cst_file, min_frag_idx_code, max_frag_idx_code);
             }
         }
     }

@@ -26,7 +26,7 @@ pub struct NikayaGroup {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FragmentListItem {
     pub id: i32,
-    pub frag_idx: i32,
+    pub frag_idx_code: String,
     pub frag_type: String,
     pub frag_review: Option<String>,
     pub cst_code: Option<String>,
@@ -38,7 +38,7 @@ pub struct FragmentListItem {
 pub struct FragmentDetail {
     pub id: i32,
     pub cst_file: String,
-    pub frag_idx: i32,
+    pub frag_idx_code: String,
     pub frag_type: String,
     pub frag_review: Option<String>,
     pub nikaya: String,
@@ -64,7 +64,7 @@ pub struct FragmentDetail {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AdjacentFragment {
     pub id: i32,
-    pub frag_idx: i32,
+    pub frag_idx_code: String,
     pub frag_type: String,
     pub content_xml: String,
     pub cst_code: Option<String>,
@@ -128,7 +128,7 @@ pub struct CreateFragmentResponse {
 /// Request body for moving fragment content
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MoveFragmentRequest {
-    pub frag_idx: i32,
+    pub frag_idx_code: String,
     pub xml_file: String,
     pub direction: String, // "prev" or "next"
 }

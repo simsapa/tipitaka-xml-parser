@@ -142,7 +142,7 @@ pub fn parse_into_fragments(
                             current_line,
                             current_char,
                             cst_file,
-                            fragments.len(),
+                            &format!("{}.0", fragments.len()),
                             frag_start_pos,
                             frag_start_line,
                             frag_start_char,
@@ -166,7 +166,7 @@ pub fn parse_into_fragments(
                                 end_char,
                                 group_levels: current_fragment_group_levels.clone(),
                                 cst_file: cst_file.to_string(),
-                                frag_idx: fragments.len(),
+                                frag_idx_code: format!("{}.0", fragments.len()),
                                 frag_review: None,
                                 cst_code: None,
                                 cst_vagga: None,
@@ -209,10 +209,10 @@ pub fn parse_into_fragments(
                                 // Only close if this is a Sutta fragment and has actual sutta content
                                 if matches!(frag_type, FragmentType::Sutta) {
                                     // When overrides have pushed the fragment start to or past this
-                                    // boundary, always close the fragment to maintain frag_idx alignment
+                                    // boundary, always close the fragment to maintain frag_idx_code alignment
                                     // with correction overrides (e.g., collapsed/moved fragments).
                                     // This guard is specific to Anguttara Nikaya where correction
-                                    // overrides require strict frag_idx alignment.
+                                    // overrides require strict frag_idx_code alignment.
                                     let should_close = if frag_start_pos >= event_start_pos
                                         && nikaya_structure.nikaya == "anguttara" {
                                         true
@@ -233,7 +233,7 @@ pub fn parse_into_fragments(
                                             event_start_line,
                                             event_start_char,
                                             cst_file,
-                                            fragments.len(),
+                                            &format!("{}.0", fragments.len()),
                                             frag_start_pos,
                                             frag_start_line,
                                             frag_start_char,
@@ -254,7 +254,7 @@ pub fn parse_into_fragments(
                                         end_char,
                                         group_levels: current_fragment_group_levels.clone(),
                                         cst_file: cst_file.to_string(),
-                                        frag_idx: fragments.len(),
+                                        frag_idx_code: format!("{}.0", fragments.len()),
                                         frag_review: None,
                                         cst_code: None,
                                         cst_vagga: None,
@@ -313,10 +313,10 @@ pub fn parse_into_fragments(
 
                                     if matches!(frag_type, FragmentType::Sutta) {
                                         // When overrides have pushed the fragment start to or past this
-                                        // boundary, always close the fragment to maintain frag_idx alignment
+                                        // boundary, always close the fragment to maintain frag_idx_code alignment
                                         // with correction overrides (e.g., collapsed/moved fragments).
                                         // This guard is specific to Anguttara Nikaya where correction
-                                        // overrides require strict frag_idx alignment.
+                                        // overrides require strict frag_idx_code alignment.
                                         let should_close = if frag_start_pos >= event_start_pos
                                             && nikaya_structure.nikaya == "anguttara" {
                                             true
@@ -337,7 +337,7 @@ pub fn parse_into_fragments(
                                                 event_start_line,
                                                 event_start_char,
                                                 cst_file,
-                                                fragments.len(),
+                                                &format!("{}.0", fragments.len()),
                                                 frag_start_pos,
                                                 frag_start_line,
                                                 frag_start_char,
@@ -357,7 +357,7 @@ pub fn parse_into_fragments(
                                                     end_char,
                                                     group_levels: current_fragment_group_levels.clone(),
                                                     cst_file: cst_file.to_string(),
-                                                    frag_idx: fragments.len(),
+                                                    frag_idx_code: format!("{}.0", fragments.len()),
                                                     frag_review: None,
                                                     cst_code: None,
                                                     cst_vagga: None,
@@ -459,7 +459,7 @@ pub fn parse_into_fragments(
                                 close_line,
                                 close_char,
                                 cst_file,
-                                fragments.len(),
+                                &format!("{}.0", fragments.len()),
                                 frag_start_pos,
                                 frag_start_line,
                                 frag_start_char,
@@ -483,7 +483,7 @@ pub fn parse_into_fragments(
                                         end_char,
                                         group_levels: current_fragment_group_levels.clone(),
                                         cst_file: cst_file.to_string(),
-                                        frag_idx: fragments.len(),
+                                        frag_idx_code: format!("{}.0", fragments.len()),
                                         frag_review: None,
                                         cst_code: None,
                                         cst_vagga: None,
@@ -566,7 +566,7 @@ pub fn parse_into_fragments(
                                     close_line,
                                     close_char,
                                     cst_file,
-                                    fragments.len(),
+                                    &format!("{}.0", fragments.len()),
                                     frag_start_pos,
                                     frag_start_line,
                                     frag_start_char,
@@ -585,7 +585,7 @@ pub fn parse_into_fragments(
                                         end_char,
                                         group_levels: current_fragment_group_levels.clone(),
                                         cst_file: cst_file.to_string(),
-                                        frag_idx: fragments.len(),
+                                        frag_idx_code: format!("{}.0", fragments.len()),
                                         frag_review: None,
                                         cst_code: None,
                                         cst_vagga: None,
@@ -668,7 +668,7 @@ pub fn parse_into_fragments(
                             event_start_line,
                             event_start_char,
                             cst_file,
-                            fragments.len(),
+                            &format!("{}.0", fragments.len()),
                             frag_start_pos,
                             frag_start_line,
                             frag_start_char,
@@ -688,7 +688,7 @@ pub fn parse_into_fragments(
                 end_char,
                 group_levels: current_fragment_group_levels.clone(),
                 cst_file: cst_file.to_string(),
-                frag_idx: fragments.len(),
+                frag_idx_code: format!("{}.0", fragments.len()),
                 frag_review: None,
                 cst_code: None,
                 cst_vagga: None,
@@ -733,7 +733,7 @@ pub fn parse_into_fragments(
             reader.current_line(),
             reader.current_char(),
             cst_file,
-            fragments.len(),
+            &format!("{}.0", fragments.len()),
             frag_start_pos,
             frag_start_line,
             frag_start_char,
@@ -752,7 +752,7 @@ pub fn parse_into_fragments(
                                 end_char,
                                 group_levels: current_fragment_group_levels.clone(),
                                 cst_file: cst_file.to_string(),
-                                frag_idx: fragments.len(),
+                                frag_idx_code: format!("{}.0", fragments.len()),
                                 frag_review: None,
                                 cst_code: None,
                                 cst_vagga: None,

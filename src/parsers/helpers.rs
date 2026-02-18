@@ -231,7 +231,7 @@ fn line_char_to_byte_pos(xml_content: &str, target_line: usize, target_char: usi
 /// For "moved" fragments (collapse=true), returns the fragment start position as the end,
 /// producing a zero-width fragment with empty content. The `collapsed` flag is set to `true`
 /// so callers know to push the fragment even though its content is empty — this keeps
-/// `frag_idx` (derived from `fragments.len()`) in sync with the correction overrides.
+/// `frag_idx_code` (derived from `fragments.len()`) in sync with the correction overrides.
 ///
 /// # Arguments
 /// * `frag_start_pos` - The start byte position of the current fragment, for validation
@@ -243,14 +243,14 @@ fn line_char_to_byte_pos(xml_content: &str, target_line: usize, target_char: usi
 ///
 /// # Errors
 /// Returns an error if the overridden end position is before the fragment start position,
-/// which indicates the override is being applied to the wrong fragment (e.g., due to frag_idx shifting).
+/// which indicates the override is being applied to the wrong fragment (e.g., due to frag_idx_code shifting).
 pub fn apply_fragment_adjustment(
     xml_content: &str,
     default_end_pos: usize,
     default_end_line: usize,
     default_end_char: usize,
     cst_file: &str,
-    frag_idx: usize,
+    frag_idx_code: &str,
     frag_start_pos: usize,
     frag_start_line: usize,
     frag_start_char: usize,
@@ -260,7 +260,7 @@ pub fn apply_fragment_adjustment(
     if let Some(overrides) = correction_overrides {
         let key = FragmentKey {
             cst_file: cst_file.to_string(),
-            frag_idx,
+            frag_idx_code: frag_idx_code.to_string(),
         };
         if let Some(override_data) = overrides.get(&key) {
             if override_data.collapse {
@@ -271,15 +271,15 @@ pub fn apply_fragment_adjustment(
     }
 
     // Then: check for boundary override
-    if let Some((end_line, end_char)) = get_boundary_override(cst_file, frag_idx, correction_overrides) {
+    if let Some((end_line, end_char)) = get_boundary_override(cst_file, frag_idx_code, correction_overrides) {
         let end_pos = line_char_to_byte_pos(xml_content, end_line, end_char);
 
         // Validate that the override end position is not before the fragment start position
         if end_pos < frag_start_pos {
             return Err(ParserError::InvalidBoundaryOverride {
                 details: format!(
-                    "end position ({}) is before fragment start position ({})\n  File: {}\n  Fragment index: {}\n  Override: end_line={}, end_char={}\n\nThis indicates the override is being applied to the wrong fragment, likely due to frag_idx shifting between parse runs. Please adjust the fragment boundary in the UI.",
-                    end_pos, frag_start_pos, cst_file, frag_idx, end_line, end_char
+                    "end position ({}) is before fragment start position ({})\n  File: {}\n  Fragment index: {}\n  Override: end_line={}, end_char={}\n\nThis indicates the override is being applied to the wrong fragment, likely due to frag_idx_code shifting between parse runs. Please adjust the fragment boundary in the UI.",
+                    end_pos, frag_start_pos, cst_file, frag_idx_code, end_line, end_char
                 ),
             }.into());
         }
@@ -377,19 +377,19 @@ pub fn parse_sc_code(sc_code: &str) -> Option<ScCodeComponents> {
 ///
 /// # Arguments
 /// * `cst_file` - The XML file name
-/// * `frag_idx` - The fragment index
+/// * `frag_idx_code` - The fragment index
 /// * `correction_overrides` - Optional correction fragment overrides from database
 ///
 /// # Returns
 /// `Some((end_line, end_char))` if an override exists, `None` otherwise
 pub fn get_boundary_override(
     cst_file: &str,
-    frag_idx: usize,
+    frag_idx_code: &str,
     correction_overrides: Option<&CorrectionFragmentOverrides>,
 ) -> Option<(usize, usize)> {
     let key = FragmentKey {
         cst_file: cst_file.to_string(),
-        frag_idx,
+        frag_idx_code: frag_idx_code.to_string(),
     };
 
     if let Some(overrides) = correction_overrides {
@@ -442,7 +442,7 @@ pub fn apply_sc_overrides(
     for (idx, fragment) in fragments.iter().enumerate() {
         let key = FragmentKey {
             cst_file: cst_file.to_string(),
-            frag_idx: fragment.frag_idx,
+            frag_idx_code: fragment.frag_idx_code.clone(),
         };
 
         if let Some(override_data) = correction_overrides.get(&key) {
@@ -1771,7 +1771,7 @@ mod tests {
 
         let mut corrections = HashMap::new();
         corrections.insert(
-            FragmentKey { cst_file: "test.xml".to_string(), frag_idx: 0 },
+            FragmentKey { cst_file: "test.xml".to_string(), frag_idx_code: "0.0".to_string() },
             CorrectionFragmentOverride {
                 collapse: false,
                 end_line: Some(100),
@@ -1788,22 +1788,22 @@ mod tests {
         );
 
         // Correction override should be returned
-        let result = get_boundary_override("test.xml", 0, Some(&corrections));
+        let result = get_boundary_override("test.xml", "0.0", Some(&corrections));
         assert_eq!(result, Some((100, 50)));
 
-        // No override for frag_idx 1
-        let result = get_boundary_override("test.xml", 1, Some(&corrections));
+        // No override for frag_idx_code "1.0"
+        let result = get_boundary_override("test.xml", "1.0", Some(&corrections));
         assert_eq!(result, None);
     }
 
     /// Helper to create a test fragment with minimal required fields
-    fn create_test_fragment(frag_idx: usize, cst_code: Option<&str>, sc_code: Option<&str>) -> XmlFragment {
+    fn create_test_fragment(frag_idx_code: String, cst_code: Option<&str>, sc_code: Option<&str>) -> XmlFragment {
         use crate::types::FragmentType;
 
         XmlFragment {
             nikaya: "digha".to_string(),
             cst_file: "test.xml".to_string(),
-            frag_idx,
+            frag_idx_code,
             frag_type: FragmentType::Sutta,
             frag_review: None,
             content_xml: "test content".to_string(),
@@ -1827,11 +1827,9 @@ mod tests {
         // Create fragments - some with existing sc_code, some without
         let mut fragments = vec![
             // Fragment with existing sc_code - should NOT be overwritten
-            create_test_fragment(0, Some("dn1.1.0.1"), Some("existing_sc_code")),
-            // Fragment without sc_code but with cst_code - should be populated if cst_code maps
-            create_test_fragment(1, Some("dn1.1.0.2"), None),
-            // Fragment with empty values - should remain unchanged if cst_code doesn't map
-            create_test_fragment(2, Some("nonexistent.code"), None),
+            create_test_fragment("0.0".to_string(), Some("dn1.1.0.1"), Some("existing_sc_code")),
+            create_test_fragment("1.0".to_string(), Some("dn1.1.0.2"), None),
+            create_test_fragment("2.0".to_string(), Some("nonexistent.code"), None),
         ];
 
         // Store original values
@@ -1860,7 +1858,7 @@ mod tests {
         // Create a fragment with a CST code that we know maps to an SC code
         // (dn1.1.0.1 -> dn1 based on the TSV mapping)
         let mut fragments = vec![
-            create_test_fragment(0, Some("dn1.1.0.1"), None),
+            create_test_fragment("0.0".to_string(), Some("dn1.1.0.1"), None),
         ];
 
         // Call conditional populate
@@ -1881,7 +1879,7 @@ mod tests {
 
         // Create fragment with existing sc_code and a cst_code that maps differently
         let mut fragments = vec![
-            create_test_fragment(0, Some("dn1.1.0.1"), Some("my_custom_sc_code")),
+            create_test_fragment("0.0".to_string(), Some("dn1.1.0.1"), Some("my_custom_sc_code")),
         ];
 
         // Store original

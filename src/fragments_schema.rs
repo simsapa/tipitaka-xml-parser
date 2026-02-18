@@ -13,7 +13,7 @@ diesel::table! {
     xml_fragments (id) {
         id -> Integer,
         cst_file -> Text,
-        frag_idx -> Integer,
+        frag_idx_code -> Text,
         frag_type -> Text,
         frag_review -> Nullable<Text>,
         nikaya -> Text,

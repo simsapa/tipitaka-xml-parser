@@ -13,7 +13,7 @@ Generated from [prd-insert-fragment.md](./prd-insert-fragment.md)
 - `migrations/fragments/2025-01-01-000000_create_fragments_tables/up.sql` - Existing migration
 - `migrations/fragments/2025-01-02-000000_frag_idx_to_frag_idx_code/up.sql` - New migration (to create)
 - `migrations/fragments/2025-01-02-000000_frag_idx_to_frag_idx_code/down.sql` - New migration rollback (to create)
-- `src/fragment_exporter.rs` - DB export, `extract_correction_overrides()`, migration runner
+- `src/fragment_exporter.rs` - DB export, `extract_correction_overrides()`, migration runner, `establish_connection_and_migrate()` helper
 
 **Parsing Pipeline:**
 - `src/xml_parser.rs` - Entry point `parse_into_fragments()`, calls parser then `apply_sc_overrides()`
@@ -67,12 +67,12 @@ Generated from [prd-insert-fragment.md](./prd-insert-fragment.md)
 > in `fragment_exporter.rs` already uses `MigrationHarness` — this task ensures it
 > runs consistently on every DB connection, not just during export.
 
-- [ ] 1.0 Set up Diesel embedded migrations and auto-run on DB connection
-  - [ ] 1.1 Audit all locations where `SqliteConnection::establish()` is called (fragment_exporter.rs, web/state.rs, fragment_operations.rs, tests) and identify which ones already run migrations
-  - [ ] 1.2 Create a shared `establish_connection_and_migrate(db_path: &Path) -> Result<SqliteConnection>` helper function that establishes the connection and runs pending migrations in one call
-  - [ ] 1.3 Replace all direct `SqliteConnection::establish()` calls with the new helper, ensuring migrations auto-run on every DB connection
-  - [ ] 1.4 Verify the existing `embed_migrations!("migrations/fragments/")` macro is used and that `MigrationHarness::run_pending_migrations()` is the mechanism (not manual SQL)
-  - [ ] 1.5 Test that opening an existing DB with the old schema triggers auto-migration, and opening a fresh DB creates the schema from scratch
+- [x] 1.0 Set up Diesel embedded migrations and auto-run on DB connection
+  - [x] 1.1 Audit all locations where `SqliteConnection::establish()` is called (fragment_exporter.rs, web/state.rs, fragment_operations.rs, tests) and identify which ones already run migrations
+  - [x] 1.2 Create a shared `establish_connection_and_migrate(db_path: &Path) -> Result<SqliteConnection>` helper function that establishes the connection and runs pending migrations in one call
+  - [x] 1.3 Replace all direct `SqliteConnection::establish()` calls with the new helper, ensuring migrations auto-run on every DB connection
+  - [x] 1.4 Verify the existing `embed_migrations!("migrations/fragments/")` macro is used and that `MigrationHarness::run_pending_migrations()` is the mechanism (not manual SQL)
+  - [x] 1.5 Test that opening an existing DB with the old schema triggers auto-migration, and opening a fresh DB creates the schema from scratch
 
 ### 2. Database Migration: `frag_idx` to `frag_idx_code`
 
@@ -82,12 +82,12 @@ Generated from [prd-insert-fragment.md](./prd-insert-fragment.md)
 > rename. The `frag_idx` to `frag_idx_code` data conversion is done in the migration
 > SQL itself.
 
-- [ ] 2.0 Create DB migration: rename `frag_idx` INTEGER to `frag_idx_code` TEXT with data conversion
-  - [ ] 2.1 Create new migration directory `migrations/fragments/2025-01-02-000000_frag_idx_to_frag_idx_code/`
-  - [ ] 2.2 Write `up.sql`: create `xml_fragments_new` table with `frag_idx_code TEXT NOT NULL` replacing `frag_idx INTEGER NOT NULL`; `INSERT INTO xml_fragments_new SELECT` with `CAST(frag_idx AS TEXT) || '.0'` for the conversion; `DROP TABLE xml_fragments`; `ALTER TABLE xml_fragments_new RENAME TO xml_fragments`
-  - [ ] 2.3 Write `down.sql`: reverse migration that converts `frag_idx_code` back to integer (strip `.0` suffix), handling that inserted fragments (sub-index > 0) would be lost on rollback
-  - [ ] 2.4 Run `diesel migration run` and regenerate `src/fragments_schema.rs` with `diesel print-schema` to reflect the new column type
-  - [ ] 2.5 Verify the migration works on an existing database with real data (check a few rows show `"0.0"`, `"1.0"`, etc.)
+- [x] 2.0 Create DB migration: rename `frag_idx` INTEGER to `frag_idx_code` TEXT with data conversion
+  - [x] 2.1 Create new migration directory `migrations/fragments/2025-01-02-000000_frag_idx_to_frag_idx_code/`
+  - [x] 2.2 Write `up.sql`: create `xml_fragments_new` table with `frag_idx_code TEXT NOT NULL` replacing `frag_idx INTEGER NOT NULL`; `INSERT INTO xml_fragments_new SELECT` with `CAST(frag_idx AS TEXT) || '.0'` for the conversion; `DROP TABLE xml_fragments`; `ALTER TABLE xml_fragments_new RENAME TO xml_fragments`
+  - [x] 2.3 Write `down.sql`: reverse migration that converts `frag_idx_code` back to integer (strip `.0` suffix), handling that inserted fragments (sub-index > 0) would be lost on rollback
+  - [x] 2.4 Run `diesel migration run` and regenerate `src/fragments_schema.rs` with `diesel print-schema` to reflect the new column type
+  - [x] 2.5 Verify the migration works on an existing database with real data (check a few rows show `"0.0"`, `"1.0"`, etc.)
 
 ### 3. Update Rust Types, Models, and Schema
 
@@ -97,14 +97,14 @@ Generated from [prd-insert-fragment.md](./prd-insert-fragment.md)
 > column type. `CorrectionFragmentOverrides` is `HashMap<FragmentKey, ...>` so the
 > key change propagates automatically once `FragmentKey` is updated.
 
-- [ ] 3.0 Update Rust types, models, and schema for `frag_idx_code`
-  - [ ] 3.1 Update `FragmentKey` in `types.rs`: change `frag_idx: usize` to `frag_idx_code: String`
-  - [ ] 3.2 Update `XmlFragment` in `types.rs`: change `frag_idx: usize` to `frag_idx_code: String`
-  - [ ] 3.3 Update `XmlFragmentRecord` in `fragments_models.rs`: change `frag_idx: i32` to `frag_idx_code: String`
-  - [ ] 3.4 Update `NewXmlFragment` in `fragments_models.rs`: change `frag_idx: i32` to `frag_idx_code: &'a str`
-  - [ ] 3.5 Update all changeset structs (`UpdateFragmentIndex`, etc.) that reference `frag_idx` to use `frag_idx_code`
-  - [ ] 3.6 Ensure `fragments_schema.rs` reflects `frag_idx_code -> Text` (should already be done in task 2.4)
-  - [ ] 3.7 Run `cargo check` — fix all compilation errors from the type changes across the codebase (this will surface every location that needs updating)
+- [x] 3.0 Update Rust types, models, and schema for `frag_idx_code`
+  - [x] 3.1 Update `FragmentKey` in `types.rs`: change `frag_idx: usize` to `frag_idx_code: String`
+  - [x] 3.2 Update `XmlFragment` in `types.rs`: change `frag_idx: usize` to `frag_idx_code: String`
+  - [x] 3.3 Update `XmlFragmentRecord` in `fragments_models.rs`: change `frag_idx: i32` to `frag_idx_code: String`
+  - [x] 3.4 Update `NewXmlFragment` in `fragments_models.rs`: change `frag_idx: i32` to `frag_idx_code: &'a str`
+  - [x] 3.5 Update all changeset structs (`UpdateFragmentIndex`, etc.) that reference `frag_idx` to use `frag_idx_code`
+  - [x] 3.6 Ensure `fragments_schema.rs` reflects `frag_idx_code -> Text` (should already be done in task 2.4)
+  - [x] 3.7 Run `cargo check` — fix all compilation errors from the type changes across the codebase (this will surface every location that needs updating)
 
 ### 4. Implement `frag_idx_code` Version-Style Sorting
 

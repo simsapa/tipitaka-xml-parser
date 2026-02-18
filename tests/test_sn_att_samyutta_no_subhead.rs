@@ -64,27 +64,27 @@ fn test_s0303a_att_samyutta_without_subhead_split() {
     let sn3_4_frag = sn3_4_frags[0];
     assert!(!sn3_4_frag.content_xml.contains("Uppādasaṃyutt"),
         "sn3_4 fragment should NOT contain sn3_5 content (Uppādasaṃyuttavaṇṇanā).\n\
-         frag_idx: {}", sn3_4_frag.frag_idx);
+         frag_idx_code: {}", sn3_4_frag.frag_idx_code);
     assert!(!sn3_4_frag.content_xml.contains("Kilesasaṃyutt"),
         "sn3_4 fragment should NOT contain sn3_6 content (Kilesasaṃyuttavaṇṇanā).\n\
-         frag_idx: {}", sn3_4_frag.frag_idx);
+         frag_idx_code: {}", sn3_4_frag.frag_idx_code);
 
     // sn3_5 fragment should not contain sn3_6 content
     let sn3_5_frag = sn3_5_frags[0];
     assert!(!sn3_5_frag.content_xml.contains("Kilesasaṃyutt"),
         "sn3_5 fragment should NOT contain sn3_6 content (Kilesasaṃyuttavaṇṇanā).\n\
-         frag_idx: {}", sn3_5_frag.frag_idx);
+         frag_idx_code: {}", sn3_5_frag.frag_idx_code);
 
     // Verify fragment indices are sequential (sn3_4 < sn3_5 < sn3_6 < sn3_7)
-    assert!(sn3_4_frag.frag_idx < sn3_5_frag.frag_idx,
-        "sn3_4 frag_idx ({}) should be before sn3_5 frag_idx ({})",
-        sn3_4_frag.frag_idx, sn3_5_frag.frag_idx);
-    assert!(sn3_5_frag.frag_idx < sn3_6_frags[0].frag_idx,
-        "sn3_5 frag_idx ({}) should be before sn3_6 frag_idx ({})",
-        sn3_5_frag.frag_idx, sn3_6_frags[0].frag_idx);
-    assert!(sn3_6_frags[0].frag_idx < sn3_7_frags[0].frag_idx,
-        "sn3_6 frag_idx ({}) should be before sn3_7 frag_idx ({})",
-        sn3_6_frags[0].frag_idx, sn3_7_frags[0].frag_idx);
+    assert!(sn3_4_frag.frag_idx_code < sn3_5_frag.frag_idx_code,
+        "sn3_4 frag_idx_code ({}) should be before sn3_5 frag_idx_code ({})",
+        sn3_4_frag.frag_idx_code, sn3_5_frag.frag_idx_code);
+    assert!(sn3_5_frag.frag_idx_code < sn3_6_frags[0].frag_idx_code,
+        "sn3_5 frag_idx_code ({}) should be before sn3_6 frag_idx_code ({})",
+        sn3_5_frag.frag_idx_code, sn3_6_frags[0].frag_idx_code);
+    assert!(sn3_6_frags[0].frag_idx_code < sn3_7_frags[0].frag_idx_code,
+        "sn3_6 frag_idx_code ({}) should be before sn3_7 frag_idx_code ({})",
+        sn3_6_frags[0].frag_idx_code, sn3_7_frags[0].frag_idx_code);
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn test_sn_att_samyutta_no_subhead_synthetic() {
         "Should have at least 4 sutta fragments, got {}. Fragments:\n{}",
         sutta_fragments.len(),
         sutta_fragments.iter()
-            .map(|f| format!("  frag_idx {}: {}", f.frag_idx,
+            .map(|f| format!("  frag_idx_code {}: {}", f.frag_idx_code,
                 &f.content_xml[..100.min(f.content_xml.len())]))
             .collect::<Vec<_>>().join("\n"));
 

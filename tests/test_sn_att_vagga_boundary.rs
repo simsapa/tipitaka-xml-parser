@@ -182,7 +182,7 @@ fn test_s0301a_att_cittasutta_range() {
         .expect("Should find fragment with Cittasuttādivaṇṇanā");
 
     println!("Cittasuttādivaṇṇanā fragment:");
-    println!("  frag_idx: {}", citta_frag.frag_idx);
+    println!("  frag_idx_code: {}", citta_frag.frag_idx_code);
     println!("  cst_code: {:?}", citta_frag.cst_code);
     println!("  sc_code: {:?}", citta_frag.sc_code);
     println!("  sc_sutta: {:?}", citta_frag.sc_sutta);

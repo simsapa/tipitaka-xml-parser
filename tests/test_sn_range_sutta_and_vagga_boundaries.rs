@@ -50,7 +50,7 @@ fn test_sn_sutta_range_boundary() {
     );
 
     println!("Fragment with '1. Jarāmaraṇasuttaṃ':");
-    println!("  frag_idx: {}", jaramarana_frag.frag_idx);
+    println!("  frag_idx_code: {}", jaramarana_frag.frag_idx_code);
     println!("  cst_code: {:?}", jaramarana_frag.cst_code);
     println!("  cst_vagga: {:?}", jaramarana_frag.cst_vagga);
     println!("  cst_sutta: {:?}", jaramarana_frag.cst_sutta);
@@ -63,15 +63,15 @@ fn test_sn_sutta_range_boundary() {
     let jati_frag = jati_frag.unwrap();
 
     println!("\nFragment with '2-11. Jātisuttādidasakaṃ':");
-    println!("  frag_idx: {}", jati_frag.frag_idx);
+    println!("  frag_idx_code: {}", jati_frag.frag_idx_code);
     println!("  cst_code: {:?}", jati_frag.cst_code);
     println!("  cst_vagga: {:?}", jati_frag.cst_vagga);
     println!("  cst_sutta: {:?}", jati_frag.cst_sutta);
 
     // The fragment indices should be consecutive, indicating they are separate fragments
     assert!(
-        jati_frag.frag_idx > jaramarana_frag.frag_idx,
-        "Fragment with '2-11. Jātisuttādidasakaṃ' should have a higher frag_idx than '1. Jarāmaraṇasuttaṃ'"
+        jati_frag.frag_idx_code > jaramarana_frag.frag_idx_code,
+        "Fragment with '2-11. Jātisuttādidasakaṃ' should have a higher frag_idx_code than '1. Jarāmaraṇasuttaṃ'"
     );
 }
 
@@ -108,7 +108,7 @@ fn test_sn_vagga_title_closes_fragment() {
     let jati_frag = jati_frag.unwrap();
 
     println!("Fragment with '2-11. Jātisuttādidasakaṃ':");
-    println!("  frag_idx: {}", jati_frag.frag_idx);
+    println!("  frag_idx_code: {}", jati_frag.frag_idx_code);
     println!("  end_line: {}", jati_frag.end_line);
     println!("  cst_vagga: {:?}", jati_frag.cst_vagga);
     println!("  contains '9. Antarapeyyālaṃ': {}", jati_frag.content_xml.contains("9. Antarapeyyālaṃ"));
@@ -129,7 +129,7 @@ fn test_sn_vagga_title_closes_fragment() {
     let satthu_frag = satthu_frag.unwrap();
 
     println!("\nFragment with '1. Satthusuttaṃ':");
-    println!("  frag_idx: {}", satthu_frag.frag_idx);
+    println!("  frag_idx_code: {}", satthu_frag.frag_idx_code);
     println!("  start_line: {}", satthu_frag.start_line);
     println!("  cst_vagga: {:?}", satthu_frag.cst_vagga);
     println!("  cst_sutta: {:?}", satthu_frag.cst_sutta);
