@@ -12,10 +12,9 @@
 
 use std::fs;
 use tipitaka_xml_parser::{
-    fragment_operations::parse_frag_idx_code,
     nikaya_detector::detect_nikaya_structure,
     parsers::samyutta_nikaya_mula::parse_into_fragments,
-    types::{FragmentType, GroupType, ParserOverrides},
+    types::{FragmentType, GroupType, ParserOverrides, parse_frag_idx_code},
 };
 
 #[test]

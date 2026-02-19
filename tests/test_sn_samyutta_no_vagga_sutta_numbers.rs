@@ -2,10 +2,9 @@
 //! 
 //! Tests that sutta numbers are correctly incremented in samyuttas that don't have vaggas
 
-use tipitaka_xml_parser::fragment_operations::parse_frag_idx_code;
 use tipitaka_xml_parser::nikaya_detector::detect_nikaya_structure;
 use tipitaka_xml_parser::parse_into_fragments;
-use tipitaka_xml_parser::types::{FragmentType, ParserOverrides};
+use tipitaka_xml_parser::types::{FragmentType, ParserOverrides, parse_frag_idx_code};
 
 #[test]
 fn test_sn_vaṅgīsa_samyutta_sutta_numbering() {

@@ -113,14 +113,14 @@ Generated from [prd-insert-fragment.md](./prd-insert-fragment.md)
 > This comparator is needed in Rust (sorting fragment vectors), SQL (`ORDER BY` in
 > queries), and JavaScript (fragment list display, validation error sorting).
 
-- [ ] 4.0 Implement `frag_idx_code` version-style sorting utilities (Rust + JS)
-  - [ ] 4.1 Create a `parse_frag_idx_code(code: &str) -> (usize, usize)` helper in `types.rs` (or a new `frag_idx_code.rs` module) that splits `"21.3"` into `(21, 3)`
-  - [ ] 4.2 Implement `Ord`/`PartialOrd` for a `FragIdxCode` wrapper type (or a standalone comparison function `compare_frag_idx_code(a: &str, b: &str) -> Ordering`) for Rust-side sorting
-  - [ ] 4.3 Add a helper `next_sub_index(existing_codes: &[&str], major: usize) -> String` that finds the next available sub-index for a given major index (e.g., if `"21.0"` and `"21.1"` exist, returns `"21.2"`)
-  - [ ] 4.4 Add a helper `format_frag_idx_code(major: usize, minor: usize) -> String` for consistent formatting
-  - [ ] 4.5 For SQL ordering: update all `ORDER BY frag_idx` queries to use an expression that sorts numerically (e.g., `ORDER BY CAST(substr(frag_idx_code, 1, instr(frag_idx_code, '.')-1) AS INTEGER), CAST(substr(frag_idx_code, instr(frag_idx_code, '.')+1) AS INTEGER)`) — or apply Rust-side sorting after query
-  - [ ] 4.6 Add JavaScript `compareFragIdxCode(a, b)` function in `app.js` that splits on `"."` and compares numerically
-  - [ ] 4.7 Write unit tests for the Rust sorting/parsing helpers covering edge cases: `"0.0"`, `"9.0" vs "10.0"`, `"21.0" < "21.1" < "21.2" < "22.0"`
+- [x] 4.0 Implement `frag_idx_code` version-style sorting utilities (Rust + JS)
+  - [x] 4.1 Create a `parse_frag_idx_code(code: &str) -> (usize, usize)` helper in `types.rs` (or a new `frag_idx_code.rs` module) that splits `"21.3"` into `(21, 3)`
+  - [x] 4.2 Implement `Ord`/`PartialOrd` for a `FragIdxCode` wrapper type (or a standalone comparison function `compare_frag_idx_code(a: &str, b: &str) -> Ordering`) for Rust-side sorting
+  - [x] 4.3 Add a helper `next_sub_index(existing_codes: &[&str], major: usize) -> String` that finds the next available sub-index for a given major index (e.g., if `"21.0"` and `"21.1"` exist, returns `"21.2"`)
+  - [x] 4.4 Add a helper `format_frag_idx_code(major: usize, minor: usize) -> String` for consistent formatting
+  - [x] 4.5 For SQL ordering: update all `ORDER BY frag_idx` queries to use an expression that sorts numerically (e.g., `ORDER BY CAST(substr(frag_idx_code, 1, instr(frag_idx_code, '.')-1) AS INTEGER), CAST(substr(frag_idx_code, instr(frag_idx_code, '.')+1) AS INTEGER)`) — or apply Rust-side sorting after query
+  - [x] 4.6 Add JavaScript `compareFragIdxCode(a, b)` function in `app.js` that splits on `"."` and compares numerically
+  - [x] 4.7 Write unit tests for the Rust sorting/parsing helpers covering edge cases: `"0.0"`, `"9.0" vs "10.0"`, `"21.0" < "21.1" < "21.2" < "22.0"`
 
 ### 5. Update Parsers and Fragment Generation
 

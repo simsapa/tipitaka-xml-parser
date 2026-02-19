@@ -19,6 +19,26 @@ let validationFileFilter = null; // Current file filter in validation modal (nul
 // Operation state - tracks when reparse/regeneration is in progress
 let isOperationInProgress = false;
 
+/**
+ * Compare two frag_idx_code strings using version-style numeric comparison.
+ * Splits each code on "." and compares major and minor components numerically.
+ * @example
+ * compareFragIdxCode("2.0", "10.0") // returns -1 (2 < 10, not lexicographic)
+ * compareFragIdxCode("21.0", "21.1") // returns -1
+ * compareFragIdxCode("21.2", "21.2") // returns 0
+ * @param {string} a - First frag_idx_code
+ * @param {string} b - Second frag_idx_code
+ * @returns {number} - negative if a < b, 0 if equal, positive if a > b
+ */
+function compareFragIdxCode(a, b) {
+    const [aMajor, aMinor] = a.split('.').map(Number);
+    const [bMajor, bMinor] = b.split('.').map(Number);
+    if (aMajor !== bMajor) {
+        return aMajor - bMajor;
+    }
+    return aMinor - bMinor;
+}
+
 // Initialize the application
 function init() {
     loadStateFromLocalStorage();
@@ -173,13 +193,13 @@ async function fetchAndPopulateFragmentList(filename) {
             const statusColor = getStatusColor(fragment.frag_review);
             item.innerHTML = `
                 ${createReviewDropdownHtml(fragment.id, fragment.frag_review)}
-                <span class="tag">${fragment.frag_idx}</span>
+                <span class="tag">${fragment.frag_idx_code}</span>
                 <span class="tag is-${statusColor}">${fragment.frag_type}</span>
                 <span class="tag">${fragment.cst_code}</span>
                 <span class="tag">${fragment.sc_code}</span>
             `;
             item.dataset.fragmentId = fragment.id;
-            item.dataset.fragIdx = fragment.frag_idx;
+            item.dataset.fragIdxCode = fragment.frag_idx_code;
             item.dataset.fragReview = fragment.frag_review || '';
             item.onclick = (e) => {
                 // Don't select fragment if clicking on the dropdown
@@ -325,7 +345,7 @@ function updateFragmentItemInList(fragmentId, fragmentData = null) {
         const statusColor = getStatusColor(fragment.frag_review);
         fragmentItem.innerHTML = `
             ${createReviewDropdownHtml(fragment.id, fragment.frag_review)}
-            <span class="tag">${fragment.frag_idx}</span>
+            <span class="tag">${fragment.frag_idx_code}</span>
             <span class="tag is-${statusColor}">${fragment.frag_type}</span>
             <span class="tag">${fragment.cst_code}</span>
             <span class="tag">${fragment.sc_code}</span>
@@ -385,7 +405,7 @@ async function addFragmentItemToList(fragmentId, direction) {
         
         const statusColor = getStatusColor(fragment.frag_review);
         newItem.innerHTML = `
-            <span class="tag">${fragment.frag_idx}</span>
+            <span class="tag">${fragment.frag_idx_code}</span>
             <span class="tag is-${statusColor}">${fragment.frag_type}</span>
             <span class="tag">${fragment.cst_code}</span>
             <span class="tag">${fragment.sc_code}</span>
@@ -767,7 +787,7 @@ async function moveFragmentTo(direction) {
         
         // Construct request body
         const requestBody = {
-            frag_idx: currentFragment.frag_idx,
+            frag_idx_code: currentFragment.frag_idx_code,
             xml_file: currentFragment.cst_file,
             direction: direction
         };
@@ -1774,10 +1794,10 @@ function renderAllValidationResults() {
         allErrors = allErrors.filter(e => e.cst_file === validationFileFilter);
     }
 
-    // Sort by file name, then by fragment index
+    // Sort by file name, then by fragment index code
     allErrors.sort((a, b) => {
         if (a.cst_file !== b.cst_file) return a.cst_file.localeCompare(b.cst_file);
-        return a.frag_idx - b.frag_idx;
+        return compareFragIdxCode(a.frag_idx_code, b.frag_idx_code);
     });
 
     const totalCount = allErrors.length;
@@ -1807,13 +1827,13 @@ function renderAllValidationResults() {
             <div class="validation-result-item">
                 <div class="result-info">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span class="result-location">${error.cst_file} #${error.frag_idx} (${error.checkName})</span>
+                        <span class="result-location">${error.cst_file} #${error.frag_idx_code} (${error.checkName})</span>
                         ${reviewStatus}
                     </div>
                     <span class="result-message">${error.message}</span>
                 </div>
                 <div class="result-actions">
-                    <button class="button is-small is-info" onclick="openFragmentFromValidation('${error.cst_file}', ${error.frag_idx})">
+                    <button class="button is-small is-info" onclick="openFragmentFromValidation('${error.cst_file}', '${error.frag_idx_code}')">
                         Open
                     </button>
                 </div>
@@ -1890,13 +1910,13 @@ function renderValidationResults(checkId) {
             <div class="validation-result-item">
                 <div class="result-info">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span class="result-location">${error.cst_file} #${error.frag_idx}</span>
+                        <span class="result-location">${error.cst_file} #${error.frag_idx_code}</span>
                         ${reviewStatus}
                     </div>
                     <span class="result-message">${error.message}</span>
                 </div>
                 <div class="result-actions">
-                    <button class="button is-small is-info" onclick="openFragmentFromValidation('${error.cst_file}', ${error.frag_idx})">
+                    <button class="button is-small is-info" onclick="openFragmentFromValidation('${error.cst_file}', '${error.frag_idx_code}')">
                         Open
                     </button>
                 </div>
@@ -1907,7 +1927,7 @@ function renderValidationResults(checkId) {
 }
 
 // Open a fragment from validation results
-async function openFragmentFromValidation(cstFile, fragIdx) {
+async function openFragmentFromValidation(cstFile, fragIdxCode) {
     // Close validation modal
     closeValidationModal();
 
@@ -1916,14 +1936,14 @@ async function openFragmentFromValidation(cstFile, fragIdx) {
 
     // Wait a moment for fragments to load, then find and select the fragment
     setTimeout(() => {
-        const fragmentItem = document.querySelector(`#fragment-list .panel-item[data-frag-idx="${fragIdx}"]`);
+        const fragmentItem = document.querySelector(`#fragment-list .panel-item[data-frag-idx-code="${fragIdxCode}"]`);
         if (fragmentItem) {
             const fragmentId = parseInt(fragmentItem.dataset.fragmentId);
             selectFragment(fragmentId);
             // Scroll fragment into view
             fragmentItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
         } else {
-            console.warn(`Fragment with frag_idx ${fragIdx} not found in file ${cstFile}`);
+            console.warn(`Fragment with frag_idx_code ${fragIdxCode} not found in file ${cstFile}`);
         }
     }, 200);
 }
@@ -1942,7 +1962,7 @@ function showAutoFixConfirmation() {
         html += `
             <div class="autofix-change-item">
                 <span class="change-file">${fix.cst_file}</span>
-                <span class="change-idx">#${fix.frag_idx}</span>
+                <span class="change-idx">#${fix.frag_idx_code}</span>
                 <span class="change-code">${fix.sc_code}</span>
                 <span class="change-arrow">→</span>
                 <span class="change-value">${fix.suggested_value}</span>

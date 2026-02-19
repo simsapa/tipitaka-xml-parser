@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::fragments_models::{XmlFragmentRecord, UpdateFragmentBoundary, ClearMovedFragmentMetadata};
 use crate::fragments_schema::xml_fragments;
+use crate::types::{compare_frag_idx_code, parse_frag_idx_code};
 
 /// Direction enum for specifying which adjacent fragment to move content to
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -102,21 +103,6 @@ pub fn find_target_fragment(
             return Ok(Some(frag.clone()));
         }
     }
-}
-
-/// Compare two frag_idx_code strings using version-style comparison
-/// e.g., "2.0" < "2.1" < "10.0" < "10.1"
-fn compare_frag_idx_code(a: &str, b: &str) -> std::cmp::Ordering {
-    parse_frag_idx_code(a).cmp(&parse_frag_idx_code(b))
-}
-
-/// Parse a frag_idx_code string into (major, minor) tuple
-/// e.g., "5.0" -> (5, 0), "10.3" -> (10, 3)
-pub fn parse_frag_idx_code(s: &str) -> (usize, usize) {
-    let parts: Vec<&str> = s.split('.').collect();
-    let major = parts.first().and_then(|p| p.parse().ok()).unwrap_or(0);
-    let minor = parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(0);
-    (major, minor)
 }
 
 /// Increment the major version of a frag_idx_code string

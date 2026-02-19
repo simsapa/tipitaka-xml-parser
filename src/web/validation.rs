@@ -21,6 +21,7 @@ use serde::{Serialize, Deserialize};
 use crate::fragments_schema::xml_fragments;
 use crate::fragment_reconstructor::reconstruct_xml_with_conn;
 use crate::parsers::helpers::is_cst_code_range;
+use crate::types::compare_frag_idx_code;
 
 /// A validation error found during a check
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -304,13 +305,14 @@ pub fn check_xml_reconstruction(
     // Test reconstruction for each file using the same method as regeneration
     for cst_file in cst_files {
         // Get first fragment for error reporting
-        let first_fragment: Option<(i32, String, Option<String>)> = xml_fragments::table
+        let mut fragments: Vec<(i32, String, Option<String>)> = xml_fragments::table
             .select((xml_fragments::id, xml_fragments::frag_idx_code, xml_fragments::frag_review))
             .filter(xml_fragments::cst_file.eq(&cst_file))
-            .order_by(xml_fragments::frag_idx_code)
-            .first(conn)
-            .optional()
-            .unwrap_or(None);
+            .load(conn)
+            .unwrap_or_default();
+
+        fragments.sort_by(|a, b| compare_frag_idx_code(&a.1, &b.1));
+        let first_fragment = fragments.into_iter().next();
 
         if let Some((fragment_id, frag_idx_code, frag_review)) = first_fragment {
             // Attempt reconstruction using the connection (no migrations triggered)
@@ -443,7 +445,7 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection, include_checked: bool
     for cst_file in cst_files {
         // Get Sutta fragments for this file, ordered by frag_idx_code
         // Always include checked fragments for sequence validation
-        let fragments: Vec<(i32, String, Option<String>, Option<String>)> = xml_fragments::table
+        let mut fragments: Vec<(i32, String, Option<String>, Option<String>)> = xml_fragments::table
             .select((
                 xml_fragments::id,
                 xml_fragments::frag_idx_code,
@@ -453,9 +455,10 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection, include_checked: bool
             .filter(xml_fragments::cst_file.eq(&cst_file))
             .filter(xml_fragments::frag_type.eq("Sutta"))
             .filter(xml_fragments::frag_review.ne("moved").or(xml_fragments::frag_review.is_null()))
-            .order_by(xml_fragments::frag_idx_code)
             .load(conn)
             .unwrap_or_default();
+
+        fragments.sort_by(|a, b| compare_frag_idx_code(&a.1, &b.1));
 
         let mut prev_parsed: Option<ParsedScCode> = None;
 
@@ -869,12 +872,12 @@ pub fn sc_code_exists_in_titles(code: &str, titles: &HashMap<String, String>) ->
 pub fn expand_sc_code_range(sc_code: &str) -> Vec<String> {
     // First remove any colon suffix
     let base = sc_code.split(':').next().unwrap_or(sc_code);
-    
+
     // Check if it's a range (contains '-')
     if let Some(dash_pos) = base.find('-') {
         let prefix = &base[..dash_pos];
         let suffix = &base[dash_pos + 1..];
-        
+
         // Try to parse the numbers
         if let Some(period_pos) = prefix.rfind('.') {
             let num_part = &prefix[period_pos + 1..];
@@ -886,7 +889,7 @@ pub fn expand_sc_code_range(sc_code: &str) -> Vec<String> {
             }
         }
     }
-    
+
     // Not a range, return as-is
     vec![sc_code.to_string()]
 }
@@ -989,7 +992,7 @@ pub fn check_sc_code_not_in_arangodb(
             } else {
                 format!(
                     "sc_code '{}' not found in ArangoDB (expanded from '{}', missing: {})",
-                    missing_codes[0], 
+                    missing_codes[0],
                     base_code,
                     missing_codes.join(", ")
                 )
@@ -1092,14 +1095,14 @@ mod tests {
         )
         .execute(&mut conn)
         .expect("Failed to create migrations table");
-        
+
         // Mark both migrations as applied
         diesel::sql_query(
             "INSERT OR IGNORE INTO __diesel_schema_migrations (version) VALUES ('2025-01-01-000000_create_fragments_tables')"
         )
         .execute(&mut conn)
         .expect("Failed to mark first migration as applied");
-        
+
         diesel::sql_query(
             "INSERT OR IGNORE INTO __diesel_schema_migrations (version) VALUES ('2025-01-02-000000_frag_idx_to_frag_idx_code')"
         )
