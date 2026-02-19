@@ -168,14 +168,14 @@ Generated from [prd-insert-fragment.md](./prd-insert-fragment.md)
 > and navigate by sorted position. Index shifting logic (incrementing frag_idx for
 > fragments after a deletion/creation) must be adapted for the string format.
 
-- [ ] 7.0 Update fragment operations (move, delete, create, boundary adjust) for `frag_idx_code`
-  - [ ] 7.1 Update `find_target_fragment()` in `fragment_operations.rs`: query fragments sorted by `frag_idx_code` (using version-sort), find adjacent non-moved fragment by position in the sorted list rather than incrementing an integer index
-  - [ ] 7.2 Update `move_fragment_content()`: use `frag_idx_code` for fragment lookups and the response
-  - [ ] 7.3 Update fragment deletion logic: when deleting, no need to shift `frag_idx_code` values (the string codes remain stable, unlike integer indices that were decremented)
-  - [ ] 7.4 Update fragment creation logic in `fragment_operations.rs` (the existing `create_fragment` if present): use `frag_idx_code` for the new fragment
-  - [ ] 7.5 Update boundary adjustment logic: use `frag_idx_code` to identify the fragment and its neighbors
-  - [ ] 7.6 Remove or update any `UpdateFragmentIndex` changeset usage that shifted integer indices — with `frag_idx_code`, adjacent fragments don't need reindexing on insert/delete
-  - [ ] 7.7 Run `cargo check` to verify all operation code compiles
+- [x] 7.0 Update fragment operations (move, delete, create, boundary adjust) for `frag_idx_code`
+  - [x] 7.1 Update `find_target_fragment()` in `fragment_operations.rs`: query fragments sorted by `frag_idx_code` (using version-sort), find adjacent non-moved fragment by position in the sorted list rather than incrementing an integer index
+  - [x] 7.2 Update `move_fragment_content()`: use `frag_idx_code` for fragment lookups and the response
+  - [x] 7.3 Update fragment deletion logic: when deleting, no need to shift `frag_idx_code` values (the string codes remain stable, unlike integer indices that were decremented)
+  - [x] 7.4 Update fragment creation logic in `fragment_operations.rs` (the existing `create_fragment` if present): use `frag_idx_code` for the new fragment
+  - [x] 7.5 Update boundary adjustment logic: use `frag_idx_code` to identify the fragment and its neighbors
+  - [x] 7.6 Remove or update any `UpdateFragmentIndex` changeset usage that shifted integer indices — with `frag_idx_code`, adjacent fragments don't need reindexing on insert/delete
+  - [x] 7.7 Run `cargo check` to verify all operation code compiles
 
 ### 8. Update Web API Routes and Response Models
 
@@ -186,17 +186,17 @@ Generated from [prd-insert-fragment.md](./prd-insert-fragment.md)
 > must also be updated. The validation endpoints that report errors by `frag_idx`
 > need updating too.
 
-- [ ] 8.0 Update web API routes and response models for `frag_idx_code`
-  - [ ] 8.1 Update all request DTOs in `web/models.rs` that contain `frag_idx` (e.g., `MoveFragmentRequest`, any create/delete request structs) to use `frag_idx_code: String`
-  - [ ] 8.2 Update all response DTOs and JSON serialization that return `frag_idx` to return `frag_idx_code`
-  - [ ] 8.3 Update `routes.rs` fragment list endpoint: ensure fragments are returned sorted by `frag_idx_code` using version-sort
-  - [ ] 8.4 Update `routes.rs` fragment detail endpoint: use `frag_idx_code` in lookups
-  - [ ] 8.5 Update `routes.rs` move endpoint (`/api/fragments/move`): accept and use `frag_idx_code`
-  - [ ] 8.6 Update `routes.rs` boundary adjust endpoint: use `frag_idx_code` for fragment identification
-  - [ ] 8.7 Update `routes.rs` delete and existing create endpoints: use `frag_idx_code`
-  - [ ] 8.8 Update `routes.rs` reparse endpoint: ensure override extraction and result reporting use `frag_idx_code`
-  - [ ] 8.9 Update validation endpoints (`web/validation.rs`): report errors with `frag_idx_code` instead of `frag_idx`
-  - [ ] 8.10 Run `cargo check` to verify all route code compiles
+- [x] 8.0 Update web API routes and response models for `frag_idx_code`
+  - [x] 8.1 Update all request DTOs in `web/models.rs` that contain `frag_idx` (e.g., `MoveFragmentRequest`, any create/delete request structs) to use `frag_idx_code: String`
+  - [x] 8.2 Update all response DTOs and JSON serialization that return `frag_idx` to return `frag_idx_code`
+  - [x] 8.3 Update `routes.rs` fragment list endpoint: ensure fragments are returned sorted by `frag_idx_code` using version-sort
+  - [x] 8.4 Update `routes.rs` fragment detail endpoint: use `frag_idx_code` in lookups
+  - [x] 8.5 Update `routes.rs` move endpoint (`/api/fragments/move`): accept and use `frag_idx_code`
+  - [x] 8.6 Update `routes.rs` boundary adjust endpoint: use `frag_idx_code` for fragment identification
+  - [x] 8.7 Update `routes.rs` delete and existing create endpoints: use `frag_idx_code`
+  - [x] 8.8 Update `routes.rs` reparse endpoint: ensure override extraction and result reporting use `frag_idx_code`
+  - [x] 8.9 Update validation endpoints (`web/validation.rs`): report errors with `frag_idx_code` instead of `frag_idx`
+  - [x] 8.10 Run `cargo check` to verify all route code compiles
 
 ### 9. Update JavaScript/HTML UI
 
@@ -206,14 +206,14 @@ Generated from [prd-insert-fragment.md](./prd-insert-fragment.md)
 > `index.html` template may also reference `frag_idx` in data attributes or display.
 > Sorting in JS must use the version-style comparator from task 4.6.
 
-- [ ] 9.0 Update JavaScript/HTML UI to use `frag_idx_code`
-  - [ ] 9.1 Update `app.js`: replace all `fragment.frag_idx` references with `fragment.frag_idx_code` (display tags, dataset attributes, API request bodies)
-  - [ ] 9.2 Update `app.js`: replace `item.dataset.fragIdx` with `item.dataset.fragIdxCode` and all corresponding lookups
-  - [ ] 9.3 Update `app.js` `moveFragmentTo()`: send `frag_idx_code` in the request body instead of `frag_idx`
-  - [ ] 9.4 Update `app.js` sorting: replace `a.frag_idx - b.frag_idx` with the `compareFragIdxCode()` function from task 4.6
-  - [ ] 9.5 Update `app.js` validation error display: use `frag_idx_code` in error location strings and `openFragmentFromValidation()` calls
-  - [ ] 9.6 Update `index.html` if any inline references or data attributes use `frag_idx`
-  - [ ] 9.7 Test the web UI manually: verify fragment list displays correctly, sorting works, move operations work, validation errors show correct codes
+- [x] 9.0 Update JavaScript/HTML UI to use `frag_idx_code`
+  - [x] 9.1 Update `app.js`: replace all `fragment.frag_idx` references with `fragment.frag_idx_code` (display tags, dataset attributes, API request bodies)
+  - [x] 9.2 Update `app.js`: replace `item.dataset.fragIdx` with `item.dataset.fragIdxCode` and all corresponding lookups
+  - [x] 9.3 Update `app.js` `moveFragmentTo()`: send `frag_idx_code` in the request body instead of `frag_idx`
+  - [x] 9.4 Update `app.js` sorting: replace `a.frag_idx - b.frag_idx` with the `compareFragIdxCode()` function from task 4.6
+  - [x] 9.5 Update `app.js` validation error display: use `frag_idx_code` in error location strings and `openFragmentFromValidation()` calls
+  - [x] 9.6 Update `index.html` if any inline references or data attributes use `frag_idx`
+  - [x] 9.7 Test the web UI manually: verify fragment list displays correctly, sorting works, move operations work, validation errors show correct codes
 
 ### 10. Fix Existing Tests
 
@@ -223,16 +223,16 @@ Generated from [prd-insert-fragment.md](./prd-insert-fragment.md)
 > This is a mechanical but broad change — every test that constructs `XmlFragment`,
 > `FragmentKey`, or asserts on `frag_idx` values needs updating.
 
-- [ ] 10.0 Fix all existing tests to pass with `frag_idx_code`
-  - [ ] 10.1 Update `test_fragment_move_operations.rs`: change all `frag_idx` references to `frag_idx_code` strings (e.g., `frag_idx: 0` → `frag_idx_code: "0.0".to_string()`)
-  - [ ] 10.2 Update `test_checked_fragment_overrides.rs`: update override key construction and assertions
-  - [ ] 10.3 Update `test_single_file_reparse.rs`: update fragment assertions and override setup
-  - [ ] 10.4 Update `test_regenerate_with_reference.rs`: update fragment assertions
-  - [ ] 10.5 Update `test_xml_fragment_position_tracking.rs`: update fragment index assertions
-  - [ ] 10.6 Update `test_fragment_validation.rs`: update any frag_idx references
-  - [ ] 10.7 Update all remaining SN test files (`test_sn_*.rs`, `test_sutta_boundary_splitting.rs`, `test_s0303m_sc_code_propagation.rs`, `test_sc_code_arangodb_range_lookup.rs`): change frag_idx references to frag_idx_code
-  - [ ] 10.8 Update `src/test_tsv_validation.rs` (unit tests): change frag_idx references
-  - [ ] 10.9 Run `cargo test` — all existing tests must pass
+- [x] 10.0 Fix all existing tests to pass with `frag_idx_code`
+  - [x] 10.1 Update `test_fragment_move_operations.rs`: change all `frag_idx` references to `frag_idx_code` strings (e.g., `frag_idx: 0` → `frag_idx_code: "0.0".to_string()`)
+  - [x] 10.2 Update `test_checked_fragment_overrides.rs`: update override key construction and assertions
+  - [x] 10.3 Update `test_single_file_reparse.rs`: update fragment assertions and override setup
+  - [x] 10.4 Update `test_regenerate_with_reference.rs`: update fragment assertions
+  - [x] 10.5 Update `test_xml_fragment_position_tracking.rs`: update fragment index assertions
+  - [x] 10.6 Update `test_fragment_validation.rs`: update any frag_idx references
+  - [x] 10.7 Update all remaining SN test files (`test_sn_*.rs`, `test_sutta_boundary_splitting.rs`, `test_s0303m_sc_code_propagation.rs`, `test_sc_code_arangodb_range_lookup.rs`): change frag_idx references to frag_idx_code
+  - [x] 10.8 Update `src/test_tsv_validation.rs` (unit tests): change frag_idx references
+  - [x] 10.9 Run `cargo test` — all existing tests must pass
 
 ### 11. Implement Insert Fragment Backend
 
