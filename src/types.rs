@@ -136,7 +136,7 @@ pub struct CorrectionFragmentOverride {
 }
 
 /// Container for correction fragment overrides extracted from the database.
-/// Key is `(cst_file, frag_idx)` matching the `FragmentKey` type.
+/// Key is `(cst_file, frag_idx_code)` matching the `FragmentKey` type.
 pub type CorrectionFragmentOverrides = HashMap<FragmentKey, CorrectionFragmentOverride>;
 
 /// Combined override configuration for parsing.
@@ -193,7 +193,7 @@ pub enum ParserError {
     ReconstructionVerificationFailed { filename: String, details: String },
 
     /// Critical: fragment count differs from reference DB.
-    /// Override data may be stale — frag_idx values no longer align.
+    /// Override data may be stale — frag_idx_code values no longer align.
     #[error("Row count mismatch for {filename}: new parser produced {new_count} fragments, reference db has {ref_count}")]
     RowCountMismatch {
         filename: String,

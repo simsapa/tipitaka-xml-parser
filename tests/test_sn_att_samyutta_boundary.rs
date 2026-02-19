@@ -96,7 +96,7 @@ fn test_s0301a_att_frag_76_content() {
         .expect("Should parse fragments");
 
     let frag_76 = fragments.get(76)
-        .expect("Should have frag_idx 76");
+        .expect("Should have frag_idx_code 76.0");
 
     println!("Fragment 76:");
     println!("  cst_code: {:?}", frag_76.cst_code);

@@ -4,7 +4,7 @@
 //! sn3_6 (Kilesasaṃyuttavaṇṇanā) have no <p rend="subhead"> elements.
 //! They go directly from <head rend="chapter"> to <p rend="bodytext">.
 //! Previously, the parser only split fragments when a subhead was encountered,
-//! so these samyuttas were merged into frag_idx 98 (sn3_4's fragment).
+//! so these samyuttas were merged into frag_idx_code 98.0 (sn3_4's fragment).
 //!
 //! Each samyutta should produce its own fragment even without a subhead.
 

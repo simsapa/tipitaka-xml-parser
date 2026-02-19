@@ -183,7 +183,7 @@ fn test_regenerate_dn_files() {
 /// This replicates the complete "Regenerate Using Current DB as Reference" action.
 ///
 /// Also verifies that sc_code propagation works correctly:
-/// - s0301m.mul.xml frag_idx 162 has "checked" sc_code "sn5.1"
+/// - s0301m.mul.xml frag_idx_code 162.0 has "checked" sc_code "sn5.1"
 /// - Fragments 163-171 should have sc_code filled in after regeneration
 /// - Fragment 172 has sc_code "sn6.1"
 #[test]
@@ -220,7 +220,7 @@ fn test_regenerate_all_files_with_reference() {
     // Verify sc_code propagation for s0301m.mul.xml
     verify_s0301m_sc_code_propagation(&new_db_path, arangodb_available);
 
-    // Verify fragment type preservation for s0101m.mul.xml frag_idx 14
+    // Verify fragment type preservation for s0101m.mul.xml frag_idx_code 14.0
     verify_s0101m_frag_14_type(&new_db_path);
 
     // Verify that first and last fragments of each file are Headers
@@ -230,9 +230,9 @@ fn test_regenerate_all_files_with_reference() {
 /// Test single-file reparsing for s0301m.mul.xml with sc_code propagation.
 ///
 /// This test verifies that single-file reparsing correctly fills in sc_code values:
-/// - frag_idx 162 has "checked" sc_code "sn5.1"
-/// - frag_idx 163-171 should get sc_code filled in after reparsing
-/// - frag_idx 172 has sc_code "sn6.1"
+/// - frag_idx_code 162.0 has "checked" sc_code "sn5.1"
+/// - frag_idx_code 163.0-171.0 should get sc_code filled in after reparsing
+/// - frag_idx_code 172.0 has sc_code "sn6.1"
 #[test]
 fn test_reparse_s0301m_with_sc_code_propagation() {
     let (_temp_dir, new_db_path, importer, settings, arangodb_available) = setup_regeneration();
@@ -260,9 +260,9 @@ fn test_reparse_s0301m_with_sc_code_propagation() {
 /// Helper function to verify sc_code propagation for s0301m.mul.xml fragments 162-172.
 ///
 /// Checks that:
-/// - frag_idx 162 has sc_code "sn5.1" (from checked override)
-/// - frag_idx 163-171 have non-null sc_code values (propagated)
-/// - frag_idx 172 has sc_code "sn6.1"
+/// - frag_idx_code 162.0 has sc_code "sn5.1" (from checked override)
+/// - frag_idx_code 163.0-171.0 have non-null sc_code values (propagated)
+/// - frag_idx_code 172.0 has sc_code "sn6.1"
 /// - If `check_sc_sutta` is true, also verifies that all fragments with sc_code have sc_sutta titles
 fn verify_s0301m_sc_code_propagation(db_path: &Path, check_sc_sutta: bool) {
     use diesel::prelude::*;
@@ -297,13 +297,13 @@ fn verify_s0301m_sc_code_propagation(db_path: &Path, check_sc_sutta: bool) {
     );
 
     // Verify frag_idx_code "163.0"-"171.0" have non-null sc_code values (should be propagated)
-    for frag_idx in ["163.0", "164.0", "165.0", "166.0", "167.0", "168.0", "169.0", "170.0", "171.0"] {
-        let frag = fragments.iter().find(|(idx, _, _)| idx == frag_idx)
-            .expect(&format!("Fragment {} not found", frag_idx));
+    for frag_idx_code in ["163.0", "164.0", "165.0", "166.0", "167.0", "168.0", "169.0", "170.0", "171.0"] {
+        let frag = fragments.iter().find(|(idx, _, _)| idx == frag_idx_code)
+            .expect(&format!("Fragment {} not found", frag_idx_code));
         assert!(
             frag.1.is_some(),
             "frag_idx_code {} should have sc_code filled in after regeneration (was null before), got: {:?}",
-            frag_idx,
+            frag_idx_code,
             frag.1
         );
     }
@@ -340,7 +340,7 @@ fn verify_s0301m_sc_code_propagation(db_path: &Path, check_sc_sutta: bool) {
     }
 }
 
-/// Helper function to verify that s0101m.mul.xml frag_idx 14 remains "Header" type.
+/// Helper function to verify that s0101m.mul.xml frag_idx_code 14.0 remains "Header" type.
 ///
 /// This fragment has a "checked" review status correction override where the type
 /// is "Header". After regeneration with corrections applied, it should remain "Header",
@@ -383,7 +383,7 @@ fn verify_s0101m_frag_14_type(db_path: &Path) {
 }
 
 /// Helper function to verify that for every distinct cst_file,
-/// the first and last frag_idx are "Header" type fragments.
+/// the first and last frag_idx_code are "Header" type fragments.
 ///
 /// This is a structural invariant: XML files should always start and end
 /// with Header fragments (containing metadata), not Sutta fragments.
@@ -474,7 +474,7 @@ fn verify_first_last_fragments_are_headers(db_path: &Path) {
     eprintln!("✓ All {} files have Header fragments as first and last", files.len());
 }
 
-/// Test that s0302m.mul.xml frag_idx 146 has sc_code and sc_sutta populated.
+/// Test that s0302m.mul.xml frag_idx_code 146.0 has sc_code and sc_sutta populated.
 ///
 /// This tests the fix for when derived cst_code values are not in the lookup data:
 /// - If the derived cst_code is not in the lookup data, compare the current fragment's
@@ -521,30 +521,30 @@ fn test_s0302m_frag_146_sc_code_propagation() {
 
     assert!(
         fragment.sc_code.is_some() && !fragment.sc_code.as_ref().unwrap().is_empty(),
-        "frag_idx 146 should have sc_code populated, got {:?}",
+        "frag_idx_code 146.0 should have sc_code populated, got {:?}",
         fragment.sc_code
     );
 
     assert!(
         fragment.sc_sutta.is_some() && !fragment.sc_sutta.as_ref().unwrap().is_empty(),
-        "frag_idx 146 should have sc_sutta populated, got {:?}",
+        "frag_idx_code 146.0 should have sc_sutta populated, got {:?}",
         fragment.sc_sutta
     );
 
     assert_eq!(
         fragment.sc_code.as_deref(),
         Some("sn16.1"),
-        "frag_idx 146 should have sc_code 'sn16.1'"
+        "frag_idx_code 146.0 should have sc_code 'sn16.1'"
     );
 
     assert_eq!(
         fragment.sc_sutta.as_deref(),
         Some("Santuṭṭhasutta"),
-        "frag_idx 146 should have sc_sutta 'Santuṭṭhasutta' from ArangoDB"
+        "frag_idx_code 146.0 should have sc_sutta 'Santuṭṭhasutta' from ArangoDB"
     );
 }
 
-/// Test that s0302m.mul.xml frag_idx 76 has sc_code and sc_sutta populated after a range.
+/// Test that s0302m.mul.xml frag_idx_code 76.0 has sc_code and sc_sutta populated after a range.
 ///
 /// This tests the case when the previous fragment has a range sc_code (e.g., sn12.93-103).
 /// The propagate_sc_codes_from_previous() should handle ranges correctly.
@@ -583,31 +583,31 @@ fn test_s0302m_frag_76_after_range() {
         true,
     ).expect("Failed to parse fragments");
 
-    // frag_idx 75 has range sc_code sn12.93-103
-    // frag_idx 76 should have sc_code derived from previous
+    // frag_idx_code 75.0 has range sc_code sn12.93-103
+    // frag_idx_code 76.0 should have sc_code derived from previous
     let frag_76 = fragments.get(76).expect("Fragment 76 not found");
 
     assert!(
         frag_76.sc_code.is_some() && !frag_76.sc_code.as_ref().unwrap().is_empty(),
-        "frag_idx 76 should have sc_code populated, got {:?}",
+        "frag_idx_code 76.0 should have sc_code populated, got {:?}",
         frag_76.sc_code
     );
 
     assert!(
         frag_76.sc_sutta.is_some() && !frag_76.sc_sutta.as_ref().unwrap().is_empty(),
-        "frag_idx 76 should have sc_sutta populated, got {:?}",
+        "frag_idx_code 76.0 should have sc_sutta populated, got {:?}",
         frag_76.sc_sutta
     );
 
     assert_eq!(
         frag_76.sc_code.as_deref(),
         Some("sn13.1"),
-        "frag_idx 76 should have sc_code 'sn13.1'"
+        "frag_idx_code 76.0 should have sc_code 'sn13.1'"
     );
 
     assert_eq!(
         frag_76.sc_sutta.as_deref(),
         Some("Nakhasikhāsutta"),
-        "frag_idx 76 should have sc_sutta 'Nakhasikhāsutta' from ArangoDB"
+        "frag_idx_code 76.0 should have sc_sutta 'Nakhasikhāsutta' from ArangoDB"
     );
 }

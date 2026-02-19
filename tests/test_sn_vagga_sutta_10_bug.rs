@@ -4,8 +4,8 @@
 //! cst_code "sn1.3.3.10" instead of the correct "sn1.3.2.10".
 //! 
 //! The bug occurs when parsing s0301m.mul.xml (SamyuttaNikayaMula), specifically:
-//! - frag_idx 132: cst_code "sn1.3.2.9" for "9. Paṭhamaaputtakasuttaṃ" (correct)
-//! - frag_idx 133: cst_code should be "sn1.3.2.10" for "10. Dutiyaaputtakasuttaṃ" (was "sn1.3.3.10")
+//! - frag_idx_code 132.0: cst_code "sn1.3.2.9" for "9. Paṭhamaaputtakasuttaṃ" (correct)
+//! - frag_idx_code 133.0: cst_code should be "sn1.3.2.10" for "10. Dutiyaaputtakasuttaṃ" (was "sn1.3.3.10")
 //!
 //! The issue is that the parser was prematurely incrementing the vagga number when
 //! encountering the vagga 3 title, even though sutta 10 is still in vagga 2.

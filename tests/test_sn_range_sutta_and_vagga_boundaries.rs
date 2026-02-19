@@ -143,7 +143,7 @@ fn test_sn_vagga_title_closes_fragment() {
     );
 }
 
-/// Test that frag_idx with vagga 9 starts with proper content pattern
+/// Test that frag_idx_code with vagga 9 starts with proper content pattern
 /// s0302m.mul.xml should have fragment containing:
 /// <p rend="title">9. Antarapeyyālaṃ</p>
 /// <p rend="subhead">1. Satthusuttaṃ</p>
@@ -197,7 +197,7 @@ fn test_sn_antarapeyyala_fragment_content() {
     );
 }
 
-/// Test that frag_idx 10 (s0301m.mul.xml) starts with proper content pattern
+/// Test that frag_idx_code 10.0 (s0301m.mul.xml) starts with proper content pattern
 /// s0301m.mul.xml should have fragment containing:
 /// <p rend="subhead">10. Araññasuttaṃ</p>
 /// <p rend="bodytext" n="10"> ...
@@ -244,7 +244,7 @@ fn test_sn_aranan_sutta_fragment_content() {
     );
 }
 
-/// Test that frag_idx 11 (s0301m.mul.xml) has proper content pattern
+/// Test that frag_idx_code 11.0 (s0301m.mul.xml) has proper content pattern
 /// s0301m.mul.xml should have fragment containing:
 /// <p rend="title">2. Nandanavaggo</p>
 /// <p rend="subhead">1. Nandanasuttaṃ</p>

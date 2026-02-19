@@ -137,7 +137,7 @@ fn test_move_to_prev_basic() {
     
     let (current, target) = result.unwrap();
     
-    // Verify current fragment (frag_idx=2) is now empty and marked as moved
+    // Verify current fragment (frag_idx_code=2.0) is now empty and marked as moved
     assert_eq!(current.frag_idx_code, "2.0");
     assert_eq!(current.content_xml, "");
     assert_eq!(current.frag_review, Some("moved".to_string()));
@@ -146,7 +146,7 @@ fn test_move_to_prev_basic() {
     assert_eq!(current.cst_vagga, None);
     assert_eq!(current.cst_sutta, None);
     
-    // Verify target fragment (frag_idx=1) has merged content and updated boundaries
+    // Verify target fragment (frag_idx_code=1.0) has merged content and updated boundaries
     assert_eq!(target.frag_idx_code, "1.0");
     assert!(target.content_xml.contains("Fragment 1 content"));
     assert!(target.content_xml.contains("Fragment 2 content"));
@@ -168,12 +168,12 @@ fn test_move_to_next_basic() {
     
     let (current, target) = result.unwrap();
     
-    // Verify current fragment (frag_idx=1) is now empty and marked as moved
+    // Verify current fragment (frag_idx_code=1.0) is now empty and marked as moved
     assert_eq!(current.frag_idx_code, "1.0");
     assert_eq!(current.content_xml, "");
     assert_eq!(current.frag_review, Some("moved".to_string()));
     
-    // Verify target fragment (frag_idx=2) has merged content and updated boundaries
+    // Verify target fragment (frag_idx_code=2.0) has merged content and updated boundaries
     assert_eq!(target.frag_idx_code, "2.0");
     assert!(target.content_xml.contains("Fragment 1 content"));
     assert!(target.content_xml.contains("Fragment 2 content"));
@@ -196,12 +196,12 @@ fn test_skip_moved_fragments_to_prev() {
     
     let (current, target) = result.unwrap();
     
-    // Verify current fragment (frag_idx=3) is now empty and marked as moved
+    // Verify current fragment (frag_idx_code=3.0) is now empty and marked as moved
     assert_eq!(current.frag_idx_code, "3.0");
     assert_eq!(current.content_xml, "");
     assert_eq!(current.frag_review, Some("moved".to_string()));
     
-    // Verify target fragment (frag_idx=1) has merged content (skipped fragment 2)
+    // Verify target fragment (frag_idx_code=1.0) has merged content (skipped fragment 2)
     assert_eq!(target.frag_idx_code, "1.0");
     assert!(target.content_xml.contains("Fragment 1 content"));
     assert!(target.content_xml.contains("Fragment 3 content"));
@@ -223,12 +223,12 @@ fn test_skip_moved_fragments_to_next() {
     
     let (current, target) = result.unwrap();
     
-    // Verify current fragment (frag_idx=1) is now empty and marked as moved
+    // Verify current fragment (frag_idx_code=1.0) is now empty and marked as moved
     assert_eq!(current.frag_idx_code, "1.0");
     assert_eq!(current.content_xml, "");
     assert_eq!(current.frag_review, Some("moved".to_string()));
     
-    // Verify target fragment (frag_idx=3) has merged content (skipped fragment 2)
+    // Verify target fragment (frag_idx_code=3.0) has merged content (skipped fragment 2)
     assert_eq!(target.frag_idx_code, "3.0");
     assert!(target.content_xml.contains("Fragment 1 content"));
     assert!(target.content_xml.contains("Fragment 3 content"));

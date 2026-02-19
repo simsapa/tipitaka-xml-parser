@@ -132,14 +132,14 @@ Generated from [prd-insert-fragment.md](./prd-insert-fragment.md)
 > `parsers/helpers.rs` looks up overrides by `FragmentKey(cst_file, frag_idx)` —
 > this must use `frag_idx_code`.
 
-- [ ] 5.0 Update all parsers and fragment generation to use `frag_idx_code`
-  - [ ] 5.1 Update `parsers/general.rs`: when pushing fragments, set `frag_idx_code: format!("{}.0", fragments.len())` instead of `frag_idx: fragments.len()`
-  - [ ] 5.2 Update `parsers/samyutta_nikaya_mula.rs`: same pattern — assign `frag_idx_code` as `"N.0"` when creating fragments
-  - [ ] 5.3 Update `parsers/samyutta_nikaya_commentary.rs`: same pattern
-  - [ ] 5.4 Update `apply_fragment_adjustment()` in `parsers/helpers.rs`: build `FragmentKey` with `frag_idx_code` string instead of `frag_idx` usize; update the `get_boundary_override()` helper likewise
-  - [ ] 5.5 Update `apply_sc_overrides()` in `parsers/helpers.rs`: build `FragmentKey` with `frag_idx_code` from each fragment
-  - [ ] 5.6 Update `xml_parser.rs` `parse_into_fragments()`: ensure fragment indexing uses the new code format
-  - [ ] 5.7 Run `cargo check` to verify all parser code compiles
+- [x] 5.0 Update all parsers and fragment generation to use `frag_idx_code`
+  - [x] 5.1 Update `parsers/general.rs`: when pushing fragments, set `frag_idx_code: format!("{}.0", fragments.len())` instead of `frag_idx: fragments.len()`
+  - [x] 5.2 Update `parsers/samyutta_nikaya_mula.rs`: same pattern — assign `frag_idx_code` as `"N.0"` when creating fragments
+  - [x] 5.3 Update `parsers/samyutta_nikaya_commentary.rs`: same pattern
+  - [x] 5.4 Update `apply_fragment_adjustment()` in `parsers/helpers.rs`: build `FragmentKey` with `frag_idx_code` string instead of `frag_idx` usize; update the `get_boundary_override()` helper likewise
+  - [x] 5.5 Update `apply_sc_overrides()` in `parsers/helpers.rs`: build `FragmentKey` with `frag_idx_code` from each fragment
+  - [x] 5.6 Update `xml_parser.rs` `parse_into_fragments()`: ensure fragment indexing uses the new code format
+  - [x] 5.7 Run `cargo check` to verify all parser code compiles
 
 ### 6. Update CorrectionFragmentOverrides Pipeline
 
@@ -151,12 +151,12 @@ Generated from [prd-insert-fragment.md](./prd-insert-fragment.md)
 > and `apply_sc_overrides()` already uses `FragmentKey` lookups — these were updated
 > in task 5, but the extraction side needs updating here.
 
-- [ ] 6.0 Update `CorrectionFragmentOverrides` pipeline for `frag_idx_code`
-  - [ ] 6.1 Update `extract_correction_overrides()` in `fragment_exporter.rs`: read `frag_idx_code` (String) instead of `frag_idx` (i32) from query results; build `FragmentKey` with the string code
-  - [ ] 6.2 Update `extract_all_correction_overrides()` in `fragment_exporter.rs`: same changes for the all-files variant
-  - [ ] 6.3 Update any frag_review status map returned alongside overrides (the `HashMap<usize, String>` keyed by frag_idx) to use `String` keys matching `frag_idx_code`
-  - [ ] 6.4 Verify that the `CorrectionFragmentOverride` struct itself needs no changes (it stores override data, not the key)
-  - [ ] 6.5 Run `cargo check` to verify the override pipeline compiles end-to-end
+- [x] 6.0 Update `CorrectionFragmentOverrides` pipeline for `frag_idx_code`
+  - [x] 6.1 Update `extract_correction_overrides()` in `fragment_exporter.rs`: read `frag_idx_code` (String) instead of `frag_idx` (i32) from query results; build `FragmentKey` with the string code
+  - [x] 6.2 Update `extract_all_correction_overrides()` in `fragment_exporter.rs`: same changes for the all-files variant
+  - [x] 6.3 Update any frag_review status map returned alongside overrides (the `HashMap<usize, String>` keyed by frag_idx) to use `String` keys matching `frag_idx_code`
+  - [x] 6.4 Verify that the `CorrectionFragmentOverride` struct itself needs no changes (it stores override data, not the key)
+  - [x] 6.5 Run `cargo check` to verify the override pipeline compiles end-to-end
 
 ### 7. Update Fragment Operations
 

@@ -243,7 +243,7 @@ body, html {
 }
 
 #fragment-list .panel-item .tag:nth-child(2) {
-    min-width: 3rem; /* For frag_idx like "242" */
+    min-width: 3rem; /* For frag_idx_code like "242.0" */
     justify-content: left;
 }
 

@@ -163,7 +163,7 @@ pub fn regenerate_fragments_db(config: &RegenerateConfig) -> RegenerateResult {
                     output.push_str(&format!("\nFound {} regressions:\n", result.validation_errors.len()));
                     for error in &result.validation_errors {
                         output.push_str(&format!("  - File: {}, Fragment: {}, CST Code: {}\n",
-                            error.cst_file, error.frag_idx, error.cst_code));
+                            error.cst_file, error.frag_idx_code, error.cst_code));
                     }
                     output.push_str("\n");
                 }

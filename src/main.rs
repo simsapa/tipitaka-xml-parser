@@ -498,7 +498,7 @@ fn main() {
                             logger::error(&format!("Found {} regressions", result.validation_errors.len()));
                             
                             for error in &result.validation_errors {
-                                println!("REGRESSION - File: {}, Fragment: {}", error.cst_file, error.frag_idx);
+                                println!("REGRESSION - File: {}, Fragment: {}", error.cst_file, error.frag_idx_code);
                                 println!("  CST Code: {}", error.cst_code);
                                 println!("  Old value was CORRECT, new value is INCORRECT");
                                 println!("  New cst_sutta: {:?}", error.actual_cst_sutta);
