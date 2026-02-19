@@ -15,12 +15,11 @@
 //! values can be populated from the Pali titles cache fetched from ArangoDB.
 
 use std::collections::HashMap;
-use std::path::Path;
 use diesel::prelude::*;
 use serde::{Serialize, Deserialize};
 
 use crate::fragments_schema::xml_fragments;
-use crate::fragment_reconstructor::reconstruct_xml_from_db;
+use crate::fragment_reconstructor::reconstruct_xml_with_conn;
 use crate::parsers::helpers::is_cst_code_range;
 
 /// A validation error found during a check
@@ -282,7 +281,7 @@ pub fn check_sutta_review_status(conn: &mut SqliteConnection, _include_checked: 
 /// Check XML reconstruction for all files in the database
 ///
 /// Uses the same reconstruction procedure as the regeneration process:
-/// calls `reconstruct_xml_from_db` for each file and reports any failures.
+/// calls `reconstruct_xml_with_conn` for each file and reports any failures.
 /// Reports the problematic cst_file and first frag_idx_code when reconstruction fails.
 ///
 /// Always include all fragments for reconstruction validation.
@@ -290,7 +289,6 @@ pub fn check_sutta_review_status(conn: &mut SqliteConnection, _include_checked: 
 /// so we are not filtering on any frag_review fragment types.
 pub fn check_xml_reconstruction(
     conn: &mut SqliteConnection,
-    db_path: &Path,
     _include_checked: bool,
 ) -> ValidationCheckResult {
     // Get all unique cst_file values - always include checked for reconstruction validation
@@ -315,8 +313,8 @@ pub fn check_xml_reconstruction(
             .unwrap_or(None);
 
         if let Some((fragment_id, frag_idx_code, frag_review)) = first_fragment {
-            // Attempt reconstruction using the same function used during regeneration
-            match reconstruct_xml_from_db(db_path, &cst_file) {
+            // Attempt reconstruction using the connection (no migrations triggered)
+            match reconstruct_xml_with_conn(conn, &cst_file) {
                 Ok(_reconstructed_xml) => {
                     // Reconstruction succeeded, no error
                 }
@@ -1024,7 +1022,6 @@ pub fn check_sc_code_not_in_arangodb(
 /// will be excluded from validation checks (similar to how `frag_review = 'moved'` is excluded).
 pub fn run_all_validations(
     conn: &mut SqliteConnection,
-    db_path: &Path,
     pali_titles: Option<&HashMap<String, String>>,
     include_checked: bool,
 ) -> HashMap<String, ValidationCheckResult> {
@@ -1047,7 +1044,7 @@ pub fn run_all_validations(
 
     results.insert(
         "xml_reconstruction".to_string(),
-        check_xml_reconstruction(conn, db_path, include_checked),
+        check_xml_reconstruction(conn, include_checked),
     );
 
     results.insert(
@@ -1334,10 +1331,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: Fix test - migration runner tries to apply migrations on test db
     fn test_xml_reconstruction_valid_fragments() {
-        let (mut conn, temp_db) = setup_test_db();
-        let db_path = temp_db.path();
+        let (mut conn, _temp_db) = setup_test_db();
 
         // Insert valid fragments
         let fragments = vec![
@@ -1391,7 +1386,7 @@ mod tests {
         }
 
         // Run validation
-        let result = check_xml_reconstruction(&mut conn, db_path, false);
+        let result = check_xml_reconstruction(&mut conn, false);
 
         // Should have no errors
         if result.errors.len() > 0 {
@@ -1403,10 +1398,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: Fix test - migration runner tries to apply migrations on test db
     fn test_xml_reconstruction_no_fragments() {
-        let (mut conn, temp_db) = setup_test_db();
-        let db_path = temp_db.path();
+        let (mut conn, _temp_db) = setup_test_db();
 
         // Don't insert any fragments - this should cause reconstruction to fail
         // when trying to get the nikaya (no fragments found)
@@ -1443,7 +1436,7 @@ mod tests {
             .expect("Failed to insert fragment");
 
         // Run validation
-        let result = check_xml_reconstruction(&mut conn, db_path, false);
+        let result = check_xml_reconstruction(&mut conn, false);
 
         // Should succeed with minimal valid content
         assert_eq!(result.errors.len(), 0, "Should have no errors for minimal valid content");
@@ -1451,8 +1444,7 @@ mod tests {
 
     #[test]
     fn test_xml_reconstruction_invalid_position() {
-        let (mut conn, temp_db) = setup_test_db();
-        let db_path = temp_db.path();
+        let (mut conn, _temp_db) = setup_test_db();
 
         // Insert fragment with invalid position (end before start)
         let fragment = NewXmlFragment {
@@ -1482,7 +1474,7 @@ mod tests {
             .expect("Failed to insert fragment");
 
         // Run validation
-        let _result = check_xml_reconstruction(&mut conn, db_path, false);
+        let _result = check_xml_reconstruction(&mut conn, false);
 
         // The reconstruction function should handle this gracefully
         // It may or may not fail depending on the implementation
@@ -1492,8 +1484,7 @@ mod tests {
 
     #[test]
     fn test_xml_reconstruction_gap_detection() {
-        let (mut conn, temp_db) = setup_test_db();
-        let db_path = temp_db.path();
+        let (mut conn, _temp_db) = setup_test_db();
 
         // Insert fragments with a gap between them
         let fragments = vec![
@@ -1547,7 +1538,7 @@ mod tests {
         }
 
         // Run validation
-        let _result = check_xml_reconstruction(&mut conn, db_path, false);
+        let _result = check_xml_reconstruction(&mut conn, false);
 
         // The reconstruction function should handle this gracefully
         // Gaps in line positions don't necessarily mean reconstruction will fail

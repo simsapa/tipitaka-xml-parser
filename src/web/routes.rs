@@ -1157,7 +1157,6 @@ async fn run_validation(
 
     let checks = validation::run_all_validations(
         &mut conn,
-        &db_state.db_path,
         pali_titles.as_ref(),
         request.include_checked,
     );

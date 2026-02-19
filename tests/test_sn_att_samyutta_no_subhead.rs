@@ -76,13 +76,16 @@ fn test_s0303a_att_samyutta_without_subhead_split() {
          frag_idx_code: {}", sn3_5_frag.frag_idx_code);
 
     // Verify fragment indices are sequential (sn3_4 < sn3_5 < sn3_6 < sn3_7)
-    assert!(sn3_4_frag.frag_idx_code < sn3_5_frag.frag_idx_code,
+    // Note: frag_idx_code is a String like "99.0", so we must compare numerically
+    let parse_idx = |s: &str| -> f64 { s.parse().unwrap_or(0.0) };
+
+    assert!(parse_idx(&sn3_4_frag.frag_idx_code) < parse_idx(&sn3_5_frag.frag_idx_code),
         "sn3_4 frag_idx_code ({}) should be before sn3_5 frag_idx_code ({})",
         sn3_4_frag.frag_idx_code, sn3_5_frag.frag_idx_code);
-    assert!(sn3_5_frag.frag_idx_code < sn3_6_frags[0].frag_idx_code,
+    assert!(parse_idx(&sn3_5_frag.frag_idx_code) < parse_idx(&sn3_6_frags[0].frag_idx_code),
         "sn3_5 frag_idx_code ({}) should be before sn3_6 frag_idx_code ({})",
         sn3_5_frag.frag_idx_code, sn3_6_frags[0].frag_idx_code);
-    assert!(sn3_6_frags[0].frag_idx_code < sn3_7_frags[0].frag_idx_code,
+    assert!(parse_idx(&sn3_6_frags[0].frag_idx_code) < parse_idx(&sn3_7_frags[0].frag_idx_code),
         "sn3_6 frag_idx_code ({}) should be before sn3_7 frag_idx_code ({})",
         sn3_6_frags[0].frag_idx_code, sn3_7_frags[0].frag_idx_code);
 }

@@ -24,13 +24,38 @@ pub fn reconstruct_xml_from_db(
     cst_file: &str,
 ) -> Result<String> {
     let mut conn = establish_connection_and_migrate(db_path)?;
-    
+
     // Get nikaya name for this filename
     let _nikaya = get_nikaya_by_filename(&mut conn, cst_file)?;
-    
+
     // Get all fragments for this filename, ordered by line and char position
     let fragments = get_fragments_for_filename(&mut conn, cst_file)?;
-    
+
+    // Reconstruct XML from fragments
+    reconstruct_xml_from_fragments(&fragments)
+}
+
+/// Reconstruct XML content from fragments using an existing database connection
+///
+/// This variant is useful for tests and validation where you already have a connection
+/// and don't want to trigger migrations.
+///
+/// # Arguments
+/// * `conn` - An existing SQLite connection
+/// * `cst_file` - The cst_file to look up
+///
+/// # Returns
+/// The reconstructed XML content as a string
+pub fn reconstruct_xml_with_conn(
+    conn: &mut SqliteConnection,
+    cst_file: &str,
+) -> Result<String> {
+    // Get nikaya name for this filename
+    let _nikaya = get_nikaya_by_filename(conn, cst_file)?;
+
+    // Get all fragments for this filename, ordered by line and char position
+    let fragments = get_fragments_for_filename(conn, cst_file)?;
+
     // Reconstruct XML from fragments
     reconstruct_xml_from_fragments(&fragments)
 }
@@ -41,13 +66,13 @@ fn get_nikaya_by_filename(
     cst_file: &str,
 ) -> Result<String> {
     use crate::fragments_schema::xml_fragments::dsl;
-    
+
     let nikaya: String = dsl::xml_fragments
         .filter(dsl::cst_file.eq(cst_file))
         .select(dsl::nikaya)
         .first(conn)
         .context(format!("No nikaya found with filename: {}", cst_file))?;
-    
+
     Ok(nikaya)
 }
 
@@ -57,7 +82,7 @@ fn get_fragments_for_filename(
     cst_file: &str,
 ) -> Result<Vec<XmlFragment>> {
     use crate::fragments_schema::xml_fragments::dsl;
-    
+
     // Query using diesel models
     let rows: Vec<XmlFragmentRecord> = dsl::xml_fragments
         .filter(dsl::cst_file.eq(cst_file))
@@ -65,7 +90,7 @@ fn get_fragments_for_filename(
         .select(XmlFragmentRecord::as_select())
         .load(conn)
         .context("Failed to query fragments")?;
-    
+
     // Convert XmlFragmentRecord to XmlFragment
     let mut fragments = Vec::new();
     for row in rows {
@@ -74,10 +99,10 @@ fn get_fragments_for_filename(
             "Sutta" => FragmentType::Sutta,
             _ => continue,
         };
-        
+
         let group_levels: Vec<GroupLevel> = serde_json::from_str(&row.group_levels)
             .context("Failed to deserialize group levels")?;
-        
+
         fragments.push(XmlFragment {
             nikaya: row.nikaya,
             frag_type,
@@ -98,7 +123,7 @@ fn get_fragments_for_filename(
             sc_sutta: row.sc_sutta,
         });
     }
-    
+
     Ok(fragments)
 }
 
@@ -107,13 +132,13 @@ fn reconstruct_xml_from_fragments(fragments: &[XmlFragment]) -> Result<String> {
     if fragments.is_empty() {
         return Err(anyhow::anyhow!("No fragments to reconstruct"));
     }
-    
+
     // Simply concatenate all fragment contents in order
     let mut xml = String::new();
     for fragment in fragments {
         xml.push_str(&fragment.content_xml);
     }
-    
+
     Ok(xml)
 }
 
@@ -143,23 +168,23 @@ mod tests {
 </body>
 </text>
 </TEI.2>"#;
-        
+
         let temp_db = NamedTempFile::new().unwrap();
         let db_path = temp_db.path();
-        
+
         // Parse and export
         let structure = detect_nikaya_structure(original_xml).unwrap();
-        
+
         let fragments = parse_into_fragments(original_xml, &structure, "test.xml", &ParserOverrides::default(), false).unwrap();
         export_fragments_to_db(&fragments, &structure, db_path).unwrap();
-        
+
         // Reconstruct
         let reconstructed_xml = reconstruct_xml_from_db(db_path, "test.xml").unwrap();
-        
+
         // Verify - should be identical (whitespace may differ)
         assert_eq!(original_xml.trim(), reconstructed_xml.trim());
     }
-    
+
     #[test]
     fn test_roundtrip_commentary_style() {
         // Test reconstruction with commentary-style XML (DN .att.xml)
@@ -180,14 +205,14 @@ mod tests {
 </body>
 </text>
 </TEI.2>"#;
-        
+
         let temp_db = NamedTempFile::new().unwrap();
         let db_path = temp_db.path();
-        
+
         // Parse as commentary file
         let structure = detect_nikaya_structure(original_xml).unwrap();
         let fragments = parse_into_fragments(original_xml, &structure, "test.att.xml", &ParserOverrides::default(), false).unwrap();
-        
+
         // Verify head tags are together
         for frag in &fragments {
             if frag.content_xml.contains("<head rend=\"chapter\">") {
@@ -195,12 +220,12 @@ mod tests {
                     "Fragment with <head rend=\"chapter\"> must also contain </head>");
             }
         }
-        
+
         export_fragments_to_db(&fragments, &structure, db_path).unwrap();
-        
+
         // Reconstruct
         let reconstructed_xml = reconstruct_xml_from_db(db_path, "test.att.xml").unwrap();
-        
+
         // Verify - should be identical
         assert_eq!(original_xml.trim(), reconstructed_xml.trim(),
             "Reconstructed commentary XML should match original");
