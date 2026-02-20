@@ -13,9 +13,12 @@ use diesel::prelude::*;
 use crate::web::state::DbState;
 use crate::web::models::{
     FileListItem, FragmentListItem, FragmentDetail, AdjacentFragment,
-    UpdateMetadataRequest, BoundaryAdjustmentRequest, BoundaryAdjustmentResponse, BoundaryAction, CreateFragmentRequest, CreateFragmentResponse, MoveFragmentRequest, MoveFragmentResponse, AppSettings, NikayaGroup,
+    UpdateMetadataRequest, BoundaryAdjustmentRequest, BoundaryAdjustmentResponse, BoundaryAction, BoundaryDiscontinuityInfo, ContentIntegrityErrorInfo, CreateFragmentRequest, CreateFragmentResponse, MoveFragmentRequest, MoveFragmentResponse, AppSettings, NikayaGroup,
     ArangoStatusResponse, PaliTitlesResponse,
     ValidationRunRequest, ValidationRunResponse, AutoFixRequest, AutoFixResponse,
+    InsertFragmentRequest, InsertFragmentResponse,
+    RecalculateBoundariesRequest, RecalculateBoundariesResponse,
+    ResetFileRequest, ResetFileResponse,
 };
 use crate::web::settings;
 use crate::web::arangodb;
@@ -24,7 +27,7 @@ use crate::fragments_schema::xml_fragments;
 use crate::fragments_models::{
     XmlFragmentRecord, UpdateFragmentMetadata, UpdateFragmentBoundary, UpdateFragmentIndexCode, NewXmlFragment
 };
-use crate::fragment_operations::{Direction, move_fragment_content, find_target_fragment, increment_frag_idx_code};
+use crate::fragment_operations::{Direction, move_fragment_content, find_target_fragment, increment_frag_idx_code, insert_fragment, validate_boundary_chain, recalculate_boundaries, validate_content_integrity};
 use crate::types::compare_frag_idx_code;
 
 /// Serve the main index.html page
@@ -273,8 +276,8 @@ fn adjust_fragment_boundary(
     let mut conn = db_state.connect()
         .map_err(|e| format!("Database connection failed: {}", e))?;
 
-    // Start a transaction
-    conn.transaction::<_, diesel::result::Error, _>(|conn| {
+    // Start a transaction - returns (cst_file, target_id, other_id)
+    let (cst_file, target_id, other_id) = conn.transaction::<_, diesel::result::Error, _>(|conn| {
         // Get the current fragment
         let current: XmlFragmentRecord = xml_fragments::table
             .find(fragment_id)
@@ -295,6 +298,9 @@ fn adjust_fragment_boundary(
                     .ok_or_else(|| diesel::result::Error::NotFound)?;
                 (current, next)
             };
+
+        let target_id = target_fragment.id;
+        let other_id = other_fragment.id;
 
          // Calculate new boundaries and update content_xml based on action
         let (new_target_end_line, new_target_end_char, new_other_start_line, new_other_start_char,
@@ -403,7 +409,7 @@ fn adjust_fragment_boundary(
                 }
             };
 
-        // Update target fragment
+        // Update target fragment (boundary and content)
         let target_update = UpdateFragmentBoundary {
             start_line: target_fragment.start_line,
             start_char: target_fragment.start_char,
@@ -416,7 +422,15 @@ fn adjust_fragment_boundary(
             .set(&target_update)
             .execute(conn)?;
 
-        // Update other fragment
+        // Mark target fragment as needing override if not already set
+        // This ensures it gets proper boundary overrides during regeneration
+        if target_fragment.frag_review.is_none() {
+            diesel::update(xml_fragments::table.find(target_fragment.id))
+                .set(xml_fragments::frag_review.eq(Some("checked")))
+                .execute(conn)?;
+        }
+
+        // Update other fragment (boundary and content)
         let other_update = UpdateFragmentBoundary {
             start_line: new_other_start_line,
             start_char: new_other_start_char,
@@ -429,13 +443,210 @@ fn adjust_fragment_boundary(
             .set(&other_update)
             .execute(conn)?;
 
-        Ok(())
+        // Mark other fragment as needing override if not already set
+        if other_fragment.frag_review.is_none() {
+            diesel::update(xml_fragments::table.find(other_fragment.id))
+                .set(xml_fragments::frag_review.eq(Some("checked")))
+                .execute(conn)?;
+        }
+
+        Ok((target_fragment.cst_file.clone(), target_id, other_id))
     }).map_err(|e| format!("Transaction failed: {}", e))?;
 
+    // Query updated fragments for UI refresh
+    let updated_fragments: Vec<FragmentListItem> = xml_fragments::table
+        .filter(xml_fragments::id.eq_any(vec![target_id, other_id]))
+        .select((
+            xml_fragments::id,
+            xml_fragments::frag_idx_code,
+            xml_fragments::frag_type,
+            xml_fragments::frag_review,
+            xml_fragments::cst_code,
+            xml_fragments::sc_code,
+        ))
+        .load::<(i32, String, String, Option<String>, Option<String>, Option<String>)>(&mut conn)
+        .map_err(|e| format!("Failed to load updated fragments: {}", e))?
+        .into_iter()
+        .map(|(id, frag_idx_code, frag_type, frag_review, cst_code, sc_code)| FragmentListItem {
+            id,
+            frag_idx_code,
+            frag_type,
+            frag_review,
+            cst_code,
+            sc_code,
+        })
+        .collect();
+
+    // Load settings to get XML directory for content validation
+    let settings = settings::load_settings()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+
+    // Validate content integrity (check for duplication or loss)
+    let content_integrity_error = if !settings.xml_dir.is_empty() {
+        let xml_dir = std::path::Path::new(&settings.xml_dir);
+        match validate_content_integrity(&mut conn, &cst_file, xml_dir) {
+            Ok(Some(err)) => Some(ContentIntegrityErrorInfo {
+                expected_bytes: err.expected_bytes,
+                actual_bytes: err.actual_bytes,
+                difference: err.difference,
+                message: err.message,
+            }),
+            Ok(None) => None,
+            Err(e) => {
+                // Log error but don't fail the request
+                eprintln!("Content integrity check failed: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Validate boundary chain after adjustment
+    let boundary_errors = validate_boundary_chain(&mut conn, &cst_file)
+        .map_err(|e| format!("Validation failed: {}", e))?;
+
+    let boundary_errors_info: Option<Vec<BoundaryDiscontinuityInfo>> = if boundary_errors.is_empty() {
+        None
+    } else {
+        Some(boundary_errors.into_iter().map(|d| BoundaryDiscontinuityInfo {
+            frag_idx_code: d.frag_idx_code,
+            expected_start_line: d.expected_start_line,
+            expected_start_char: d.expected_start_char,
+            actual_start_line: d.actual_start_line,
+            actual_start_char: d.actual_start_char,
+        }).collect())
+    };
+
+    let message = if content_integrity_error.is_some() {
+        Some("CRITICAL: Content integrity error detected! Use 'Reset Current File' to fix.".to_string())
+    } else if boundary_errors_info.is_some() {
+        Some("Boundary adjusted but chain has discontinuities".to_string())
+    } else {
+        Some("Boundary adjusted successfully".to_string())
+    };
+
     Ok(Json(BoundaryAdjustmentResponse {
-        success: true,
-        message: Some("Boundary adjusted successfully".to_string()),
+        success: content_integrity_error.is_none(),
+        message,
         deleted_fragment_id: None,
+        boundary_errors: boundary_errors_info,
+        content_integrity_error,
+        updated_fragments: Some(updated_fragments),
+    }))
+}
+
+/// POST /api/fragments/recalculate-boundaries - Recalculate all fragment boundaries for a file
+///
+/// This endpoint recalculates all start_line, start_char, end_line, end_char values
+/// for fragments in a file based on their content_xml, ensuring boundaries form a
+/// contiguous chain. Useful for fixing discontinuities after manual boundary adjustments.
+#[post("/api/fragments/recalculate-boundaries", data = "<request>")]
+fn recalculate_boundaries_route(
+    request: Json<RecalculateBoundariesRequest>,
+    db_state: &State<DbState>
+) -> Result<Json<RecalculateBoundariesResponse>, String> {
+    let mut conn = db_state.connect()
+        .map_err(|e| format!("Database connection failed: {}", e))?;
+
+    recalculate_boundaries(&mut conn, &request.cst_file)
+        .map_err(|e| format!("Recalculation failed: {}", e))?;
+
+    Ok(Json(RecalculateBoundariesResponse {
+        success: true,
+        message: Some(format!("Boundaries recalculated for {}", request.cst_file)),
+    }))
+}
+
+/// POST /api/fragments/reset-file - Delete all fragments for a file and reparse from scratch
+///
+/// This endpoint deletes all existing fragments for a file and reparses the XML file
+/// to create fresh fragments without any overrides. All manual corrections will be lost.
+/// SC codes are populated from the embedded TSV mapping.
+#[post("/api/fragments/reset-file", data = "<request>")]
+async fn reset_file_route(
+    request: Json<ResetFileRequest>,
+    db_state: &State<DbState>
+) -> Result<Json<ResetFileResponse>, String> {
+    use std::path::Path;
+    use crate::encoding::read_xml_file;
+    use crate::nikaya_detector::detect_nikaya_structure;
+    use crate::xml_parser::parse_into_fragments;
+    use crate::fragment_exporter::export_fragments_to_db;
+    use crate::types::ParserOverrides;
+
+    let cst_file = &request.cst_file;
+
+    // Load settings to get XML directory
+    let mut settings = settings::load_settings()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+    settings::generate_default_paths(&mut settings);
+
+    if settings.xml_dir.is_empty() {
+        return Err("XML directory not configured. Please configure settings first.".to_string());
+    }
+
+    // Step 1: Delete existing fragments for this file
+    {
+        let mut conn = db_state.connect()
+            .map_err(|e| format!("Database connection failed: {}", e))?;
+
+        let deleted_count = diesel::delete(
+            xml_fragments::table.filter(xml_fragments::cst_file.eq(cst_file))
+        )
+        .execute(&mut conn)
+        .map_err(|e| format!("Failed to delete fragments: {}", e))?;
+
+        if deleted_count == 0 {
+            return Err(format!("No fragments found for file: {}", cst_file));
+        }
+    }
+
+    // Fetch Pali titles from ArangoDB for sc_sutta population
+    let pali_titles = match arangodb::get_pali_titles().await {
+        Ok(titles) => Some(titles),
+        Err(_) => None, // Continue without titles if ArangoDB unavailable
+    };
+
+    // Step 2: Read and parse the XML file
+    let xml_path = Path::new(&settings.xml_dir).join(cst_file);
+    if !xml_path.exists() {
+        return Err(format!("XML file not found: {:?}", xml_path));
+    }
+
+    let xml_content = read_xml_file(&xml_path)
+        .map_err(|e| format!("Failed to read XML file: {}", e))?;
+
+    let structure = detect_nikaya_structure(&xml_content)
+        .map_err(|e| format!("Failed to detect nikaya structure: {}", e))?;
+
+    // Parse without correction overrides but with pali_titles for SC field population
+    let overrides = ParserOverrides {
+        correction_overrides: None,
+        inserted_fragments: None,
+        pali_titles,
+    };
+
+    let fragments = parse_into_fragments(
+        &xml_content,
+        &structure,
+        cst_file,
+        &overrides,
+        true,  // populate SC fields from TSV
+    )
+    .map_err(|e| format!("Failed to parse XML: {}", e))?;
+
+    let fragments_count = fragments.len();
+
+    // Step 3: Export to database
+    let db_path = Path::new(&settings.db_path);
+    export_fragments_to_db(&fragments, &structure, db_path)
+        .map_err(|e| format!("Failed to export fragments: {}", e))?;
+
+    Ok(Json(ResetFileResponse {
+        success: true,
+        message: format!("File reset successfully. Created {} fragments.", fragments_count),
+        fragments_count,
     }))
 }
 
@@ -561,6 +772,109 @@ fn move_fragment(
     Ok(Json(MoveFragmentResponse {
         current_fragment: current_item,
         target_fragment: target_item,
+    }))
+}
+
+/// POST /api/fragments/insert - Insert a new empty fragment before or after the specified fragment
+///
+/// This endpoint creates a new fragment with zero-width boundaries and empty content,
+/// copying metadata from the adjacent fragment. The new fragment is marked as "checked".
+///
+/// # Request Body
+/// - `frag_idx_code`: The currently selected fragment's code (e.g., "21.0")
+/// - `cst_file`: The XML file name
+/// - `direction`: "before" or "after"
+///
+/// # Returns
+/// The newly created fragment and a success indicator.
+#[post("/api/fragments/insert", data = "<request>")]
+fn insert_fragment_route(
+    request: Json<InsertFragmentRequest>,
+    db_state: &State<DbState>
+) -> Result<Json<InsertFragmentResponse>, String> {
+    // Parse direction string to Direction enum
+    let direction = match request.direction.as_str() {
+        "before" => Direction::Prev,
+        "after" => Direction::Next,
+        _ => return Err(format!("Invalid direction: {}. Must be 'before' or 'after'", request.direction)),
+    };
+
+    // Get database connection
+    let mut conn = db_state.connect()
+        .map_err(|e| format!("Database connection failed: {}", e))?;
+
+    // Call the insert operation
+    let new_fragment = insert_fragment(
+        &mut conn,
+        &request.cst_file,
+        &request.frag_idx_code,
+        direction,
+    ).map_err(|e| format!("Insert operation failed: {}", e))?;
+
+    // Load settings to get XML directory for content validation
+    let app_settings = settings::load_settings()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+
+    // Validate content integrity (should be unchanged since new fragment is empty)
+    let content_integrity_error = if !app_settings.xml_dir.is_empty() {
+        let xml_dir = std::path::Path::new(&app_settings.xml_dir);
+        match validate_content_integrity(&mut conn, &request.cst_file, xml_dir) {
+            Ok(Some(err)) => Some(ContentIntegrityErrorInfo {
+                expected_bytes: err.expected_bytes,
+                actual_bytes: err.actual_bytes,
+                difference: err.difference,
+                message: err.message,
+            }),
+            Ok(None) => None,
+            Err(e) => {
+                eprintln!("Content integrity check failed: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Validate boundary chain after insertion
+    let boundary_errors = validate_boundary_chain(&mut conn, &request.cst_file)
+        .map_err(|e| format!("Validation failed: {}", e))?;
+
+    let boundary_errors_info: Option<Vec<BoundaryDiscontinuityInfo>> = if boundary_errors.is_empty() {
+        None
+    } else {
+        Some(boundary_errors.into_iter().map(|d| BoundaryDiscontinuityInfo {
+            frag_idx_code: d.frag_idx_code,
+            expected_start_line: d.expected_start_line,
+            expected_start_char: d.expected_start_char,
+            actual_start_line: d.actual_start_line,
+            actual_start_char: d.actual_start_char,
+        }).collect())
+    };
+
+    // Map to FragmentListItem for response
+    let fragment_item = FragmentListItem {
+        id: new_fragment.id,
+        frag_idx_code: new_fragment.frag_idx_code,
+        frag_type: new_fragment.frag_type,
+        frag_review: new_fragment.frag_review,
+        cst_code: new_fragment.cst_code,
+        sc_code: new_fragment.sc_code,
+    };
+
+    let message = if content_integrity_error.is_some() {
+        Some("CRITICAL: Content integrity error detected! Use 'Reset Current File' to fix.".to_string())
+    } else if boundary_errors_info.is_some() {
+        Some("New fragment inserted but chain has discontinuities".to_string())
+    } else {
+        Some("New fragment inserted successfully".to_string())
+    };
+
+    Ok(Json(InsertFragmentResponse {
+        success: content_integrity_error.is_none(),
+        new_fragment: fragment_item,
+        message,
+        content_integrity_error,
+        boundary_errors: boundary_errors_info,
     }))
 }
 
@@ -983,7 +1297,7 @@ async fn reparse_file(
     // during parsing via apply_sc_overrides(), no need for separate restoration step
     output.push_str("Step 2: Extracting correction overrides from current database...\n");
     let db_path = Path::new(&settings.db_path);
-    let (correction_overrides, _review_status) = match extract_correction_overrides(db_path, cst_file) {
+    let (correction_overrides, _review_status, inserted_fragments_vec) = match extract_correction_overrides(db_path, cst_file) {
         Ok(result) => result,
         Err(e) => {
             return Json(ReparseFileResponse {
@@ -994,7 +1308,17 @@ async fn reparse_file(
             });
         }
     };
-    output.push_str(&format!("  Extracted {} correction overrides (includes frag_review status)\n\n", correction_overrides.len()));
+    output.push_str(&format!("  Extracted {} correction overrides (includes frag_review status)\n", correction_overrides.len()));
+    output.push_str(&format!("  Extracted {} inserted fragments\n\n", inserted_fragments_vec.len()));
+
+    // Convert inserted fragments Vec to InsertedFragmentsMap (HashMap keyed by cst_file)
+    let inserted_fragments_map: Option<crate::types::InsertedFragmentsMap> = if inserted_fragments_vec.is_empty() {
+        None
+    } else {
+        let mut map = std::collections::HashMap::new();
+        map.insert(cst_file.to_string(), inserted_fragments_vec);
+        Some(map)
+    };
 
     // Step 3: Fetch Pali titles from ArangoDB (for sc_sutta population)
     output.push_str("Step 3: Fetching Pali titles from ArangoDB...\n");
@@ -1014,6 +1338,7 @@ async fn reparse_file(
     output.push_str("Step 4: Constructing parser overrides...\n");
     let overrides = ParserOverrides {
         correction_overrides: if correction_overrides.is_empty() { None } else { Some(correction_overrides) },
+        inserted_fragments: inserted_fragments_map,
         pali_titles,
     };
     output.push_str("  ParserOverrides constructed\n\n");
@@ -1370,8 +1695,11 @@ pub fn get_routes() -> Vec<Route> {
         get_fragment_detail,
         update_fragment_metadata,
         adjust_fragment_boundary,
+        recalculate_boundaries_route,
+        reset_file_route,
         delete_fragment,
         move_fragment,
+        insert_fragment_route,
         create_fragment,
         get_settings,
         save_settings_endpoint,

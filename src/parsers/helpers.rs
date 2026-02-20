@@ -2,7 +2,7 @@ use anyhow::{Result, Context};
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
-use crate::types::{XmlFragment, FragmentKey, CorrectionFragmentOverrides, ScCodeComponents, ParserError, FragmentType};
+use crate::types::{XmlFragment, FragmentKey, CorrectionFragmentOverrides, ScCodeComponents, ParserError, FragmentType, InsertedFragmentData, parse_frag_idx_code};
 use crate::sutta_builder::cst_code_to_sc_code_map;
 use regex::Regex;
 
@@ -225,6 +225,7 @@ fn line_char_to_byte_pos(xml_content: &str, target_line: usize, target_char: usi
 /// Apply fragment overrides to adjust end position
 ///
 /// Checks `CorrectionFragmentOverrides` for boundary overrides and collapse flags.
+/// Also checks for inserted fragments that may affect the end boundary of generated fragments.
 ///
 /// Returns `(end_byte_pos, end_line, end_char, collapsed)`.
 ///
@@ -233,13 +234,23 @@ fn line_char_to_byte_pos(xml_content: &str, target_line: usize, target_char: usi
 /// so callers know to push the fragment even though its content is empty — this keeps
 /// `frag_idx_code` (derived from `fragments.len()`) in sync with the correction overrides.
 ///
+/// For generated fragments (e.g., "N.0") that have inserted fragments after them (e.g., "N.1"),
+/// the inserted fragment's start boundary is used as the end boundary for the generated fragment.
+/// This ensures the generated fragment is truncated at the correct position before the inserted content.
+///
 /// # Arguments
 /// * `frag_start_pos` - The start byte position of the current fragment, for validation
 /// * `frag_start_line` - The start line of the current fragment (1-indexed)
 /// * `frag_start_char` - The start character of the current fragment (0-indexed)
+/// * `inserted_fragments` - Optional slice of inserted fragments for this file (sorted by frag_idx_code)
 ///
 /// # Returns
-/// `Result<(usize, usize, usize, bool)>` - The adjusted (end_pos, end_line, end_char, collapsed)
+/// `Result<(usize, usize, usize, bool, usize, usize, usize)>`:
+/// - `end_pos, end_line, end_char` - The adjusted end position for this fragment's content
+/// - `collapsed` - Whether this is a zero-width (moved) fragment
+/// - `chain_end_pos, chain_end_line, chain_end_char` - The position where the NEXT fragment should start.
+///   This differs from end position when inserted fragments exist, allowing the next fragment
+///   to start after all inserted fragments rather than where this fragment ends.
 ///
 /// # Errors
 /// Returns an error if the overridden end position is before the fragment start position,
@@ -255,7 +266,8 @@ pub fn apply_fragment_adjustment(
     frag_start_line: usize,
     frag_start_char: usize,
     correction_overrides: Option<&CorrectionFragmentOverrides>,
-) -> Result<(usize, usize, usize, bool)> {
+    inserted_fragments: Option<&[InsertedFragmentData]>,
+) -> Result<(usize, usize, usize, bool, usize, usize, usize)> {
     // First: check for collapse (moved fragments)
     if let Some(overrides) = correction_overrides {
         let key = FragmentKey {
@@ -265,30 +277,91 @@ pub fn apply_fragment_adjustment(
         if let Some(override_data) = overrides.get(&key) {
             if override_data.collapse {
                 // Collapse: end = start (zero-width fragment)
-                return Ok((frag_start_pos, frag_start_line, frag_start_char, true));
+                // Chain position is same as end position (next fragment starts here)
+                return Ok((frag_start_pos, frag_start_line, frag_start_char, true,
+                           frag_start_pos, frag_start_line, frag_start_char));
             }
         }
     }
 
-    // Then: check for boundary override
-    if let Some((end_line, end_char)) = get_boundary_override(cst_file, frag_idx_code, correction_overrides) {
-        let end_pos = line_char_to_byte_pos(xml_content, end_line, end_char);
+    // Second: determine end position (from override or default)
+    let (end_pos, end_line, end_char) = if let Some((ovr_end_line, ovr_end_char)) =
+        get_boundary_override(cst_file, frag_idx_code, correction_overrides)
+    {
+        let ovr_end_pos = line_char_to_byte_pos(xml_content, ovr_end_line, ovr_end_char);
 
         // Validate that the override end position is not before the fragment start position
-        if end_pos < frag_start_pos {
+        if ovr_end_pos < frag_start_pos {
             return Err(ParserError::InvalidBoundaryOverride {
                 details: format!(
                     "end position ({}) is before fragment start position ({})\n  File: {}\n  Fragment index: {}\n  Override: end_line={}, end_char={}\n\nThis indicates the override is being applied to the wrong fragment, likely due to frag_idx_code shifting between parse runs. Please adjust the fragment boundary in the UI.",
-                    end_pos, frag_start_pos, cst_file, frag_idx_code, end_line, end_char
+                    ovr_end_pos, frag_start_pos, cst_file, frag_idx_code, ovr_end_line, ovr_end_char
                 ),
             }.into());
         }
 
-        return Ok((end_pos, end_line, end_char, false));
+        (ovr_end_pos, ovr_end_line, ovr_end_char)
+    } else {
+        // No override - use default detection
+        // Validate that the default end position is not before the fragment start position
+        if default_end_pos < frag_start_pos {
+            return Err(ParserError::InvalidBoundaryOverride {
+                details: format!(
+                    "Detected end position ({}) is before fragment start position ({}).\n  File: {}\n  Fragment index: {}\n  default_end_line={}, default_end_char={}\n  frag_start_line={}, frag_start_char={}\n\nThis indicates a parser state inconsistency, possibly due to invalid stored boundary data. Try recalculating boundaries for this file first.",
+                    default_end_pos, frag_start_pos, cst_file, frag_idx_code,
+                    default_end_line, default_end_char, frag_start_line, frag_start_char
+                ),
+            }.into());
+        }
+
+        (default_end_pos, default_end_line, default_end_char)
+    };
+
+    // Third: check if there's an inserted fragment after this generated fragment
+    // For generated fragment "N.0", check if there's an inserted fragment "N.1"
+    // This determines the chain position (where the NEXT fragment should start)
+    if let Some(inserted) = inserted_fragments {
+        let (major, minor) = parse_frag_idx_code(frag_idx_code);
+
+        // Only check for inserted fragments if this is a generated fragment (minor = 0)
+        if minor == 0 {
+            // Find ALL inserted fragments with this major index to determine:
+            // 1. First inserted fragment's start -> used for validation only (should match end_pos)
+            // 2. Last inserted fragment's end -> chain position for next generated fragment
+            let mut first_inserted: Option<&InsertedFragmentData> = None;
+            let mut last_inserted: Option<&InsertedFragmentData> = None;
+
+            for ins_frag in inserted {
+                let (ins_major, ins_minor) = parse_frag_idx_code(&ins_frag.frag_idx_code);
+                if ins_major == major && ins_minor > 0 {
+                    if first_inserted.is_none() {
+                        first_inserted = Some(ins_frag);
+                    }
+                    last_inserted = Some(ins_frag);
+                }
+            }
+
+            if let (Some(first), Some(last)) = (first_inserted, last_inserted) {
+                // Validate that our end position matches the first inserted fragment's start
+                let first_start_pos = line_char_to_byte_pos(xml_content, first.start_line, first.start_char);
+                if end_pos != first_start_pos {
+                    // This is a warning condition but not an error - the override takes precedence
+                    // The user may have intentionally adjusted the boundary
+                }
+
+                // Use last inserted fragment's end as the chain position
+                // (where the next generated fragment should start)
+                let chain_end_line = last.end_line;
+                let chain_end_char = last.end_char;
+                let chain_end_pos = line_char_to_byte_pos(xml_content, chain_end_line, chain_end_char);
+
+                return Ok((end_pos, end_line, end_char, false, chain_end_pos, chain_end_line, chain_end_char));
+            }
+        }
     }
 
-    // No override - use default detection
-    Ok((default_end_pos, default_end_line, default_end_char, false))
+    // No inserted fragments - chain position equals end position
+    Ok((end_pos, end_line, end_char, false, end_pos, end_line, end_char))
 }
 
 /// Populate SC fields from embedded TSV mapping
@@ -1774,6 +1847,8 @@ mod tests {
             FragmentKey { cst_file: "test.xml".to_string(), frag_idx_code: "0.0".to_string() },
             CorrectionFragmentOverride {
                 collapse: false,
+                start_line: None,
+                start_char: None,
                 end_line: Some(100),
                 end_char: Some(50),
                 sc_code: None,

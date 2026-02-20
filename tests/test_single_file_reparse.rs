@@ -114,7 +114,7 @@ fn test_reparse_preserves_correction_overrides() {
     .unwrap();
 
     // Extract checked overrides
-    let (correction_overrides, review_status) =
+    let (correction_overrides, review_status, _inserted_fragments) =
         extract_correction_overrides(db_path, cst_file).unwrap();
 
     assert!(!correction_overrides.is_empty(), "Should have checked overrides");
@@ -122,6 +122,7 @@ fn test_reparse_preserves_correction_overrides() {
     // Re-parse with checked overrides
     let overrides = ParserOverrides {
         correction_overrides: Some(correction_overrides),
+        inserted_fragments: None,
         pali_titles: None,
     };
 
@@ -227,7 +228,7 @@ fn test_reparse_restores_all_review_statuses() {
     .unwrap();
 
     // Extract checked overrides (should get all 3)
-    let (correction_overrides, review_status) =
+    let (correction_overrides, review_status, _inserted_fragments) =
         extract_correction_overrides(db_path, cst_file).unwrap();
 
     assert_eq!(review_status.len(), 3, "Should have 3 review statuses");
@@ -247,6 +248,7 @@ fn test_reparse_restores_all_review_statuses() {
     // Re-parse and export
     let overrides = ParserOverrides {
         correction_overrides: Some(correction_overrides),
+        inserted_fragments: None,
         pali_titles: None,
     };
 

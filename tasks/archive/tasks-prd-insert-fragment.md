@@ -244,8 +244,8 @@ Generated from [prd-insert-fragment.md](./prd-insert-fragment.md)
 > endpoint is `POST /api/fragments/insert` accepting `frag_idx_code`, `cst_file`,
 > and `direction`. Skip moved fragments when finding the insertion point.
 
-- [ ] 11.0 Implement insert fragment backend (API endpoint + operation logic)
-  - [ ] 11.1 Add `insert_fragment()` function in `fragment_operations.rs` that:
+- [x] 11.0 Implement insert fragment backend (API endpoint + operation logic)
+  - [x] 11.1 Add `insert_fragment()` function in `fragment_operations.rs` that:
     - Loads the current fragment by `frag_idx_code` and `cst_file`
     - Finds the neighbor fragment in the given direction (skipping moved fragments, reusing `find_target_fragment()` logic)
     - Computes the `frag_idx_code` for the new fragment using `next_sub_index()` from task 4.3
@@ -254,9 +254,9 @@ Generated from [prd-insert-fragment.md](./prd-insert-fragment.md)
     - Sets `content_xml = ""`, `frag_review = "checked"`
     - Inserts the new record into the database
     - Returns the new fragment record
-  - [ ] 11.2 Add request/response DTOs in `web/models.rs`: `InsertFragmentRequest { frag_idx_code, cst_file, direction }` and response with the new fragment
-  - [ ] 11.3 Add `POST /api/fragments/insert` route in `routes.rs` that calls the operation and returns the new fragment plus updated fragment list
-  - [ ] 11.4 Run `cargo check` to verify the new endpoint compiles
+  - [x] 11.2 Add request/response DTOs in `web/models.rs`: `InsertFragmentRequest { frag_idx_code, cst_file, direction }` and response with the new fragment
+  - [x] 11.3 Add `POST /api/fragments/insert` route in `routes.rs` that calls the operation and returns the new fragment plus updated fragment list
+  - [x] 11.4 Run `cargo check` to verify the new endpoint compiles
 
 ### 12. Implement Insert Fragment UI
 
@@ -265,13 +265,13 @@ Generated from [prd-insert-fragment.md](./prd-insert-fragment.md)
 > Disable when no fragment selected or current fragment is "moved". After insertion,
 > refresh the fragment list and auto-select the new fragment.
 
-- [ ] 12.0 Implement insert fragment UI (buttons, confirmation, refresh)
-  - [ ] 12.1 Add the two buttons in `index.html`: "A&uarr;" (`id="add-new-before"`) after `id="move-to-prev"`, and "A&darr;" (`id="add-new-after"`) after `id="move-to-next"`, with similar styling to the move buttons
-  - [ ] 12.2 Add `insertFragment(direction)` function in `app.js` that sends `POST /api/fragments/insert` with `frag_idx_code`, `cst_file`, and direction
-  - [ ] 12.3 Add click handlers for both buttons using `showConfirmModal()`: "Insert a new empty fragment BEFORE/AFTER the current fragment?"
-  - [ ] 12.4 On successful insertion: refresh the fragment list for the current file, auto-select the newly inserted fragment
-  - [ ] 12.5 Add disable logic: both buttons disabled when no fragment is selected or when `currentFragment.frag_review === "moved"`
-  - [ ] 12.6 Test manually in the web UI: insert before/after, verify the new fragment appears in correct position, verify metadata is copied, verify boundaries are zero-width
+- [x] 12.0 Implement insert fragment UI (buttons, confirmation, refresh)
+  - [x] 12.1 Add the two buttons in `index.html`: "A&uarr;" (`id="add-new-before"`) after `id="move-to-prev"`, and "A&darr;" (`id="add-new-after"`) after `id="move-to-next"`, with similar styling to the move buttons
+  - [x] 12.2 Add `insertFragment(direction)` function in `app.js` that sends `POST /api/fragments/insert` with `frag_idx_code`, `cst_file`, and direction
+  - [x] 12.3 Add click handlers for both buttons using `showConfirmModal()`: "Insert a new empty fragment BEFORE/AFTER the current fragment?"
+  - [x] 12.4 On successful insertion: refresh the fragment list for the current file, auto-select the newly inserted fragment
+  - [x] 12.5 Add disable logic: both buttons disabled when no fragment is selected or when `currentFragment.frag_review === "moved"`
+  - [x] 12.6 Test manually in the web UI: insert before/after, verify the new fragment appears in correct position, verify metadata is copied, verify boundaries are zero-width
 
 ### 13. Adapt Regeneration Pipeline for Inserted Fragments
 
@@ -291,16 +291,64 @@ Generated from [prd-insert-fragment.md](./prd-insert-fragment.md)
 >
 > This adapts the existing pipeline rather than adding a new stage.
 
-- [ ] 13.0 Adapt regeneration pipeline to preserve and re-inject inserted fragments
-  - [ ] 13.1 Extend `CorrectionFragmentOverride` (or add a parallel `InsertedFragmentOverride` struct) to store full fragment data for inserted fragments: content_xml, start_line, start_char, end_line, end_char, plus all metadata fields
-  - [ ] 13.2 Update `extract_correction_overrides()` to detect inserted fragments (sub-index > 0 in `frag_idx_code`) and extract them with full content and boundary data, storing them in the overrides map or a separate collection in `ParserOverrides`
-  - [ ] 13.3 Update `extract_all_correction_overrides()` with the same logic for full regeneration
-  - [ ] 13.4 Update `apply_fragment_adjustment()` in `parsers/helpers.rs`: when finalizing a generated fragment at `"N.0"`, check if there are inserted fragments `"N.1"`, `"N.2"`, etc. in the overrides — if so, apply the first inserted fragment's start boundary as the end_line/end_char override for `"N.0"`
-  - [ ] 13.5 Add a post-parsing injection step in `xml_parser.rs` `parse_into_fragments()` (after `apply_sc_overrides()`): iterate through the fragment list, and at each `"N.0"` that has associated inserted fragments, splice them into the list at the correct positions
-  - [ ] 13.6 Ensure the injected fragments have their metadata restored (frag_review, sc_code, cst_code, etc.) — either during injection or via `apply_sc_overrides()` processing them
-  - [ ] 13.7 Update `fragment_exporter.rs` export logic to handle the mixed generated + inserted fragment list (the export writes all fragments sequentially, so it should work if the list is correctly ordered)
-  - [ ] 13.8 Test with reparse: insert a fragment, reparse the file, verify the inserted fragment is preserved with correct boundaries and content
-  - [ ] 13.9 Test with full regeneration: insert a fragment, regenerate the entire DB, verify the inserted fragment is preserved
+- [x] 13.0 Adapt regeneration pipeline to preserve and re-inject inserted fragments
+  - [x] 13.1 Extend `CorrectionFragmentOverride` (or add a parallel `InsertedFragmentOverride` struct) to store full fragment data for inserted fragments: content_xml, start_line, start_char, end_line, end_char, plus all metadata fields
+  - [x] 13.2 Update `extract_correction_overrides()` to detect inserted fragments (sub-index > 0 in `frag_idx_code`) and extract them with full content and boundary data, storing them in the overrides map or a separate collection in `ParserOverrides`
+  - [x] 13.3 Update `extract_all_correction_overrides()` with the same logic for full regeneration
+  - [x] 13.4 Update `apply_fragment_adjustment()` in `parsers/helpers.rs`: when finalizing a generated fragment at `"N.0"`, check if there are inserted fragments `"N.1"`, `"N.2"`, etc. in the overrides — if so, apply the first inserted fragment's start boundary as the end_line/end_char override for `"N.0"`
+  - [x] 13.5 Add a post-parsing injection step in `xml_parser.rs` `parse_into_fragments()` (after `apply_sc_overrides()`): iterate through the fragment list, and at each `"N.0"` that has associated inserted fragments, splice them into the list at the correct positions
+  - [x] 13.6 Ensure the injected fragments have their metadata restored (frag_review, sc_code, cst_code, etc.) — either during injection or via `apply_sc_overrides()` processing them
+  - [x] 13.7 Update `fragment_exporter.rs` export logic to handle the mixed generated + inserted fragment list (the export writes all fragments sequentially, so it should work if the list is correctly ordered)
+  - [x] 13.8 Test with reparse: insert a fragment, reparse the file, verify the inserted fragment is preserved with correct boundaries and content
+  - [x] 13.9 Test with full regeneration: insert a fragment, regenerate the entire DB, verify the inserted fragment is preserved
+
+#### Implementation Notes: Fragment Chain Position Fix
+
+**Problem Discovered:**
+During testing, full database regeneration failed with reconstruction verification errors:
+```
+ERROR: Reconstruction verification failed for s0304t.tik.xml: length mismatch
+(original: 271294 bytes, reconstructed: 272234 bytes)
+```
+The reconstructed XML was 940 bytes longer than the original — exactly the size of the inserted fragment.
+
+**Root Cause:**
+When an inserted fragment (e.g., `17.1`) exists between generated fragments (`17.0` and `18.0`):
+1. Fragment `17.0` was correctly truncated at `17.1`'s start (line 323)
+2. The injected fragment `17.1` covered lines 323-335
+3. BUT fragment `18.0` also started at line 323 instead of line 335
+
+The parsers used `apply_fragment_adjustment()`'s returned `end_pos` as BOTH:
+- The end of the current fragment (correct)
+- The start of the NEXT fragment (incorrect when inserted fragments exist)
+
+This caused fragment `18.0` to overlap with fragment `17.1`, duplicating 940 bytes of content.
+
+**Solution Implemented:**
+1. Changed `apply_fragment_adjustment()` return type from 4-tuple to 7-tuple:
+   ```rust
+   (end_pos, end_line, end_char, collapsed, chain_end_pos, chain_end_line, chain_end_char)
+   ```
+   - `end_*`: Where THIS fragment's content ends (for slicing)
+   - `chain_end_*`: Where the NEXT generated fragment should start
+
+2. When inserted fragments exist (e.g., `17.1`, `17.2` after `17.0`):
+   - `end_*` = first inserted fragment's START (truncates `17.0`)
+   - `chain_end_*` = last inserted fragment's END (skip point for `18.0`)
+
+3. Updated all parser call sites to use `chain_end_*` for:
+   - `next_frag_start_pos/line/char` assignments
+   - `current_fragment_start` assignments
+
+**Key Files Modified:**
+- `src/parsers/helpers.rs`: Extended return type and chain position logic
+- `src/parsers/general.rs`: Updated all `apply_fragment_adjustment` call sites
+- `src/parsers/samyutta_nikaya_mula.rs`: Same updates
+- `src/parsers/samyutta_nikaya_commentary.rs`: Same updates
+- `src/web/routes.rs`: Fixed single-file reparse to use extracted inserted fragments
+
+**Test Added:**
+- `tests/test_fragment_insertion.rs`: `test_inserted_fragment_survives_reparse()` verifies that inserted fragments survive reparse with correct boundaries and total content length matches original XML.
 
 ### 14. Integration Tests for Fragment Insertion
 

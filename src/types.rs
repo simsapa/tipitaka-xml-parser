@@ -111,6 +111,11 @@ pub struct CorrectionFragmentOverride {
     /// If true, collapse this fragment to zero-width (for "moved" fragments).
     /// The parser will set end = start, producing an empty fragment.
     pub collapse: bool,
+    /// Override start line (1-indexed). Applied during fragment finalization.
+    /// Used when a previous inserted fragment has modified where this fragment should begin.
+    pub start_line: Option<usize>,
+    /// Override start character position (0-indexed). Applied during fragment finalization.
+    pub start_char: Option<usize>,
     /// Override end line (1-indexed). Applied during fragment finalization.
     /// Ignored when `collapse` is true.
     pub end_line: Option<usize>,
@@ -139,6 +144,51 @@ pub struct CorrectionFragmentOverride {
 /// Key is `(cst_file, frag_idx_code)` matching the `FragmentKey` type.
 pub type CorrectionFragmentOverrides = HashMap<FragmentKey, CorrectionFragmentOverride>;
 
+/// Full data for an inserted fragment (sub-index > 0) that needs preservation during regeneration.
+///
+/// Unlike `CorrectionFragmentOverride` which stores only override values for generated fragments,
+/// this struct stores the complete fragment data since inserted fragments don't exist in the
+/// freshly parsed output and must be re-injected.
+#[derive(Debug, Clone)]
+pub struct InsertedFragmentData {
+    /// The fragment index code (e.g., "21.1", "21.2")
+    pub frag_idx_code: String,
+    /// XML content of the fragment
+    pub content_xml: String,
+    /// Starting line number in source file (1-indexed)
+    pub start_line: usize,
+    /// Starting character position within start_line (0-indexed)
+    pub start_char: usize,
+    /// Ending line number in source file (1-indexed)
+    pub end_line: usize,
+    /// Ending character position within end_line (0-indexed)
+    pub end_char: usize,
+    /// Fragment type (Header or Sutta)
+    pub frag_type: FragmentType,
+    /// Review status (typically "checked" for inserted fragments)
+    pub frag_review: Option<String>,
+    /// CST code
+    pub cst_code: Option<String>,
+    /// SC code
+    pub sc_code: Option<String>,
+    /// CST vagga
+    pub cst_vagga: Option<String>,
+    /// CST sutta
+    pub cst_sutta: Option<String>,
+    /// CST paranum
+    pub cst_paranum: Option<String>,
+    /// SC sutta
+    pub sc_sutta: Option<String>,
+    /// Nikaya name
+    pub nikaya: String,
+    /// Group levels JSON (serialized)
+    pub group_levels: String,
+}
+
+/// Container for inserted fragment data, grouped by cst_file.
+/// For each file, fragments are stored in a Vec sorted by frag_idx_code.
+pub type InsertedFragmentsMap = HashMap<String, Vec<InsertedFragmentData>>;
+
 /// Combined override configuration for parsing.
 ///
 /// This struct bundles all override types to simplify function signatures.
@@ -147,6 +197,9 @@ pub struct ParserOverrides {
     /// Correction fragment overrides extracted from the database.
     /// Contains both boundary and SC field overrides, plus collapse flag for moved fragments.
     pub correction_overrides: Option<CorrectionFragmentOverrides>,
+    /// Inserted fragments (sub-index > 0) that need to be re-injected after parsing.
+    /// Keyed by cst_file, each value is a sorted Vec of inserted fragments.
+    pub inserted_fragments: Option<InsertedFragmentsMap>,
     /// Pali titles cache from ArangoDB for populating sc_sutta fields.
     /// Maps SC code (e.g., "sn5.2") to Pali title (e.g., "Somāsutta").
     /// Used during SC code propagation to automatically fill in sc_sutta titles.

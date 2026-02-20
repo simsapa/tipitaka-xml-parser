@@ -103,12 +103,40 @@ pub struct BoundaryAdjustmentRequest {
     pub direction: String, // "prev" or "next"
 }
 
+/// Boundary discontinuity information for API responses
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BoundaryDiscontinuityInfo {
+    pub frag_idx_code: String,
+    pub expected_start_line: i32,
+    pub expected_start_char: i32,
+    pub actual_start_line: i32,
+    pub actual_start_char: i32,
+}
+
+/// Content integrity error for API responses
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ContentIntegrityErrorInfo {
+    pub expected_bytes: usize,
+    pub actual_bytes: usize,
+    pub difference: i64,
+    pub message: String,
+}
+
 /// Response for boundary adjustment
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BoundaryAdjustmentResponse {
     pub success: bool,
     pub message: Option<String>,
     pub deleted_fragment_id: Option<i32>,
+    /// Boundary validation errors found after the adjustment
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub boundary_errors: Option<Vec<BoundaryDiscontinuityInfo>>,
+    /// Content integrity error (duplication or loss)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_integrity_error: Option<ContentIntegrityErrorInfo>,
+    /// Updated fragments for UI refresh (includes current and affected adjacent fragment)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_fragments: Option<Vec<FragmentListItem>>,
 }
 
 /// Request body for creating a new fragment
@@ -138,6 +166,68 @@ pub struct MoveFragmentRequest {
 pub struct MoveFragmentResponse {
     pub current_fragment: FragmentListItem,
     pub target_fragment: FragmentListItem,
+}
+
+/// Request body for inserting a new fragment
+#[derive(Serialize, Deserialize, Debug)]
+pub struct InsertFragmentRequest {
+    /// The currently selected fragment's frag_idx_code (e.g., "21.0")
+    pub frag_idx_code: String,
+    /// The XML file name (e.g., "s0101m.mul.xml")
+    pub cst_file: String,
+    /// Direction to insert: "before" or "after"
+    pub direction: String,
+}
+
+/// Response for fragment insertion
+#[derive(Serialize, Deserialize, Debug)]
+pub struct InsertFragmentResponse {
+    /// Whether the operation succeeded
+    pub success: bool,
+    /// The newly created fragment
+    pub new_fragment: FragmentListItem,
+    /// Optional message
+    pub message: Option<String>,
+    /// Content integrity error (duplication or loss)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_integrity_error: Option<ContentIntegrityErrorInfo>,
+    /// Boundary validation errors found after the insertion
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub boundary_errors: Option<Vec<BoundaryDiscontinuityInfo>>,
+}
+
+/// Request for recalculating boundaries
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RecalculateBoundariesRequest {
+    /// The XML file name (e.g., "s0101m.mul.xml")
+    pub cst_file: String,
+}
+
+/// Response for recalculating boundaries
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RecalculateBoundariesResponse {
+    /// Whether the operation succeeded
+    pub success: bool,
+    /// Optional message
+    pub message: Option<String>,
+}
+
+/// Request for resetting a file (delete and reparse)
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ResetFileRequest {
+    /// The XML file name (e.g., "s0101m.mul.xml")
+    pub cst_file: String,
+}
+
+/// Response for resetting a file
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ResetFileResponse {
+    /// Whether the operation succeeded
+    pub success: bool,
+    /// Message with details
+    pub message: String,
+    /// Number of fragments created
+    pub fragments_count: usize,
 }
 
 /// Color theme options

@@ -83,12 +83,16 @@ fn setup_regeneration() -> (TempDir, PathBuf, TipitakaImporter, AppSettings, boo
     let xml_dir = PathBuf::from(&settings.xml_dir);
     assert!(xml_dir.exists(), "XML directory not found at {:?}", xml_dir);
 
-    // Extract correction overrides
+    // Extract correction overrides and inserted fragments
     let db_path = PathBuf::from(&settings.db_path);
-    let correction_overrides = extract_all_correction_overrides(&db_path)
+    let (correction_overrides, inserted_fragments) = extract_all_correction_overrides(&db_path)
         .expect("Failed to extract correction overrides");
 
     eprintln!("Loaded {} correction overrides from reference database", correction_overrides.len());
+    let total_inserted: usize = inserted_fragments.values().map(|v| v.len()).sum();
+    if total_inserted > 0 {
+        eprintln!("Loaded {} inserted fragments from reference database", total_inserted);
+    }
 
     // Try to fetch Pali titles from ArangoDB (may fail if ArangoDB not running)
     let pali_titles = try_get_pali_titles();
@@ -101,6 +105,7 @@ fn setup_regeneration() -> (TempDir, PathBuf, TipitakaImporter, AppSettings, boo
     // Build ParserOverrides
     let overrides = ParserOverrides {
         correction_overrides: Some(correction_overrides),
+        inserted_fragments: if inserted_fragments.is_empty() { None } else { Some(inserted_fragments) },
         pali_titles,
     };
 

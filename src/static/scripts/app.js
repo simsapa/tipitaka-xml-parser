@@ -302,6 +302,43 @@ async function updateReviewStatusFromList(fragmentId, newStatus) {
     }
 }
 
+// Update only the review status indicator in the fragment list (no API call)
+// Used after operations that already updated the backend
+function updateFragmentListItemReviewStatus(fragmentId, newStatus) {
+    // Update state
+    const stateIndex = state.fragments.findIndex(f => f.id === fragmentId);
+    if (stateIndex !== -1) {
+        state.fragments[stateIndex].frag_review = newStatus;
+    }
+
+    // Update the fragment item's data attribute and status color
+    const fragmentItem = document.querySelector(`#fragment-list .panel-item[data-fragment-id="${fragmentId}"]`);
+    if (fragmentItem) {
+        fragmentItem.dataset.fragReview = newStatus || '';
+
+        // Update the review dropdown value
+        const dropdown = fragmentItem.querySelector('.review-dropdown');
+        if (dropdown) {
+            dropdown.value = newStatus || '';
+        }
+
+        // Update the frag_type tag color (3rd child element, after dropdown and frag_idx_code)
+        const fragTypeTag = fragmentItem.querySelector('.tag:nth-child(3)');
+        if (fragTypeTag) {
+            // Remove old color classes
+            fragTypeTag.classList.remove('is-light', 'is-warning', 'is-success', 'is-danger', 'is-info');
+            // Add new color class
+            const newColor = getStatusColor(newStatus);
+            fragTypeTag.classList.add(`is-${newColor}`);
+        }
+    }
+
+    // If this is the currently selected fragment, update the metadata panel dropdown too
+    if (state.selectedFragmentId === fragmentId) {
+        document.getElementById('frag_review').value = newStatus || '';
+    }
+}
+
 // Auto-fill sc_sutta field based on sc_code using cached Pali titles from ArangoDB
 function autoFillScSutta(scCode) {
     if (!scCode || !window.paliTitlesCache) return;
@@ -565,6 +602,21 @@ async function fetchAndDisplayFragmentDetails(fragmentId) {
             el.disabled = !(currentIsSutta && nextIsSutta);
         }
 
+        // Insert buttons: disabled if current fragment is "moved"
+        const currentIsMoved = detail.frag_review === 'moved';
+
+        el = document.getElementById('add-new-before');
+        if (el) {
+            // Disable insert-before if current fragment is moved or if there's no previous non-moved fragment
+            el.disabled = currentIsMoved || !hasPrev;
+        }
+
+        el = document.getElementById('add-new-after');
+        if (el) {
+            // Disable insert-after if current fragment is moved or if there's no next non-moved fragment
+            el.disabled = currentIsMoved || !hasNext;
+        }
+
         el = document.getElementById('create-prev-btn');
         if (el) {
             // Create new prev button: disabled if current is the first Header (no prev Header exists)
@@ -718,10 +770,41 @@ async function adjustBoundary(action, direction) {
 
         const result = await response.json();
 
+        // Update fragment list items with the returned updated fragments
+        if (result.updated_fragments) {
+            for (const fragment of result.updated_fragments) {
+                updateFragmentListItemReviewStatus(fragment.id, fragment.frag_review);
+            }
+        }
+
         // Refresh the current fragment view to update boundary data and adjacent fragment metadata
         await fetchAndDisplayFragmentDetails(state.selectedFragmentId);
 
         console.log('Boundary adjusted:', result.message);
+
+        // Show CRITICAL content integrity errors first
+        if (result.content_integrity_error) {
+            const err = result.content_integrity_error;
+            const diffSign = err.difference > 0 ? '+' : '';
+            alert(
+                `CRITICAL: Content Integrity Error!\n\n` +
+                `${err.message}\n\n` +
+                `Expected: ${err.expected_bytes} bytes\n` +
+                `Actual: ${err.actual_bytes} bytes\n` +
+                `Difference: ${diffSign}${err.difference} bytes\n\n` +
+                `This indicates content duplication or loss.\n` +
+                `Use 'Reset Current File' from the menu to fix this.`
+            );
+            return;
+        }
+
+        // Show boundary errors if any
+        if (result.boundary_errors && result.boundary_errors.length > 0) {
+            const errorMessages = result.boundary_errors.map(e =>
+                `Fragment ${e.frag_idx_code}: expected start (${e.expected_start_line}:${e.expected_start_char}), actual (${e.actual_start_line}:${e.actual_start_char})`
+            ).join('\n');
+            alert(`Warning: Boundary chain has discontinuities!\n\n${errorMessages}`);
+        }
     } catch (error) {
         console.error('Error adjusting boundary:', error);
         alert('Failed to adjust boundary');
@@ -819,6 +902,103 @@ async function moveFragmentTo(direction) {
     } catch (error) {
         console.error('Error moving fragment:', error);
         alert(`Failed to move fragment: ${error.message}`);
+    }
+}
+
+// Insert a new empty fragment before or after the current fragment
+async function insertFragment(direction) {
+    if (!state.selectedFragmentId) {
+        alert('No fragment selected');
+        return;
+    }
+
+    try {
+        // Get current fragment detail to retrieve cst_file and frag_idx_code
+        const currentFragment = await getCurrentFragmentDetail();
+        if (!currentFragment) {
+            alert('Failed to get current fragment details');
+            return;
+        }
+
+        // Check if current fragment is moved - cannot insert adjacent to moved fragments
+        if (currentFragment.frag_review === 'moved') {
+            alert('Cannot insert adjacent to a moved fragment');
+            return;
+        }
+
+        // Construct request body
+        const requestBody = {
+            frag_idx_code: currentFragment.frag_idx_code,
+            cst_file: currentFragment.cst_file,
+            direction: direction
+        };
+
+        // Make POST request to insert endpoint
+        const response = await fetch('/api/fragments/insert', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || 'Failed to insert fragment');
+        }
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Refresh the fragment list for the current file
+            await fetchAndPopulateFragmentList(state.selectedFile);
+
+            // Select the newly inserted fragment
+            await selectFragment(result.new_fragment.id);
+
+            console.log(`New fragment inserted ${direction} successfully`);
+
+            // Show CRITICAL content integrity errors first
+            if (result.content_integrity_error) {
+                const err = result.content_integrity_error;
+                const diffSign = err.difference > 0 ? '+' : '';
+                alert(
+                    `CRITICAL: Content Integrity Error!\n\n` +
+                    `${err.message}\n\n` +
+                    `Expected: ${err.expected_bytes} bytes\n` +
+                    `Actual: ${err.actual_bytes} bytes\n` +
+                    `Difference: ${diffSign}${err.difference} bytes\n\n` +
+                    `This indicates content duplication or loss.\n` +
+                    `Use 'Reset Current File' from the menu to fix this.`
+                );
+                return;
+            }
+
+            // Show boundary errors if any
+            if (result.boundary_errors && result.boundary_errors.length > 0) {
+                const errorMessages = result.boundary_errors.map(e =>
+                    `Fragment ${e.frag_idx_code}: expected start (${e.expected_start_line}:${e.expected_start_char}), actual (${e.actual_start_line}:${e.actual_start_char})`
+                ).join('\n');
+                alert(`Warning: Boundary chain has discontinuities!\n\n${errorMessages}`);
+            }
+        } else {
+            // Check if there's a content integrity error in a failed response
+            if (result.content_integrity_error) {
+                const err = result.content_integrity_error;
+                const diffSign = err.difference > 0 ? '+' : '';
+                alert(
+                    `CRITICAL: Content Integrity Error!\n\n` +
+                    `${err.message}\n\n` +
+                    `Expected: ${err.expected_bytes} bytes\n` +
+                    `Actual: ${err.actual_bytes} bytes\n` +
+                    `Difference: ${diffSign}${err.difference} bytes\n\n` +
+                    `Use 'Reset Current File' from the menu to fix this.`
+                );
+                return;
+            }
+            throw new Error(result.message || 'Insert operation failed');
+        }
+    } catch (error) {
+        console.error('Error inserting fragment:', error);
+        alert(`Failed to insert fragment: ${error.message}`);
     }
 }
 
@@ -961,7 +1141,26 @@ function setupEventListeners() {
             });
         };
     }
-    
+
+    // Insert new fragment buttons with confirmation
+    el = document.getElementById('add-new-before');
+    if (el) {
+        el.onclick = () => {
+            showConfirmModal("Insert a new empty fragment BEFORE the current fragment?", () => {
+                insertFragment('before');
+            });
+        };
+    }
+
+    el = document.getElementById('add-new-after');
+    if (el) {
+        el.onclick = () => {
+            showConfirmModal("Insert a new empty fragment AFTER the current fragment?", () => {
+                insertFragment('after');
+            });
+        };
+    }
+
     // Create new fragment buttons
     el = document.getElementById('create-prev-btn');
     if (el) {
@@ -988,7 +1187,19 @@ function setupEventListeners() {
         closeMenuDropdown();
         openRegenerateModal();
     };
-    
+
+    document.getElementById('menu-recalculate-boundaries').onclick = (e) => {
+        e.preventDefault();
+        closeMenuDropdown();
+        openRecalculateBoundariesModal();
+    };
+
+    document.getElementById('menu-reset-current-file').onclick = (e) => {
+        e.preventDefault();
+        closeMenuDropdown();
+        resetCurrentFile();
+    };
+
     // Settings modal controls
     document.getElementById('settings-modal-close').onclick = closeSettingsModal;
     document.getElementById('settings-cancel').onclick = closeSettingsModal;
@@ -1005,6 +1216,12 @@ function setupEventListeners() {
     document.getElementById('regenerate-with-reference').onclick = () => startRegeneration(true);
     document.getElementById('regenerate-new-replace').onclick = () => startRegeneration(false);
     document.getElementById('copy-output-btn').onclick = copyOutputToClipboard;
+
+    // Recalculate Boundaries modal controls
+    document.getElementById('recalculate-boundaries-modal-close').onclick = closeRecalculateBoundariesModal;
+    document.getElementById('recalculate-boundaries-close').onclick = closeRecalculateBoundariesModal;
+    document.getElementById('recalculate-current-file').onclick = () => recalculateBoundaries(false);
+    document.getElementById('recalculate-all-files').onclick = () => recalculateBoundaries(true);
 }
 
 // Show confirmation modal
@@ -1191,7 +1408,7 @@ function openRegenerateModal() {
 // Close Regenerate modal
 function closeRegenerateModal() {
     document.getElementById('regenerate-modal').classList.remove('is-active');
-    
+
     // If DB was replaced, reload the page now
     if (needsReloadAfterClose) {
         needsReloadAfterClose = false;
@@ -1203,6 +1420,218 @@ function closeRegenerateModal() {
 
 // Global flag to track if reload is needed
 let needsReloadAfterClose = false;
+
+// Open Recalculate Boundaries modal
+function openRecalculateBoundariesModal() {
+    // Reset modal state
+    document.getElementById('recalculate-boundaries-start-message').style.display = 'block';
+    document.getElementById('recalculate-boundaries-status').style.display = 'none';
+    document.getElementById('recalculate-boundaries-result').style.display = 'none';
+    document.getElementById('recalculate-boundaries-output').textContent = '';
+    document.getElementById('recalculate-current-file').disabled = false;
+    document.getElementById('recalculate-all-files').disabled = false;
+    document.getElementById('recalculate-boundaries-close').textContent = 'Cancel';
+
+    // Show currently selected file info if a file is selected
+    const selectedFileInfo = document.getElementById('recalculate-selected-file-info');
+    const selectedFileName = document.getElementById('recalculate-selected-file-name');
+    const currentFileBtn = document.getElementById('recalculate-current-file');
+
+    if (state.selectedFile) {
+        selectedFileInfo.style.display = 'block';
+        selectedFileName.textContent = state.selectedFile;
+        currentFileBtn.disabled = false;
+    } else {
+        selectedFileInfo.style.display = 'none';
+        currentFileBtn.disabled = true;
+    }
+
+    document.getElementById('recalculate-boundaries-modal').classList.add('is-active');
+}
+
+// Close Recalculate Boundaries modal
+function closeRecalculateBoundariesModal() {
+    document.getElementById('recalculate-boundaries-modal').classList.remove('is-active');
+}
+
+// Recalculate boundaries
+async function recalculateBoundaries(allFiles) {
+    const statusDiv = document.getElementById('recalculate-boundaries-status');
+    const statusText = document.getElementById('recalculate-boundaries-status-text');
+    const startMessage = document.getElementById('recalculate-boundaries-start-message');
+    const resultDiv = document.getElementById('recalculate-boundaries-result');
+    const outputPre = document.getElementById('recalculate-boundaries-output');
+    const currentFileBtn = document.getElementById('recalculate-current-file');
+    const allFilesBtn = document.getElementById('recalculate-all-files');
+    const closeBtn = document.getElementById('recalculate-boundaries-close');
+
+    // Disable buttons during operation
+    currentFileBtn.disabled = true;
+    allFilesBtn.disabled = true;
+
+    // Show status
+    startMessage.style.display = 'none';
+    statusDiv.style.display = 'block';
+    statusDiv.className = 'notification is-info';
+    statusText.textContent = allFiles ? 'Recalculating boundaries for all files...' : `Recalculating boundaries for ${state.selectedFile}...`;
+
+    let results = [];
+
+    try {
+        if (allFiles) {
+            // Get all files from the current file list
+            const filesResponse = await fetch('/api/files');
+            if (!filesResponse.ok) throw new Error('Failed to get file list');
+            const files = await filesResponse.json();
+
+            let successCount = 0;
+            let errorCount = 0;
+
+            for (const file of files) {
+                statusText.textContent = `Recalculating: ${file.cst_file} (${successCount + errorCount + 1}/${files.length})`;
+
+                try {
+                    const response = await fetch('/api/fragments/recalculate-boundaries', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ cst_file: file.cst_file })
+                    });
+
+                    if (response.ok) {
+                        successCount++;
+                        results.push(`✓ ${file.cst_file}`);
+                    } else {
+                        const errorText = await response.text();
+                        errorCount++;
+                        results.push(`✗ ${file.cst_file}: ${errorText}`);
+                    }
+                } catch (e) {
+                    errorCount++;
+                    results.push(`✗ ${file.cst_file}: ${e.message}`);
+                }
+            }
+
+            // Show final status
+            if (errorCount === 0) {
+                statusDiv.className = 'notification is-success';
+                statusText.textContent = `Completed successfully! ${successCount} files processed.`;
+            } else {
+                statusDiv.className = 'notification is-warning';
+                statusText.textContent = `Completed with ${errorCount} errors. ${successCount} files succeeded.`;
+            }
+        } else {
+            // Single file
+            if (!state.selectedFile) {
+                throw new Error('No file selected');
+            }
+
+            const response = await fetch('/api/fragments/recalculate-boundaries', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cst_file: state.selectedFile })
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                statusDiv.className = 'notification is-success';
+                statusText.textContent = result.message || 'Boundaries recalculated successfully!';
+                results.push(`✓ ${state.selectedFile}: Boundaries recalculated`);
+            } else {
+                const errorText = await response.text();
+                throw new Error(errorText);
+            }
+        }
+
+        // Show results
+        resultDiv.style.display = 'block';
+        outputPre.textContent = results.join('\n');
+
+        // Change close button text
+        closeBtn.textContent = 'Close';
+
+        // Refresh fragment list if a file was selected
+        if (state.selectedFile) {
+            await fetchAndPopulateFragmentList(state.selectedFile);
+            if (state.selectedFragmentId) {
+                await fetchAndDisplayFragmentDetails(state.selectedFragmentId);
+            }
+        }
+
+    } catch (error) {
+        statusDiv.className = 'notification is-danger';
+        statusText.textContent = `Error: ${error.message}`;
+        resultDiv.style.display = 'block';
+        outputPre.textContent = `Error: ${error.message}`;
+        closeBtn.textContent = 'Close';
+    }
+}
+
+// Reset current file - delete all fragments and reparse from scratch
+async function resetCurrentFile() {
+    if (!state.selectedFile) {
+        alert('No file selected. Please select a file first.');
+        return;
+    }
+
+    const confirmed = confirm(
+        `WARNING: This will delete ALL fragments for "${state.selectedFile}" and reparse the file from scratch.\n\n` +
+        `All manual corrections (checked fragments, boundary adjustments, inserted fragments) will be LOST.\n\n` +
+        `Are you sure you want to continue?`
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    // Double confirmation for safety
+    const doubleConfirmed = confirm(
+        `FINAL CONFIRMATION\n\n` +
+        `You are about to reset "${state.selectedFile}".\n\n` +
+        `This action cannot be undone. Continue?`
+    );
+
+    if (!doubleConfirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/fragments/reset-file', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cst_file: state.selectedFile })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || 'Failed to reset file');
+        }
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert(`File reset successfully!\n\n${result.message}`);
+
+            // Refresh the fragment list
+            await fetchAndPopulateFragmentList(state.selectedFile);
+
+            // Clear selection and select first fragment if available
+            state.selectedFragmentId = null;
+            const firstFragment = document.querySelector('#fragment-list .panel-item');
+            if (firstFragment) {
+                const firstId = parseInt(firstFragment.dataset.fragmentId);
+                if (firstId) {
+                    await selectFragment(firstId);
+                }
+            }
+        } else {
+            throw new Error(result.message || 'Reset failed');
+        }
+
+    } catch (error) {
+        console.error('Error resetting file:', error);
+        alert(`Failed to reset file: ${error.message}`);
+    }
+}
 
 // Update all reparse buttons' disabled state based on isOperationInProgress
 function updateReparseButtonsState() {
@@ -1256,8 +1685,21 @@ async function startRegeneration(useReferenceDb) {
             body: JSON.stringify({ use_reference_db: useReferenceDb })
         });
 
-        // Always try to parse as JSON since we always return JSON now
-        const result = await response.json();
+        // Check if response is OK and try to parse as JSON
+        const contentType = response.headers.get('content-type');
+        let result;
+
+        if (contentType && contentType.includes('application/json')) {
+            result = await response.json();
+        } else {
+            // Not JSON - get text and wrap it
+            const text = await response.text();
+            result = {
+                success: false,
+                output: `Server returned non-JSON response (${response.status}):\n${text}`,
+                db_replaced: false
+            };
+        }
 
         // Display output
         document.getElementById('regenerate-output').textContent = result.output;
@@ -1350,7 +1792,22 @@ async function reparseFile(cstFile) {
             body: JSON.stringify({ cst_file: cstFile })
         });
 
-        const result = await response.json();
+        // Check if response is OK and try to parse as JSON
+        const contentType = response.headers.get('content-type');
+        let result;
+
+        if (contentType && contentType.includes('application/json')) {
+            result = await response.json();
+        } else {
+            // Not JSON - get text and wrap it
+            const text = await response.text();
+            result = {
+                success: false,
+                output: `Server returned non-JSON response (${response.status}):\n${text}`,
+                fragments_count: 0,
+                review_status_restored: 0
+            };
+        }
 
         // Display output
         document.getElementById('regenerate-output').textContent = result.output;

@@ -54,6 +54,8 @@ fn test_correction_overrides_precedence() {
         key,
         CorrectionFragmentOverride {
             collapse: false,
+            start_line: None,
+            start_char: None,
             end_line: None,
             end_char: None,
             sc_code: Some("dn1.override".to_string()),
@@ -69,6 +71,7 @@ fn test_correction_overrides_precedence() {
 
     let overrides = ParserOverrides {
         correction_overrides: Some(correction_overrides),
+        inserted_fragments: None,
         pali_titles: None,
     };
 
@@ -185,7 +188,7 @@ fn test_extract_correction_overrides() {
     .unwrap();
 
     // Now extract checked overrides
-    let (overrides, review_status) = extract_correction_overrides(db_path, "test.xml").unwrap();
+    let (overrides, review_status, _inserted_fragments) = extract_correction_overrides(db_path, "test.xml").unwrap();
 
     assert_eq!(overrides.len(), 1, "Should have 1 checked override");
     assert_eq!(
@@ -294,6 +297,8 @@ fn test_boundary_override_from_checked_fragment() {
         key,
         CorrectionFragmentOverride {
             collapse: false,
+            start_line: None,
+            start_char: None,
             end_line: Some(override_end_line),
             end_char: Some(0),
             sc_code: None,
@@ -309,6 +314,7 @@ fn test_boundary_override_from_checked_fragment() {
 
     let overrides = ParserOverrides {
         correction_overrides: Some(correction_overrides),
+        inserted_fragments: None,
         pali_titles: None,
     };
 
@@ -392,6 +398,8 @@ fn test_boundary_override_applied() {
         key,
         CorrectionFragmentOverride {
             collapse: false,
+            start_line: None,
+            start_char: None,
             end_line: Some(checked_end_line),
             end_char: Some(0),
             sc_code: None,
@@ -407,6 +415,7 @@ fn test_boundary_override_applied() {
 
     let overrides = ParserOverrides {
         correction_overrides: Some(correction_overrides),
+        inserted_fragments: None,
         pali_titles: None,
     };
 
@@ -496,6 +505,8 @@ fn test_header_fragment_boundary_continuity_with_override() {
         key,
         CorrectionFragmentOverride {
             collapse: false,
+            start_line: None,
+            start_char: None,
             end_line: Some(extended_end_line),
             end_char: Some(extended_end_char),
             sc_code: None,
@@ -511,6 +522,7 @@ fn test_header_fragment_boundary_continuity_with_override() {
 
     let overrides = ParserOverrides {
         correction_overrides: Some(correction_overrides),
+        inserted_fragments: None,
         pali_titles: None,
     };
 
@@ -627,6 +639,8 @@ fn test_boundary_override_content_extraction() {
         key,
         CorrectionFragmentOverride {
             collapse: false,
+            start_line: None,
+            start_char: None,
             end_line: Some(bbbb_line),
             end_char: Some(0), // At start of BBBB line
             sc_code: None,
@@ -642,6 +656,7 @@ fn test_boundary_override_content_extraction() {
 
     let overrides = ParserOverrides {
         correction_overrides: Some(correction_overrides),
+        inserted_fragments: None,
         pali_titles: None,
     };
 

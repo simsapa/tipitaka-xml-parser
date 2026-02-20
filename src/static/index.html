@@ -77,6 +77,12 @@
                                             <a href="#" class="dropdown-item" id="menu-validation">
                                                 Database Validation
                                             </a>
+                                            <a href="#" class="dropdown-item" id="menu-recalculate-boundaries">
+                                                Recalculate Boundaries
+                                            </a>
+                                            <a href="#" class="dropdown-item" id="menu-reset-current-file">
+                                                Reset Current File
+                                            </a>
                                         </div>
                                     </div>
                                 </div>
@@ -320,6 +326,7 @@
 
                                     <div class="buttons are-small" style="margin-left: 1em;">
                                         <button class="button is-danger" id="move-to-prev" title="Empty and move content to previous">M↑</button>
+                                        <button class="button is-warning" id="add-new-before" title="Insert new empty fragment before current">A↑</button>
                                     </div>
                                 </div>
 
@@ -400,6 +407,7 @@
 
                                     <div class="buttons are-small" style="margin-left: 1em;">
                                         <button class="button is-danger" id="move-to-next" title="Empty and move content to next">M↓</button>
+                                        <button class="button is-warning" id="add-new-after" title="Insert new empty fragment after current">A↓</button>
                                     </div>
                                 </div>
                             </div>
@@ -664,6 +672,40 @@
             </section>
             <footer class="modal-card-foot">
                 <button class="button" id="validation-close">Close</button>
+            </footer>
+        </div>
+    </div>
+
+    <!-- Recalculate Boundaries Modal -->
+    <div class="modal" id="recalculate-boundaries-modal">
+        <div class="modal-background"></div>
+        <div class="modal-card" style="width: 700px; max-height: 80vh;">
+            <header class="modal-card-head">
+                <p class="modal-card-title">Recalculate Fragment Boundaries</p>
+                <button class="delete" aria-label="close" id="recalculate-boundaries-modal-close"></button>
+            </header>
+            <section class="modal-card-body" style="overflow-y: auto;">
+                <div id="recalculate-boundaries-status" class="notification is-info" style="display: none;">
+                    <p><strong>Status:</strong> <span id="recalculate-boundaries-status-text">Processing...</span></p>
+                </div>
+                <div id="recalculate-boundaries-start-message" class="content">
+                    <p>This will recalculate <code>start_line</code>, <code>start_char</code>, <code>end_line</code>, and <code>end_char</code> values for fragments based on their <code>content_xml</code>.</p>
+                    <p>This is useful for fixing boundary discontinuities that may occur after inserting fragments and adjusting their boundaries.</p>
+                    <div class="notification is-warning is-light">
+                        <p><strong>Note:</strong> This operation modifies the database. Boundaries will be recalculated to form a contiguous chain based on fragment order and content length.</p>
+                    </div>
+                    <p id="recalculate-selected-file-info" style="display: none;">
+                        <strong>Selected file:</strong> <code id="recalculate-selected-file-name"></code>
+                    </p>
+                </div>
+                <div id="recalculate-boundaries-result" class="content" style="display: none;">
+                    <pre id="recalculate-boundaries-output" style="background: #f5f5f5; padding: 1rem; border-radius: 4px; max-height: 300px; overflow-y: auto; font-size: 0.875rem; line-height: 1.4; white-space: pre-wrap; word-wrap: break-word;"></pre>
+                </div>
+            </section>
+            <footer class="modal-card-foot">
+                <button class="button is-primary" id="recalculate-current-file">Recalculate Current File</button>
+                <button class="button is-warning" id="recalculate-all-files">Recalculate All Files</button>
+                <button class="button" id="recalculate-boundaries-close">Cancel</button>
             </footer>
         </div>
     </div>
