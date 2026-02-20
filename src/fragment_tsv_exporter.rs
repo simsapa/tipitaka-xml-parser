@@ -6,11 +6,13 @@
 
 use anyhow::{Result, Context};
 use diesel::prelude::*;
-use diesel::sqlite::SqliteConnection;
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::io::Write;
 
+use crate::fragment_exporter::establish_connection_and_migrate;
 use crate::fragments_schema::xml_fragments;
+use crate::types::compare_frag_idx_code;
 
 /// Fragment data for TSV export (excludes id, content_xml, content_html, created_at)
 #[derive(Queryable, Selectable)]
@@ -19,8 +21,8 @@ use crate::fragments_schema::xml_fragments;
 pub struct FragmentTsvRecord {
     #[diesel(select_expression = xml_fragments::cst_file)]
     pub cst_file: String,
-    #[diesel(select_expression = xml_fragments::frag_idx)]
-    pub frag_idx: i32,
+    #[diesel(select_expression = xml_fragments::frag_idx_code)]
+    pub frag_idx_code: String,
     #[diesel(select_expression = xml_fragments::frag_type)]
     pub frag_type: String,
     #[diesel(select_expression = xml_fragments::frag_review)]
@@ -62,54 +64,68 @@ pub struct FragmentTsvRecord {
 /// # Returns
 /// Number of rows exported or error
 pub fn export_fragments_to_tsv(db_path: &Path, output_path: &Path) -> Result<usize> {
-    // Connect to database
-    let mut conn = SqliteConnection::establish(db_path.to_str().unwrap())
-        .context("Failed to connect to fragments database")?;
-    
+    // Connect to database and run migrations
+    let mut conn = establish_connection_and_migrate(db_path)?;
+
     // Query all fragments with only the fields we want
     use crate::fragments_schema::xml_fragments::dsl;
-    
+
     let fragments: Vec<FragmentTsvRecord> = dsl::xml_fragments
         .select(FragmentTsvRecord::as_select())
-        .order((dsl::cst_file.asc(), dsl::frag_idx.asc()))
+        .order(dsl::cst_file.asc())
         .load(&mut conn)
         .context("Failed to query fragments")?;
-    
+
+    // Group by cst_file and sort each group by frag_idx_code (version-style)
+    let mut grouped: BTreeMap<String, Vec<FragmentTsvRecord>> = BTreeMap::new();
+    for frag in fragments {
+        grouped.entry(frag.cst_file.clone())
+            .or_insert_with(Vec::new)
+            .push(frag);
+    }
+
+    // Sort each group using version-style comparison
+    for frags in grouped.values_mut() {
+        frags.sort_by(|a, b| compare_frag_idx_code(&a.frag_idx_code, &b.frag_idx_code));
+    }
+
     // Write to TSV file
     let file = std::fs::File::create(output_path)
         .context(format!("Failed to create output file: {:?}", output_path))?;
     let mut writer = std::io::BufWriter::new(file);
-    
+
     // Write header
-    writeln!(writer, "{}", 
-        "cst_file\tfrag_idx\tfrag_type\tfrag_review\tnikaya\tcst_code\tsc_code\tcst_vagga\tcst_sutta\tcst_paranum\tsc_sutta\tstart_line\tstart_char\tend_line\tend_char\tgroup_levels"
+    writeln!(writer, "{}",
+        "cst_file\tfrag_idx_code\tfrag_type\tfrag_review\tnikaya\tcst_code\tsc_code\tcst_vagga\tcst_sutta\tcst_paranum\tsc_sutta\tstart_line\tstart_char\tend_line\tend_char\tgroup_levels"
     ).context("Failed to write TSV header")?;
-    
+
     // Write rows
-    let count = fragments.len();
-    for frag in fragments {
-        writeln!(writer, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-            escape_tsv_field(&frag.cst_file),
-            frag.frag_idx,
-            escape_tsv_field(&frag.frag_type),
-            frag.frag_review.as_deref().unwrap_or(""),
-            escape_tsv_field(&frag.nikaya),
-            frag.cst_code.as_deref().unwrap_or(""),
-            frag.sc_code.as_deref().unwrap_or(""),
-            frag.cst_vagga.as_deref().unwrap_or(""),
-            frag.cst_sutta.as_deref().unwrap_or(""),
-            frag.cst_paranum.as_deref().unwrap_or(""),
-            frag.sc_sutta.as_deref().unwrap_or(""),
-            frag.start_line,
-            frag.start_char,
-            frag.end_line,
-            frag.end_char,
-            escape_tsv_field(&frag.group_levels),
-        ).context("Failed to write TSV row")?;
+    let count: usize = grouped.values().map(|v| v.len()).sum();
+    for frags in grouped.values() {
+        for frag in frags {
+            writeln!(writer, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                escape_tsv_field(&frag.cst_file),
+                frag.frag_idx_code,
+                escape_tsv_field(&frag.frag_type),
+                frag.frag_review.as_deref().unwrap_or(""),
+                escape_tsv_field(&frag.nikaya),
+                frag.cst_code.as_deref().unwrap_or(""),
+                frag.sc_code.as_deref().unwrap_or(""),
+                frag.cst_vagga.as_deref().unwrap_or(""),
+                frag.cst_sutta.as_deref().unwrap_or(""),
+                frag.cst_paranum.as_deref().unwrap_or(""),
+                frag.sc_sutta.as_deref().unwrap_or(""),
+                frag.start_line,
+                frag.start_char,
+                frag.end_line,
+                frag.end_char,
+                escape_tsv_field(&frag.group_levels),
+            ).context("Failed to write TSV row")?;
+        }
     }
-    
+
     writer.flush().context("Failed to flush TSV output")?;
-    
+
     Ok(count)
 }
 
@@ -147,44 +163,44 @@ mod tests {
 </body>
 </text>
 </TEI.2>"#;
-        
+
         let temp_db = NamedTempFile::new().unwrap();
         let db_path = temp_db.path();
-        
+
         let temp_tsv = NamedTempFile::new().unwrap();
         let tsv_path = temp_tsv.path();
-        
+
         // Parse and export to DB
         let structure = detect_nikaya_structure(original_xml).unwrap();
         let fragments = parse_into_fragments(original_xml, &structure, "test.xml", &ParserOverrides::default(), false).unwrap();
         export_fragments_to_db(&fragments, &structure, db_path).unwrap();
-        
+
         // Export to TSV
         let count = export_fragments_to_tsv(db_path, tsv_path).unwrap();
-        
+
         // Verify
         assert_eq!(count, fragments.len());
-        
+
         // Read TSV and verify format
         let tsv_content = std::fs::read_to_string(tsv_path).unwrap();
         let lines: Vec<&str> = tsv_content.lines().collect();
-        
+
         // Should have header + data rows
         assert_eq!(lines.len(), fragments.len() + 1);
-        
+
         // Check header
         assert!(lines[0].contains("cst_file"));
-        assert!(lines[0].contains("frag_idx"));
+        assert!(lines[0].contains("frag_idx_code"));
         assert!(lines[0].contains("frag_type"));
         assert!(!lines[0].contains("content_xml"));
         assert!(!lines[0].contains("content_html"));
         assert!(!lines[0].contains("created_at"));
-        
+
         // Check first data row
         assert!(lines[1].contains("test.xml"));
         assert!(lines[1].contains("digha"));
     }
-    
+
     #[test]
     fn test_escape_tsv_field() {
         assert_eq!(escape_tsv_field("hello"), "hello");

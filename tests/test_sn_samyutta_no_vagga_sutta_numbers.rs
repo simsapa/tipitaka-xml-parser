@@ -4,7 +4,7 @@
 
 use tipitaka_xml_parser::nikaya_detector::detect_nikaya_structure;
 use tipitaka_xml_parser::parse_into_fragments;
-use tipitaka_xml_parser::types::{FragmentType, ParserOverrides};
+use tipitaka_xml_parser::types::{FragmentType, ParserOverrides, parse_frag_idx_code};
 
 #[test]
 fn test_sn_vaṅgīsa_samyutta_sutta_numbering() {
@@ -40,11 +40,11 @@ fn test_sn_vaṅgīsa_samyutta_sutta_numbering() {
     
     println!("\nFound {} suttas in sn1.8 (Vaṅgīsasaṃyuttaṃ):", sn8_suttas.len());
     for (i, s) in sn8_suttas.iter().take(5).enumerate() {
-        println!("  {}. frag_idx={}, cst_code={:?}, cst_sutta={:?}", 
-            i+1, s.frag_idx, s.cst_code, s.cst_sutta);
-        
-        // Print first 200 chars of content for fragment 210
-        if s.frag_idx == 210 {
+        println!("  {}. frag_idx_code={}, cst_code={:?}, cst_sutta={:?}",
+            i+1, s.frag_idx_code, s.cst_code, s.cst_sutta);
+
+        // Print first 200 chars of content for fragment "210.0"
+        if s.frag_idx_code == "210.0" {
             let preview = s.content_xml.chars().take(200).collect::<String>();
             println!("     Content preview: {}", preview);
             
@@ -72,7 +72,7 @@ fn test_sn_vaṅgīsa_samyutta_sutta_numbering() {
         .expect("Should find Nikkhantasuttaṃ");
     
     println!("\nSutta 1 (Nikkhantasuttaṃ):");
-    println!("  frag_idx: {}", sutta1.frag_idx);
+    println!("  frag_idx_code: {}", sutta1.frag_idx_code);
     println!("  cst_code: {:?}", sutta1.cst_code);
     println!("  cst_vagga: {:?}", sutta1.cst_vagga);
     println!("  cst_sutta: {:?}", sutta1.cst_sutta);
@@ -88,7 +88,7 @@ fn test_sn_vaṅgīsa_samyutta_sutta_numbering() {
         .expect("Should find Aratisuttaṃ");
     
     println!("\nSutta 2 (Aratisuttaṃ):");
-    println!("  frag_idx: {}", sutta2.frag_idx);
+    println!("  frag_idx_code: {}", sutta2.frag_idx_code);
     println!("  cst_code: {:?}", sutta2.cst_code);
     println!("  cst_vagga: {:?}", sutta2.cst_vagga);
     println!("  cst_sutta: {:?}", sutta2.cst_sutta);
@@ -100,7 +100,7 @@ fn test_sn_vaṅgīsa_samyutta_sutta_numbering() {
     assert_eq!(sutta2.cst_sutta.as_deref(), Some("2. Aratisuttaṃ"),
         "Sutta 2 should have cst_sutta='2. Aratisuttaṃ'");
     
-    // Verify fragment ordering
-    assert!(sutta2.frag_idx > sutta1.frag_idx,
+    // Verify fragment ordering (using version-style comparison for frag_idx_code)
+    assert!(parse_frag_idx_code(&sutta2.frag_idx_code) > parse_frag_idx_code(&sutta1.frag_idx_code),
         "Sutta 2 fragment should come after Sutta 1");
 }

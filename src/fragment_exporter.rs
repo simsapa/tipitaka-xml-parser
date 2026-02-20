@@ -9,7 +9,7 @@ use diesel::sqlite::SqliteConnection;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use std::path::Path;
 
-use crate::types::{XmlFragment, CorrectionFragmentOverride, CorrectionFragmentOverrides, FragmentKey};
+use crate::types::{XmlFragment, CorrectionFragmentOverride, CorrectionFragmentOverrides, FragmentKey, InsertedFragmentData, FragmentType, parse_frag_idx_code, compare_frag_idx_code};
 use std::collections::HashMap;
 use crate::nikaya_structure::NikayaStructure;
 use crate::fragments_models::{NewNikayaStructure, NewXmlFragment};
@@ -37,13 +37,9 @@ pub fn export_fragments_to_db(
     nikaya_structure: &NikayaStructure,
     db_path: &Path,
 ) -> Result<usize> {
-    // Connect to database
-    let mut conn = SqliteConnection::establish(db_path.to_str().unwrap())
-        .context("Failed to connect to fragments database")?;
-    
-    // Run migrations
-    run_migrations(&mut conn)?;
-    
+    // Connect to database and run migrations
+    let mut conn = establish_connection_and_migrate(db_path)?;
+
     // Insert or get nikaya structure
     insert_nikaya_structure(&mut conn, nikaya_structure)?;
     
@@ -58,6 +54,26 @@ fn run_migrations(conn: &mut SqliteConnection) -> Result<()> {
     conn.run_pending_migrations(FRAGMENTS_MIGRATIONS)
         .map_err(|e| anyhow::anyhow!("Failed to execute pending database migrations: {}", e))?;
     Ok(())
+}
+
+/// Establish a database connection and run any pending migrations.
+///
+/// This is the recommended way to connect to the fragments database.
+/// It ensures that the database schema is always up-to-date by running
+/// any pending migrations automatically.
+///
+/// # Arguments
+/// * `db_path` - Path to the SQLite database file
+///
+/// # Returns
+/// A connected `SqliteConnection` with migrations applied
+pub fn establish_connection_and_migrate(db_path: &Path) -> Result<SqliteConnection> {
+    let mut conn = SqliteConnection::establish(db_path.to_str().unwrap())
+        .context("Failed to connect to fragments database")?;
+
+    run_migrations(&mut conn)?;
+
+    Ok(conn)
 }
 
 /// Insert nikaya structure into database using diesel model
@@ -119,7 +135,7 @@ fn insert_fragments(
 
         let new_fragment = NewXmlFragment {
             cst_file: &fragment.cst_file,
-            frag_idx: fragment.frag_idx as i32,
+            frag_idx_code: &fragment.frag_idx_code,
             frag_type,
             frag_review: fragment.frag_review.as_deref(),
             nikaya: &fragment.nikaya,
@@ -167,8 +183,7 @@ pub struct ValidationStats {
 /// # Returns
 /// ValidationStats with counts of fragments with missing codes
 pub fn validate_fragments_db(db_path: &Path) -> Result<ValidationStats> {
-    let mut conn = SqliteConnection::establish(db_path.to_str().unwrap())
-        .context("Failed to connect to fragments database")?;
+    let mut conn = establish_connection_and_migrate(db_path)?;
     
     #[derive(QueryableByName)]
     struct CountResult {
@@ -237,8 +252,8 @@ pub fn validate_first_last_headers(
         return Err(ParserError::HeaderValidationFailed {
             filename: filename.to_string(),
             details: format!(
-                "first fragment (frag_idx {}) is {:?}, expected Header",
-                first.frag_idx,
+                "first fragment (frag_idx_code {}) is {:?}, expected Header",
+                first.frag_idx_code,
                 first.frag_type
             ),
         }.into());
@@ -250,8 +265,8 @@ pub fn validate_first_last_headers(
         return Err(ParserError::HeaderValidationFailed {
             filename: filename.to_string(),
             details: format!(
-                "last fragment (frag_idx {}) is {:?}, expected Header",
-                last.frag_idx,
+                "last fragment (frag_idx_code {}) is {:?}, expected Header",
+                last.frag_idx_code,
                 last.frag_type
             ),
         }.into());
@@ -260,14 +275,14 @@ pub fn validate_first_last_headers(
     Ok(())
 }
 
-/// Extract correction fragment overrides and frag_review status from the database.
+/// Extract correction fragment overrides, frag_review status, and inserted fragments from the database.
 ///
 /// Queries fragments where `frag_review` is not null, empty, or 'unchecked' for the given file.
-/// Returns both the overrides (for use during parsing) and the frag_review status map
-/// (for restoration after parsing).
+/// Returns correction overrides, review status map, and inserted fragments (those with sub-index > 0).
 ///
 /// "Moved" fragments get `collapse: true` with no boundary/SC overrides.
-/// Other reviewed fragments get their boundary and SC values as overrides.
+/// Other reviewed generated fragments get their boundary and SC values as overrides.
+/// Inserted fragments (sub-index > 0) are extracted with full content and boundary data.
 ///
 /// # Arguments
 /// * `db_path` - Path to the fragments database
@@ -275,23 +290,29 @@ pub fn validate_first_last_headers(
 ///
 /// # Returns
 /// Tuple of:
-/// - `CorrectionFragmentOverrides` - HashMap of overrides keyed by (cst_file, frag_idx)
-/// - `HashMap<usize, String>` - Map of frag_idx to frag_review status for restoration
+/// - `CorrectionFragmentOverrides` - HashMap of overrides keyed by (cst_file, frag_idx_code)
+/// - `HashMap<String, String>` - Map of frag_idx_code to frag_review status for restoration
+/// - `Vec<InsertedFragmentData>` - Inserted fragments with full data for re-injection
 pub fn extract_correction_overrides(
     db_path: &Path,
     cst_file: &str,
-) -> Result<(CorrectionFragmentOverrides, HashMap<usize, String>)> {
-    let mut conn = SqliteConnection::establish(db_path.to_str().unwrap())
-        .context("Failed to connect to fragments database")?;
+) -> Result<(CorrectionFragmentOverrides, HashMap<String, String>, Vec<InsertedFragmentData>)> {
+    let mut conn = establish_connection_and_migrate(db_path)?;
 
     #[derive(QueryableByName)]
     struct CorrectionFragmentRow {
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        frag_idx_code: String,
         #[diesel(sql_type = diesel::sql_types::Integer)]
-        frag_idx: i32,
-        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
-        end_line: Option<i32>,
-        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
-        end_char: Option<i32>,
+        start_line: i32,
+        #[diesel(sql_type = diesel::sql_types::Integer)]
+        start_char: i32,
+        #[diesel(sql_type = diesel::sql_types::Integer)]
+        end_line: i32,
+        #[diesel(sql_type = diesel::sql_types::Integer)]
+        end_char: i32,
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        content_xml: String,
         #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
         sc_code: Option<String>,
         #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
@@ -308,12 +329,19 @@ pub fn extract_correction_overrides(
         frag_review: Option<String>,
         #[diesel(sql_type = diesel::sql_types::Text)]
         frag_type: String,
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        nikaya: String,
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        group_levels: String,
     }
 
     // Query fragments with frag_review status that indicates they've been reviewed
     // Excludes: NULL, empty string, and 'unchecked'
+    // Now includes additional fields needed for inserted fragments
     let rows: Vec<CorrectionFragmentRow> = diesel::sql_query(
-        "SELECT frag_idx, end_line, end_char, sc_code, sc_sutta, cst_code, cst_vagga, cst_sutta, cst_paranum, frag_review, frag_type
+        "SELECT frag_idx_code, start_line, start_char, end_line, end_char, content_xml,
+                sc_code, sc_sutta, cst_code, cst_vagga, cst_sutta, cst_paranum,
+                frag_review, frag_type, nikaya, group_levels
          FROM xml_fragments
          WHERE cst_file = ?
            AND frag_review IS NOT NULL
@@ -326,94 +354,137 @@ pub fn extract_correction_overrides(
 
     let mut overrides = CorrectionFragmentOverrides::new();
     let mut review_status = HashMap::new();
+    let mut inserted_fragments = Vec::new();
 
     for row in rows {
-        let frag_idx = row.frag_idx as usize;
+        let frag_idx_code = row.frag_idx_code.clone();
         let frag_review = row.frag_review.as_deref().unwrap_or("");
 
         // Parse frag_type from string to enum
-        let frag_type = match row.frag_type.as_str() {
-            "Header" => Some(crate::types::FragmentType::Header),
-            "Sutta" => Some(crate::types::FragmentType::Sutta),
-            _ => None,
+        let frag_type_enum = match row.frag_type.as_str() {
+            "Header" => FragmentType::Header,
+            "Sutta" => FragmentType::Sutta,
+            _ => FragmentType::Sutta, // Default to Sutta if unknown
         };
 
-        // Build the override based on frag_review status
-        let override_data = match frag_review {
-            "moved" => CorrectionFragmentOverride {
-                collapse: true,
-                // Don't use stale boundary values from moved fragments
-                end_line: None,
-                end_char: None,
-                // Moved fragments have no SC data
-                sc_code: None,
-                sc_sutta: None,
-                // Moved fragments have no CST metadata
-                cst_code: None,
-                cst_vagga: None,
-                cst_sutta: None,
-                cst_paranum: None,
-                // frag_review status is handled separately via review_status map
+        // Check if this is an inserted fragment (sub-index > 0)
+        let (_, minor) = parse_frag_idx_code(&frag_idx_code);
+        let is_inserted = minor > 0;
+
+        if is_inserted {
+            // For inserted fragments, store full data for re-injection
+            inserted_fragments.push(InsertedFragmentData {
+                frag_idx_code: frag_idx_code.clone(),
+                content_xml: row.content_xml,
+                start_line: row.start_line as usize,
+                start_char: row.start_char as usize,
+                end_line: row.end_line as usize,
+                end_char: row.end_char as usize,
+                frag_type: frag_type_enum.clone(),
                 frag_review: row.frag_review.clone(),
-                frag_type: frag_type.clone(),
-            },
-            _ => CorrectionFragmentOverride {
-                collapse: false,
-                end_line: row.end_line.map(|v| v as usize),
-                end_char: row.end_char.map(|v| v as usize),
-                sc_code: row.sc_code,
-                sc_sutta: row.sc_sutta,
                 cst_code: row.cst_code,
+                sc_code: row.sc_code,
                 cst_vagga: row.cst_vagga,
                 cst_sutta: row.cst_sutta,
                 cst_paranum: row.cst_paranum,
-                frag_review: row.frag_review.clone(),
-                frag_type,
-            },
-        };
+                sc_sutta: row.sc_sutta,
+                nikaya: row.nikaya,
+                group_levels: row.group_levels,
+            });
+        } else {
+            // For generated fragments (sub-index = 0), store as correction override
+            let override_data = match frag_review {
+                "moved" => CorrectionFragmentOverride {
+                    collapse: true,
+                    // Don't use stale boundary values from moved fragments
+                    start_line: None,
+                    start_char: None,
+                    end_line: None,
+                    end_char: None,
+                    // Moved fragments have no SC data
+                    sc_code: None,
+                    sc_sutta: None,
+                    // Moved fragments have no CST metadata
+                    cst_code: None,
+                    cst_vagga: None,
+                    cst_sutta: None,
+                    cst_paranum: None,
+                    // frag_review status is handled separately via review_status map
+                    frag_review: row.frag_review.clone(),
+                    frag_type: Some(frag_type_enum),
+                },
+                _ => CorrectionFragmentOverride {
+                    collapse: false,
+                    // Include start position for fragments that may follow an inserted fragment
+                    start_line: Some(row.start_line as usize),
+                    start_char: Some(row.start_char as usize),
+                    end_line: Some(row.end_line as usize),
+                    end_char: Some(row.end_char as usize),
+                    sc_code: row.sc_code,
+                    sc_sutta: row.sc_sutta,
+                    cst_code: row.cst_code,
+                    cst_vagga: row.cst_vagga,
+                    cst_sutta: row.cst_sutta,
+                    cst_paranum: row.cst_paranum,
+                    frag_review: row.frag_review.clone(),
+                    frag_type: Some(frag_type_enum),
+                },
+            };
 
-        let key = FragmentKey {
-            cst_file: cst_file.to_string(),
-            frag_idx,
-        };
+            let key = FragmentKey {
+                cst_file: cst_file.to_string(),
+                frag_idx_code: frag_idx_code.clone(),
+            };
 
-        overrides.insert(key, override_data);
+            overrides.insert(key, override_data);
+        }
 
-        // Store the frag_review status for restoration
+        // Store the frag_review status for restoration (both generated and inserted)
         if let Some(status) = row.frag_review {
-            review_status.insert(frag_idx, status);
+            review_status.insert(frag_idx_code, status);
         }
     }
 
-    Ok((overrides, review_status))
+    // Sort inserted fragments by frag_idx_code
+    inserted_fragments.sort_by(|a, b| compare_frag_idx_code(&a.frag_idx_code, &b.frag_idx_code));
+
+    Ok((overrides, review_status, inserted_fragments))
 }
 
-/// Extract correction fragment overrides from the database for all files.
+/// Extract correction fragment overrides and inserted fragments from the database for all files.
 ///
 /// This variant queries ALL corrected fragments across all files, used during
 /// full database regeneration. "Moved" fragments get `collapse: true`.
+/// Inserted fragments (sub-index > 0) are extracted with full content and boundary data.
 ///
 /// # Arguments
 /// * `db_path` - Path to the fragments database
 ///
 /// # Returns
-/// `CorrectionFragmentOverrides` - HashMap of overrides keyed by (cst_file, frag_idx)
+/// Tuple of:
+/// - `CorrectionFragmentOverrides` - HashMap of overrides keyed by (cst_file, frag_idx_code)
+/// - `InsertedFragmentsMap` - HashMap of cst_file -> Vec<InsertedFragmentData>
 pub fn extract_all_correction_overrides(
     db_path: &Path,
-) -> Result<CorrectionFragmentOverrides> {
-    let mut conn = SqliteConnection::establish(db_path.to_str().unwrap())
-        .context("Failed to connect to fragments database")?;
+) -> Result<(CorrectionFragmentOverrides, crate::types::InsertedFragmentsMap)> {
+    let mut conn = establish_connection_and_migrate(db_path)?;
 
     #[derive(QueryableByName)]
     struct CorrectionFragmentRow {
         #[diesel(sql_type = diesel::sql_types::Text)]
         cst_file: String,
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        frag_idx_code: String,
         #[diesel(sql_type = diesel::sql_types::Integer)]
-        frag_idx: i32,
-        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
-        end_line: Option<i32>,
-        #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
-        end_char: Option<i32>,
+        start_line: i32,
+        #[diesel(sql_type = diesel::sql_types::Integer)]
+        start_char: i32,
+        #[diesel(sql_type = diesel::sql_types::Integer)]
+        end_line: i32,
+        #[diesel(sql_type = diesel::sql_types::Integer)]
+        end_char: i32,
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        content_xml: String,
         #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
         sc_code: Option<String>,
         #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
@@ -430,11 +501,18 @@ pub fn extract_all_correction_overrides(
         frag_review: Option<String>,
         #[diesel(sql_type = diesel::sql_types::Text)]
         frag_type: String,
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        nikaya: String,
+        #[diesel(sql_type = diesel::sql_types::Text)]
+        group_levels: String,
     }
 
     // Query ALL fragments with reviewed status across all files
+    // Now includes additional fields needed for inserted fragments
     let rows: Vec<CorrectionFragmentRow> = diesel::sql_query(
-        "SELECT cst_file, frag_idx, end_line, end_char, sc_code, sc_sutta, cst_code, cst_vagga, cst_sutta, cst_paranum, frag_review, frag_type
+        "SELECT cst_file, frag_idx_code, start_line, start_char, end_line, end_char, content_xml,
+                sc_code, sc_sutta, cst_code, cst_vagga, cst_sutta, cst_paranum,
+                frag_review, frag_type, nikaya, group_levels
          FROM xml_fragments
          WHERE frag_review IS NOT NULL
            AND frag_review != ''
@@ -444,55 +522,97 @@ pub fn extract_all_correction_overrides(
     .context("Failed to query all correction fragments")?;
 
     let mut overrides = CorrectionFragmentOverrides::new();
+    let mut inserted_fragments_map: crate::types::InsertedFragmentsMap = HashMap::new();
 
     for row in rows {
         let frag_review = row.frag_review.as_deref().unwrap_or("");
 
         // Parse frag_type from string to enum
-        let frag_type = match row.frag_type.as_str() {
-            "Header" => Some(crate::types::FragmentType::Header),
-            "Sutta" => Some(crate::types::FragmentType::Sutta),
-            _ => None,
+        let frag_type_enum = match row.frag_type.as_str() {
+            "Header" => FragmentType::Header,
+            "Sutta" => FragmentType::Sutta,
+            _ => FragmentType::Sutta, // Default to Sutta if unknown
         };
 
-        let override_data = match frag_review {
-            "moved" => CorrectionFragmentOverride {
-                collapse: true,
-                end_line: None,
-                end_char: None,
-                sc_code: None,
-                sc_sutta: None,
-                cst_code: None,
-                cst_vagga: None,
-                cst_sutta: None,
-                cst_paranum: None,
+        // Check if this is an inserted fragment (sub-index > 0)
+        let (_, minor) = parse_frag_idx_code(&row.frag_idx_code);
+        let is_inserted = minor > 0;
+
+        if is_inserted {
+            // For inserted fragments, store full data for re-injection
+            let inserted_data = InsertedFragmentData {
+                frag_idx_code: row.frag_idx_code.clone(),
+                content_xml: row.content_xml,
+                start_line: row.start_line as usize,
+                start_char: row.start_char as usize,
+                end_line: row.end_line as usize,
+                end_char: row.end_char as usize,
+                frag_type: frag_type_enum.clone(),
                 frag_review: row.frag_review.clone(),
-                frag_type: frag_type.clone(),
-            },
-            _ => CorrectionFragmentOverride {
-                collapse: false,
-                end_line: row.end_line.map(|v| v as usize),
-                end_char: row.end_char.map(|v| v as usize),
-                sc_code: row.sc_code,
-                sc_sutta: row.sc_sutta,
                 cst_code: row.cst_code,
+                sc_code: row.sc_code,
                 cst_vagga: row.cst_vagga,
                 cst_sutta: row.cst_sutta,
                 cst_paranum: row.cst_paranum,
-                frag_review: row.frag_review.clone(),
-                frag_type,
-            },
-        };
+                sc_sutta: row.sc_sutta,
+                nikaya: row.nikaya,
+                group_levels: row.group_levels,
+            };
 
-        let key = FragmentKey {
-            cst_file: row.cst_file,
-            frag_idx: row.frag_idx as usize,
-        };
+            inserted_fragments_map
+                .entry(row.cst_file.clone())
+                .or_default()
+                .push(inserted_data);
+        } else {
+            // For generated fragments (sub-index = 0), store as correction override
+            let override_data = match frag_review {
+                "moved" => CorrectionFragmentOverride {
+                    collapse: true,
+                    start_line: None,
+                    start_char: None,
+                    end_line: None,
+                    end_char: None,
+                    sc_code: None,
+                    sc_sutta: None,
+                    cst_code: None,
+                    cst_vagga: None,
+                    cst_sutta: None,
+                    cst_paranum: None,
+                    frag_review: row.frag_review.clone(),
+                    frag_type: Some(frag_type_enum),
+                },
+                _ => CorrectionFragmentOverride {
+                    collapse: false,
+                    start_line: Some(row.start_line as usize),
+                    start_char: Some(row.start_char as usize),
+                    end_line: Some(row.end_line as usize),
+                    end_char: Some(row.end_char as usize),
+                    sc_code: row.sc_code,
+                    sc_sutta: row.sc_sutta,
+                    cst_code: row.cst_code,
+                    cst_vagga: row.cst_vagga,
+                    cst_sutta: row.cst_sutta,
+                    cst_paranum: row.cst_paranum,
+                    frag_review: row.frag_review.clone(),
+                    frag_type: Some(frag_type_enum),
+                },
+            };
 
-        overrides.insert(key, override_data);
+            let key = FragmentKey {
+                cst_file: row.cst_file,
+                frag_idx_code: row.frag_idx_code,
+            };
+
+            overrides.insert(key, override_data);
+        }
     }
 
-    Ok(overrides)
+    // Sort inserted fragments for each file by frag_idx_code
+    for fragments in inserted_fragments_map.values_mut() {
+        fragments.sort_by(|a, b| compare_frag_idx_code(&a.frag_idx_code, &b.frag_idx_code));
+    }
+
+    Ok((overrides, inserted_fragments_map))
 }
 
 /// Count fragments for a specific file in the database.
@@ -506,8 +626,7 @@ pub fn extract_all_correction_overrides(
 /// # Returns
 /// Number of fragments for this file in the database
 pub fn count_fragments_in_db(db_path: &Path, cst_file: &str) -> Result<usize> {
-    let mut conn = SqliteConnection::establish(db_path.to_str().unwrap())
-        .context("Failed to connect to fragments database")?;
+    let mut conn = establish_connection_and_migrate(db_path)?;
 
     #[derive(QueryableByName)]
     struct CountResult {
@@ -533,31 +652,30 @@ pub fn count_fragments_in_db(db_path: &Path, cst_file: &str) -> Result<usize> {
 /// # Arguments
 /// * `db_path` - Path to the fragments database
 /// * `cst_file` - The XML file name
-/// * `review_status` - Map of frag_idx to frag_review status
+/// * `review_status` - Map of frag_idx_code to frag_review status
 ///
 /// # Returns
 /// Number of fragments updated
 pub fn restore_frag_review_status(
     db_path: &Path,
     cst_file: &str,
-    review_status: &HashMap<usize, String>,
+    review_status: &HashMap<String, String>,
 ) -> Result<usize> {
     if review_status.is_empty() {
         return Ok(0);
     }
 
-    let mut conn = SqliteConnection::establish(db_path.to_str().unwrap())
-        .context("Failed to connect to fragments database")?;
+    let mut conn = establish_connection_and_migrate(db_path)?;
 
     let mut updated = 0;
 
-    for (frag_idx, status) in review_status {
+    for (frag_idx_code, status) in review_status {
         let result = diesel::sql_query(
-            "UPDATE xml_fragments SET frag_review = ? WHERE cst_file = ? AND frag_idx = ?"
+            "UPDATE xml_fragments SET frag_review = ? WHERE cst_file = ? AND frag_idx_code = ?"
         )
         .bind::<diesel::sql_types::Text, _>(status)
         .bind::<diesel::sql_types::Text, _>(cst_file)
-        .bind::<diesel::sql_types::Integer, _>(*frag_idx as i32)
+        .bind::<diesel::sql_types::Text, _>(frag_idx_code.as_str())
         .execute(&mut conn)
         .context("Failed to update frag_review status")?;
 
@@ -595,7 +713,7 @@ mod tests {
                 end_char: 34,
                 group_levels: vec![],
                 cst_file: "test.xml".to_string(),
-                frag_idx: 0,
+                frag_idx_code: "0.0".to_string(),
                 frag_review: None,
                 cst_code: None,
                 cst_vagga: None,
@@ -621,7 +739,7 @@ mod tests {
                     },
                 ],
                 cst_file: "test.xml".to_string(),
-                frag_idx: 1,
+                frag_idx_code: "1.0".to_string(),
                 frag_review: None,
                 cst_code: None,
                 cst_vagga: None,
@@ -685,7 +803,7 @@ mod tests {
                 end_char: 34,
                 group_levels: vec![],
                 cst_file: "dn1.xml".to_string(),
-                frag_idx: 0,
+                frag_idx_code: "0.0".to_string(),
                 frag_review: None,
                 cst_code: None,
                 cst_vagga: None,
@@ -707,7 +825,7 @@ mod tests {
                 end_char: 35,
                 group_levels: vec![],
                 cst_file: "mn1.xml".to_string(),
-                frag_idx: 0,
+                frag_idx_code: "0.0".to_string(),
                 frag_review: None,
                 cst_code: None,
                 cst_vagga: None,
@@ -808,7 +926,7 @@ mod tests {
                 end_char: 30,
                 group_levels: vec![],
                 cst_file: "test.xml".to_string(),
-                frag_idx: 0,
+                frag_idx_code: "0.0".to_string(),
                 frag_review: None,
                 cst_code: Some("dn1.1".to_string()),
                 cst_vagga: None,
@@ -828,7 +946,7 @@ mod tests {
                 end_char: 33,
                 group_levels: vec![],
                 cst_file: "test.xml".to_string(),
-                frag_idx: 1,
+                frag_idx_code: "1.0".to_string(),
                 frag_review: None,
                 cst_code: Some("dn1.2".to_string()),
                 cst_vagga: None,
@@ -848,7 +966,7 @@ mod tests {
                 end_char: 32,
                 group_levels: vec![],
                 cst_file: "test.xml".to_string(),
-                frag_idx: 2,
+                frag_idx_code: "2.0".to_string(),
                 frag_review: None,
                 cst_code: None,
                 cst_vagga: None,
@@ -868,7 +986,7 @@ mod tests {
                 end_char: 28,
                 group_levels: vec![],
                 cst_file: "test.xml".to_string(),
-                frag_idx: 3,
+                frag_idx_code: "3.0".to_string(),
                 frag_review: None,
                 cst_code: None,
                 cst_vagga: None,
@@ -888,7 +1006,7 @@ mod tests {
                 end_char: 13,
                 group_levels: vec![],
                 cst_file: "test.xml".to_string(),
-                frag_idx: 4,
+                frag_idx_code: "4.0".to_string(),
                 frag_review: None,
                 cst_code: None,
                 cst_vagga: None,
@@ -933,7 +1051,7 @@ mod tests {
                 end_char: 50,
                 group_levels: vec![],
                 cst_file: "s0301m.mul.xml".to_string(),
-                frag_idx: 162,
+                frag_idx_code: "162.0".to_string(),
                 frag_review: Some("checked".to_string()),
                 cst_code: Some("sn1.5.0.1".to_string()),
                 cst_vagga: None,
@@ -953,7 +1071,7 @@ mod tests {
                 end_char: 60,
                 group_levels: vec![],
                 cst_file: "s0301m.mul.xml".to_string(),
-                frag_idx: 163,
+                frag_idx_code: "163.0".to_string(),
                 frag_review: Some("in-progress".to_string()),
                 cst_code: Some("sn1.5.0.2".to_string()),
                 cst_vagga: None,
@@ -973,7 +1091,7 @@ mod tests {
                 end_char: 70,
                 group_levels: vec![],
                 cst_file: "s0301m.mul.xml".to_string(),
-                frag_idx: 164,
+                frag_idx_code: "164.0".to_string(),
                 frag_review: Some("unchecked".to_string()),
                 cst_code: Some("sn1.5.0.3".to_string()),
                 cst_vagga: None,
@@ -993,7 +1111,7 @@ mod tests {
                 end_char: 80,
                 group_levels: vec![],
                 cst_file: "s0301m.mul.xml".to_string(),
-                frag_idx: 165,
+                frag_idx_code: "165.0".to_string(),
                 frag_review: None,
                 cst_code: Some("sn1.5.0.4".to_string()),
                 cst_vagga: None,
@@ -1008,7 +1126,7 @@ mod tests {
         export_fragments_to_db(&fragments, &structure, db_path).unwrap();
 
         // Extract checked overrides
-        let (overrides, review_status) = super::extract_correction_overrides(db_path, "s0301m.mul.xml").unwrap();
+        let (overrides, review_status, _inserted_fragments) = super::extract_correction_overrides(db_path, "s0301m.mul.xml").unwrap();
 
         // Should have 2 overrides (checked and in-progress, not unchecked or None)
         assert_eq!(overrides.len(), 2, "Should extract 2 correction overrides");
@@ -1017,25 +1135,25 @@ mod tests {
         // Verify collapse is false for non-moved fragments
         let key_162 = crate::types::FragmentKey {
             cst_file: "s0301m.mul.xml".to_string(),
-            frag_idx: 162,
+            frag_idx_code: "162.0".to_string(),
         };
         assert!(!overrides.get(&key_162).unwrap().collapse, "Checked fragment should not be collapsed");
 
         // Check the checked fragment override
-        let override_162 = overrides.get(&key_162).expect("Should have override for frag_idx 162");
+        let override_162 = overrides.get(&key_162).expect("Should have override for frag_idx_code 162");
         assert_eq!(override_162.sc_code, Some("sn5.1".to_string()));
         assert_eq!(override_162.sc_sutta, Some("Āḷavikāsutta".to_string()));
         assert_eq!(override_162.end_line, Some(10));
         assert_eq!(override_162.end_char, Some(50));
 
         // Check review status
-        assert_eq!(review_status.get(&162), Some(&"checked".to_string()));
-        assert_eq!(review_status.get(&163), Some(&"in-progress".to_string()));
+        assert_eq!(review_status.get("162.0"), Some(&"checked".to_string()));
+        assert_eq!(review_status.get("163.0"), Some(&"in-progress".to_string()));
 
         // Verify unchecked fragment is not included
         let key_164 = crate::types::FragmentKey {
             cst_file: "s0301m.mul.xml".to_string(),
-            frag_idx: 164,
+            frag_idx_code: "164.0".to_string(),
         };
         assert!(overrides.get(&key_164).is_none(), "Unchecked fragment should not be extracted");
     }
@@ -1063,7 +1181,7 @@ mod tests {
                 end_char: 50,
                 group_levels: vec![],
                 cst_file: "test.xml".to_string(),
-                frag_idx: 0,
+                frag_idx_code: "0.0".to_string(),
                 frag_review: None,  // No review status initially
                 cst_code: None,
                 cst_vagga: None,
@@ -1082,7 +1200,7 @@ mod tests {
                 end_char: 60,
                 group_levels: vec![],
                 cst_file: "test.xml".to_string(),
-                frag_idx: 1,
+                frag_idx_code: "1.0".to_string(),
                 frag_review: None,  // No review status initially
                 cst_code: None,
                 cst_vagga: None,
@@ -1098,8 +1216,8 @@ mod tests {
 
         // Create review status map (simulating previously extracted statuses)
         let mut review_status = std::collections::HashMap::new();
-        review_status.insert(0usize, "checked".to_string());
-        review_status.insert(1usize, "in-progress".to_string());
+        review_status.insert("0.0".to_string(), "checked".to_string());
+        review_status.insert("1.0".to_string(), "in-progress".to_string());
 
         // Restore the statuses
         let updated = super::restore_frag_review_status(db_path, "test.xml", &review_status).unwrap();
@@ -1111,14 +1229,14 @@ mod tests {
         #[allow(dead_code)]
         #[derive(QueryableByName)]
         struct FragReviewResult {
-            #[diesel(sql_type = diesel::sql_types::Integer)]
-            frag_idx: i32,
+            #[diesel(sql_type = diesel::sql_types::Text)]
+            frag_idx_code: String,
             #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
             frag_review: Option<String>,
         }
 
         let results: Vec<FragReviewResult> = diesel::sql_query(
-            "SELECT frag_idx, frag_review FROM xml_fragments WHERE cst_file = 'test.xml' ORDER BY frag_idx"
+            "SELECT frag_idx_code, frag_review FROM xml_fragments WHERE cst_file = 'test.xml' ORDER BY frag_idx_code"
         )
         .load(&mut conn)
         .unwrap();
@@ -1150,7 +1268,7 @@ mod tests {
                 end_char: 50,
                 group_levels: vec![],
                 cst_file: "file1.xml".to_string(),
-                frag_idx: 0,
+                frag_idx_code: "0.0".to_string(),
                 frag_review: Some("checked".to_string()),
                 cst_code: None,
                 cst_vagga: None,
@@ -1172,7 +1290,7 @@ mod tests {
                 end_char: 50,
                 group_levels: vec![],
                 cst_file: "file2.xml".to_string(),
-                frag_idx: 5,
+                frag_idx_code: "5.0".to_string(),
                 frag_review: Some("checked".to_string()),
                 cst_code: None,
                 cst_vagga: None,
@@ -1191,7 +1309,7 @@ mod tests {
                 end_char: 60,
                 group_levels: vec![],
                 cst_file: "file2.xml".to_string(),
-                frag_idx: 6,
+                frag_idx_code: "6.0".to_string(),
                 frag_review: Some("unchecked".to_string()),  // Should not be extracted
                 cst_code: None,
                 cst_vagga: None,
@@ -1207,7 +1325,7 @@ mod tests {
         export_fragments_to_db(&fragments2, &structure, db_path).unwrap();
 
         // Extract all checked overrides
-        let overrides = super::extract_all_correction_overrides(db_path).unwrap();
+        let (overrides, _inserted_fragments) = super::extract_all_correction_overrides(db_path).unwrap();
 
         // Should have 2 overrides (one from each file, not the unchecked one)
         assert_eq!(overrides.len(), 2, "Should extract 2 checked overrides from all files");
@@ -1215,7 +1333,7 @@ mod tests {
         // Verify file1 override
         let key1 = crate::types::FragmentKey {
             cst_file: "file1.xml".to_string(),
-            frag_idx: 0,
+            frag_idx_code: "0.0".to_string(),
         };
         assert!(overrides.get(&key1).is_some(), "Should have override from file1");
         assert_eq!(overrides.get(&key1).unwrap().sc_code, Some("sn1.1".to_string()));
@@ -1223,7 +1341,7 @@ mod tests {
         // Verify file2 override
         let key2 = crate::types::FragmentKey {
             cst_file: "file2.xml".to_string(),
-            frag_idx: 5,
+            frag_idx_code: "5.0".to_string(),
         };
         assert!(overrides.get(&key2).is_some(), "Should have override from file2");
         assert_eq!(overrides.get(&key2).unwrap().sc_code, Some("sn2.1".to_string()));
@@ -1243,7 +1361,7 @@ mod tests {
                 end_char: 20,
                 group_levels: vec![],
                 cst_file: "test.xml".to_string(),
-                frag_idx: 0,
+                frag_idx_code: "0.0".to_string(),
                 frag_review: None,
                 cst_code: None,
                 cst_vagga: None,
@@ -1262,7 +1380,7 @@ mod tests {
                 end_char: 15,
                 group_levels: vec![],
                 cst_file: "test.xml".to_string(),
-                frag_idx: 1,
+                frag_idx_code: "1.0".to_string(),
                 frag_review: None,
                 cst_code: Some("dn1.1".to_string()),
                 cst_vagga: None,
@@ -1281,7 +1399,7 @@ mod tests {
                 end_char: 18,
                 group_levels: vec![],
                 cst_file: "test.xml".to_string(),
-                frag_idx: 2,
+                frag_idx_code: "2.0".to_string(),
                 frag_review: None,
                 cst_code: None,
                 cst_vagga: None,
@@ -1310,7 +1428,7 @@ mod tests {
                 end_char: 15,
                 group_levels: vec![],
                 cst_file: "test.xml".to_string(),
-                frag_idx: 0,
+                frag_idx_code: "0.0".to_string(),
                 frag_review: None,
                 cst_code: Some("dn1.1".to_string()),
                 cst_vagga: None,
@@ -1329,7 +1447,7 @@ mod tests {
                 end_char: 18,
                 group_levels: vec![],
                 cst_file: "test.xml".to_string(),
-                frag_idx: 1,
+                frag_idx_code: "1.0".to_string(),
                 frag_review: None,
                 cst_code: None,
                 cst_vagga: None,
@@ -1363,7 +1481,7 @@ mod tests {
                 end_char: 20,
                 group_levels: vec![],
                 cst_file: "test.xml".to_string(),
-                frag_idx: 0,
+                frag_idx_code: "0.0".to_string(),
                 frag_review: None,
                 cst_code: None,
                 cst_vagga: None,
@@ -1382,7 +1500,7 @@ mod tests {
                 end_char: 15,
                 group_levels: vec![],
                 cst_file: "test.xml".to_string(),
-                frag_idx: 1,
+                frag_idx_code: "1.0".to_string(),
                 frag_review: None,
                 cst_code: Some("dn1.1".to_string()),
                 cst_vagga: None,

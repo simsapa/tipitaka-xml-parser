@@ -16,7 +16,7 @@ use std::fs;
 use tipitaka_xml_parser::{
     nikaya_detector::detect_nikaya_structure,
     parsers::samyutta_nikaya_mula::parse_into_fragments,
-    types::{FragmentType, ParserOverrides},
+    types::{FragmentType, ParserOverrides, parse_frag_idx_code},
 };
 
 #[test]
@@ -63,8 +63,8 @@ fn test_sn_samyutta_transition_sn1_3_to_sn1_4() {
     assert_eq!(first_sutta_sn1_4.cst_vagga.as_deref(), Some("1. Paṭhamavaggo"));
     assert_eq!(first_sutta_sn1_4.cst_sutta.as_deref(), Some("1. Tapokammasuttaṃ"));
     
-    // Verify fragment order
-    assert!(first_sutta_sn1_4.frag_idx > last_sutta_sn1_3.frag_idx,
+    // Verify fragment order (using version-style comparison for frag_idx_code)
+    assert!(parse_frag_idx_code(&first_sutta_sn1_4.frag_idx_code) > parse_frag_idx_code(&last_sutta_sn1_3.frag_idx_code),
         "First sutta of Mārasaṃyuttaṃ should come after last sutta of Kosalasaṃyuttaṃ");
     
     // Note: There is currently a known issue where an extra fragment is created for the
@@ -116,8 +116,8 @@ fn test_sn_samyutta_transition_sn1_4_to_sn1_5() {
     assert_eq!(first_sutta_sn1_5.cst_code.as_deref(), Some("sn1.5.1.1"),
         "First sutta of Bhikkhunīsaṃyuttaṃ should be sn1.5.1.1, not sn1.5.5.5");
     
-    // Verify fragment order
-    assert!(first_sutta_sn1_5.frag_idx > last_sutta_sn1_4.frag_idx,
+    // Verify fragment order (using version-style comparison for frag_idx_code)
+    assert!(parse_frag_idx_code(&first_sutta_sn1_5.frag_idx_code) > parse_frag_idx_code(&last_sutta_sn1_4.frag_idx_code),
         "First sutta of Bhikkhunīsaṃyuttaṃ should come after last sutta of Mārasaṃyuttaṃ");
 }
 
@@ -162,7 +162,7 @@ fn test_sn_samyutta_transition_sn1_6_to_sn1_7() {
     assert_eq!(first_sutta_sn1_7.cst_code.as_deref(), Some("sn1.7.1.1"),
         "First sutta of Brāhmaṇasaṃyuttaṃ should be sn1.7.1.1, not sn1.7.7.7");
     
-    // Verify fragment order
-    assert!(first_sutta_sn1_7.frag_idx > last_sutta_sn1_6.frag_idx,
+    // Verify fragment order (using version-style comparison for frag_idx_code)
+    assert!(parse_frag_idx_code(&first_sutta_sn1_7.frag_idx_code) > parse_frag_idx_code(&last_sutta_sn1_6.frag_idx_code),
         "First sutta of Brāhmaṇasaṃyuttaṃ should come after last sutta of Brahmāsaṃyuttaṃ");
 }

@@ -48,12 +48,14 @@ fn test_correction_overrides_precedence() {
     let mut correction_overrides = CorrectionFragmentOverrides::new();
     let key = FragmentKey {
         cst_file: "test.xml".to_string(),
-        frag_idx: sutta_frag.frag_idx,
+        frag_idx_code: sutta_frag.frag_idx_code.clone(),
     };
     correction_overrides.insert(
         key,
         CorrectionFragmentOverride {
             collapse: false,
+            start_line: None,
+            start_char: None,
             end_line: None,
             end_char: None,
             sc_code: Some("dn1.override".to_string()),
@@ -69,6 +71,7 @@ fn test_correction_overrides_precedence() {
 
     let overrides = ParserOverrides {
         correction_overrides: Some(correction_overrides),
+        inserted_fragments: None,
         pali_titles: None,
     };
 
@@ -78,7 +81,7 @@ fn test_correction_overrides_precedence() {
     // Find the same fragment
     let overridden_frag = fragments_with_override
         .iter()
-        .find(|f| f.frag_idx == sutta_frag.frag_idx)
+        .find(|f| f.frag_idx_code == sutta_frag.frag_idx_code)
         .expect("Should find the same fragment");
 
     // The sc_code and sc_sutta should be overridden
@@ -171,11 +174,11 @@ fn test_extract_correction_overrides() {
 
     let mut conn = SqliteConnection::establish(db_path.to_str().unwrap()).unwrap();
 
-    // Update frag_idx 1 to be "checked"
+    // Update frag_idx_code "1.0" to be "checked"
     diesel::update(
         xml_fragments::table
             .filter(xml_fragments::cst_file.eq("test.xml"))
-            .filter(xml_fragments::frag_idx.eq(1)),
+            .filter(xml_fragments::frag_idx_code.eq("1.0")),
     )
     .set((
         xml_fragments::frag_review.eq("checked"),
@@ -185,7 +188,7 @@ fn test_extract_correction_overrides() {
     .unwrap();
 
     // Now extract checked overrides
-    let (overrides, review_status) = extract_correction_overrides(db_path, "test.xml").unwrap();
+    let (overrides, review_status, _inserted_fragments) = extract_correction_overrides(db_path, "test.xml").unwrap();
 
     assert_eq!(overrides.len(), 1, "Should have 1 checked override");
     assert_eq!(
@@ -196,9 +199,9 @@ fn test_extract_correction_overrides() {
 
     let key = FragmentKey {
         cst_file: "test.xml".to_string(),
-        frag_idx: 1,
+        frag_idx_code: "1.0".to_string(),
     };
-    let override_data = overrides.get(&key).expect("Should find override for frag_idx 1");
+    let override_data = overrides.get(&key).expect("Should find override for frag_idx_code 1.0");
     assert_eq!(
         override_data.sc_code.as_deref(),
         Some("dn1.test"),
@@ -210,7 +213,7 @@ fn test_extract_correction_overrides() {
     diesel::update(
         xml_fragments::table
             .filter(xml_fragments::cst_file.eq("test.xml"))
-            .filter(xml_fragments::frag_idx.eq(1)),
+            .filter(xml_fragments::frag_idx_code.eq("1.0")),
     )
     .set(xml_fragments::frag_review.eq::<Option<String>>(None))
     .execute(&mut conn)
@@ -223,7 +226,7 @@ fn test_extract_correction_overrides() {
     // Verify it was restored
     let frag_review: Option<String> = xml_fragments::table
         .filter(xml_fragments::cst_file.eq("test.xml"))
-        .filter(xml_fragments::frag_idx.eq(1))
+        .filter(xml_fragments::frag_idx_code.eq("1.0"))
         .select(xml_fragments::frag_review)
         .first(&mut conn)
         .unwrap();
@@ -288,12 +291,14 @@ fn test_boundary_override_from_checked_fragment() {
     let mut correction_overrides = CorrectionFragmentOverrides::new();
     let key = FragmentKey {
         cst_file: "test.xml".to_string(),
-        frag_idx: sutta_frag.frag_idx,
+        frag_idx_code: sutta_frag.frag_idx_code.clone(),
     };
     correction_overrides.insert(
         key,
         CorrectionFragmentOverride {
             collapse: false,
+            start_line: None,
+            start_char: None,
             end_line: Some(override_end_line),
             end_char: Some(0),
             sc_code: None,
@@ -309,6 +314,7 @@ fn test_boundary_override_from_checked_fragment() {
 
     let overrides = ParserOverrides {
         correction_overrides: Some(correction_overrides),
+        inserted_fragments: None,
         pali_titles: None,
     };
 
@@ -318,7 +324,7 @@ fn test_boundary_override_from_checked_fragment() {
     // Find the same fragment
     let overridden_frag = fragments_with_override
         .iter()
-        .find(|f| f.frag_idx == sutta_frag.frag_idx)
+        .find(|f| f.frag_idx_code == sutta_frag.frag_idx_code)
         .expect("Should find the same fragment");
 
     // The end_line should be different
@@ -386,12 +392,14 @@ fn test_boundary_override_applied() {
     let mut correction_overrides = CorrectionFragmentOverrides::new();
     let key = FragmentKey {
         cst_file: "test.xml".to_string(),
-        frag_idx: sutta_frag.frag_idx,
+        frag_idx_code: sutta_frag.frag_idx_code.clone(),
     };
     correction_overrides.insert(
         key,
         CorrectionFragmentOverride {
             collapse: false,
+            start_line: None,
+            start_char: None,
             end_line: Some(checked_end_line),
             end_char: Some(0),
             sc_code: None,
@@ -407,6 +415,7 @@ fn test_boundary_override_applied() {
 
     let overrides = ParserOverrides {
         correction_overrides: Some(correction_overrides),
+        inserted_fragments: None,
         pali_titles: None,
     };
 
@@ -416,7 +425,7 @@ fn test_boundary_override_applied() {
     // Find the overridden fragment
     let overridden_frag = fragments_with_override
         .iter()
-        .find(|f| f.frag_idx == sutta_frag.frag_idx)
+        .find(|f| f.frag_idx_code == sutta_frag.frag_idx_code)
         .expect("Should find the same fragment");
 
     // The correction override value should be used
@@ -490,12 +499,14 @@ fn test_header_fragment_boundary_continuity_with_override() {
     let mut correction_overrides = CorrectionFragmentOverrides::new();
     let key = FragmentKey {
         cst_file: "test.xml".to_string(),
-        frag_idx: header_frag.frag_idx,
+        frag_idx_code: header_frag.frag_idx_code.clone(),
     };
     correction_overrides.insert(
         key,
         CorrectionFragmentOverride {
             collapse: false,
+            start_line: None,
+            start_char: None,
             end_line: Some(extended_end_line),
             end_char: Some(extended_end_char),
             sc_code: None,
@@ -511,6 +522,7 @@ fn test_header_fragment_boundary_continuity_with_override() {
 
     let overrides = ParserOverrides {
         correction_overrides: Some(correction_overrides),
+        inserted_fragments: None,
         pali_titles: None,
     };
 
@@ -621,12 +633,14 @@ fn test_boundary_override_content_extraction() {
     let mut correction_overrides = CorrectionFragmentOverrides::new();
     let key = FragmentKey {
         cst_file: "test.xml".to_string(),
-        frag_idx: sutta_frag.frag_idx,
+        frag_idx_code: sutta_frag.frag_idx_code.clone(),
     };
     correction_overrides.insert(
         key,
         CorrectionFragmentOverride {
             collapse: false,
+            start_line: None,
+            start_char: None,
             end_line: Some(bbbb_line),
             end_char: Some(0), // At start of BBBB line
             sc_code: None,
@@ -642,6 +656,7 @@ fn test_boundary_override_content_extraction() {
 
     let overrides = ParserOverrides {
         correction_overrides: Some(correction_overrides),
+        inserted_fragments: None,
         pali_titles: None,
     };
 
@@ -650,7 +665,7 @@ fn test_boundary_override_content_extraction() {
 
     let overridden_frag = fragments_with_override
         .iter()
-        .find(|f| f.frag_idx == sutta_frag.frag_idx)
+        .find(|f| f.frag_idx_code == sutta_frag.frag_idx_code)
         .expect("Should find the same fragment");
 
     // With the override, AAAA should be present but BBBB and CCCC should be cut off

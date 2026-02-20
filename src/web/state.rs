@@ -1,12 +1,13 @@
 /// Rocket state management for database connection
-/// 
+///
 /// This module manages the application state, particularly the database
 /// connection pool shared across request handlers.
 
 use std::path::PathBuf;
-use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
-use anyhow::{Result, Context};
+use anyhow::Result;
+
+use crate::fragment_exporter::establish_connection_and_migrate;
 
 /// Application state containing database connection information
 pub struct DbState {
@@ -14,12 +15,8 @@ pub struct DbState {
 }
 
 impl DbState {
-    /// Create a new database connection
+    /// Create a new database connection and run any pending migrations
     pub fn connect(&self) -> Result<SqliteConnection> {
-        let db_url = self.db_path.to_str()
-            .context("Invalid database path")?;
-        
-        SqliteConnection::establish(db_url)
-            .with_context(|| format!("Failed to connect to database: {}", db_url))
+        establish_connection_and_migrate(&self.db_path)
     }
 }

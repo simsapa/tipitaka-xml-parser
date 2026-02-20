@@ -29,6 +29,31 @@ use tipitaka_xml_parser::web::arangodb;
 /// Path to the test-specific config (relative to project root where cargo runs)
 const TEST_CONFIG_PATH: &str = "tests/data/regenerate-test-config.toml";
 
+/// Check if ArangoDB is available by attempting to fetch Pali titles.
+/// Returns Some(titles) if available, None otherwise.
+fn try_get_pali_titles() -> Option<std::collections::HashMap<String, String>> {
+    tokio::runtime::Runtime::new()
+        .expect("Failed to create tokio runtime")
+        .block_on(async {
+            match arangodb::get_pali_titles().await {
+                Ok(titles) => {
+                    eprintln!("Loaded {} Pali titles from ArangoDB", titles.len());
+                    Some(titles)
+                }
+                Err(e) => {
+                    eprintln!("Warning: Could not fetch Pali titles from ArangoDB: {}", e);
+                    None
+                }
+            }
+        })
+}
+
+/// Skip message for tests that require ArangoDB
+fn skip_without_arangodb() {
+    eprintln!("SKIPPED: This test requires ArangoDB to be running");
+    eprintln!("To run this test, start ArangoDB and ensure it's accessible");
+}
+
 /// Load test config from `tests/data/regenerate-test-config.toml`
 fn load_test_config() -> AppSettings {
     let config_path = PathBuf::from(TEST_CONFIG_PATH);
@@ -49,41 +74,38 @@ fn load_test_config() -> AppSettings {
 /// 3. Fetches Pali titles from ArangoDB (if available)
 /// 4. Creates a temp dir with a new DB path for output
 ///
-/// Returns (temp_dir, new_db_path, importer, settings).
-fn setup_regeneration() -> (TempDir, PathBuf, TipitakaImporter, AppSettings) {
+/// Returns (temp_dir, new_db_path, importer, settings, arangodb_available).
+/// The `arangodb_available` flag indicates whether Pali titles were loaded from ArangoDB.
+fn setup_regeneration() -> (TempDir, PathBuf, TipitakaImporter, AppSettings, bool) {
     let settings = load_test_config();
 
     // Verify xml_dir exists
     let xml_dir = PathBuf::from(&settings.xml_dir);
     assert!(xml_dir.exists(), "XML directory not found at {:?}", xml_dir);
 
-    // Extract correction overrides
+    // Extract correction overrides and inserted fragments
     let db_path = PathBuf::from(&settings.db_path);
-    let correction_overrides = extract_all_correction_overrides(&db_path)
+    let (correction_overrides, inserted_fragments) = extract_all_correction_overrides(&db_path)
         .expect("Failed to extract correction overrides");
 
     eprintln!("Loaded {} correction overrides from reference database", correction_overrides.len());
+    let total_inserted: usize = inserted_fragments.values().map(|v| v.len()).sum();
+    if total_inserted > 0 {
+        eprintln!("Loaded {} inserted fragments from reference database", total_inserted);
+    }
 
     // Try to fetch Pali titles from ArangoDB (may fail if ArangoDB not running)
-    let pali_titles = tokio::runtime::Runtime::new()
-        .expect("Failed to create tokio runtime")
-        .block_on(async {
-            match arangodb::get_pali_titles().await {
-                Ok(titles) => {
-                    eprintln!("Loaded {} Pali titles from ArangoDB", titles.len());
-                    Some(titles)
-                }
-                Err(e) => {
-                    eprintln!("Warning: Could not fetch Pali titles from ArangoDB: {}", e);
-                    eprintln!("Note: sc_sutta titles will not be populated for propagated sc_codes");
-                    None
-                }
-            }
-        });
+    let pali_titles = try_get_pali_titles();
+    let arangodb_available = pali_titles.is_some();
+
+    if !arangodb_available {
+        eprintln!("Note: sc_sutta titles will not be populated for propagated sc_codes");
+    }
 
     // Build ParserOverrides
     let overrides = ParserOverrides {
         correction_overrides: Some(correction_overrides),
+        inserted_fragments: if inserted_fragments.is_empty() { None } else { Some(inserted_fragments) },
         pali_titles,
     };
 
@@ -97,7 +119,7 @@ fn setup_regeneration() -> (TempDir, PathBuf, TipitakaImporter, AppSettings) {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
     let new_db_path = temp_dir.path().join("fragments-new.sqlite3");
 
-    (temp_dir, new_db_path, importer, settings)
+    (temp_dir, new_db_path, importer, settings, arangodb_available)
 }
 
 /// Resolve XML file path from config settings
@@ -114,7 +136,7 @@ fn xml_path(settings: &AppSettings, filename: &str) -> PathBuf {
 /// ```
 #[test]
 fn test_regenerate_single_file_s0101a_att() {
-    let (_temp_dir, new_db_path, importer, settings) = setup_regeneration();
+    let (_temp_dir, new_db_path, importer, settings, _arangodb_available) = setup_regeneration();
 
     let filename = "s0101a.att.xml";
     let path = xml_path(&settings, filename);
@@ -134,7 +156,7 @@ fn test_regenerate_single_file_s0101a_att() {
 /// Test regeneration of a few DN files to catch errors quickly.
 #[test]
 fn test_regenerate_dn_files() {
-    let (_temp_dir, new_db_path, importer, settings) = setup_regeneration();
+    let (_temp_dir, new_db_path, importer, settings, _arangodb_available) = setup_regeneration();
 
     let dn_files = &[
         "s0101m.mul.xml",
@@ -166,12 +188,12 @@ fn test_regenerate_dn_files() {
 /// This replicates the complete "Regenerate Using Current DB as Reference" action.
 ///
 /// Also verifies that sc_code propagation works correctly:
-/// - s0301m.mul.xml frag_idx 162 has "checked" sc_code "sn5.1"
+/// - s0301m.mul.xml frag_idx_code 162.0 has "checked" sc_code "sn5.1"
 /// - Fragments 163-171 should have sc_code filled in after regeneration
 /// - Fragment 172 has sc_code "sn6.1"
 #[test]
 fn test_regenerate_all_files_with_reference() {
-    let (_temp_dir, new_db_path, importer, settings) = setup_regeneration();
+    let (_temp_dir, new_db_path, importer, settings, arangodb_available) = setup_regeneration();
 
     let mut errors: Vec<String> = Vec::new();
     let total = settings.xml_filenames.len();
@@ -201,9 +223,9 @@ fn test_regenerate_all_files_with_reference() {
         errors.join("\n"));
 
     // Verify sc_code propagation for s0301m.mul.xml
-    verify_s0301m_sc_code_propagation(&new_db_path);
+    verify_s0301m_sc_code_propagation(&new_db_path, arangodb_available);
 
-    // Verify fragment type preservation for s0101m.mul.xml frag_idx 14
+    // Verify fragment type preservation for s0101m.mul.xml frag_idx_code 14.0
     verify_s0101m_frag_14_type(&new_db_path);
 
     // Verify that first and last fragments of each file are Headers
@@ -213,12 +235,12 @@ fn test_regenerate_all_files_with_reference() {
 /// Test single-file reparsing for s0301m.mul.xml with sc_code propagation.
 ///
 /// This test verifies that single-file reparsing correctly fills in sc_code values:
-/// - frag_idx 162 has "checked" sc_code "sn5.1"
-/// - frag_idx 163-171 should get sc_code filled in after reparsing
-/// - frag_idx 172 has sc_code "sn6.1"
+/// - frag_idx_code 162.0 has "checked" sc_code "sn5.1"
+/// - frag_idx_code 163.0-171.0 should get sc_code filled in after reparsing
+/// - frag_idx_code 172.0 has sc_code "sn6.1"
 #[test]
 fn test_reparse_s0301m_with_sc_code_propagation() {
-    let (_temp_dir, new_db_path, importer, settings) = setup_regeneration();
+    let (_temp_dir, new_db_path, importer, settings, arangodb_available) = setup_regeneration();
 
     let filename = "s0301m.mul.xml";
     let path = xml_path(&settings, filename);
@@ -237,17 +259,17 @@ fn test_reparse_s0301m_with_sc_code_propagation() {
         "Failed to export fragments for {}: {}", filename, result.unwrap_err());
 
     // Verify sc_code propagation
-    verify_s0301m_sc_code_propagation(&new_db_path);
+    verify_s0301m_sc_code_propagation(&new_db_path, arangodb_available);
 }
 
 /// Helper function to verify sc_code propagation for s0301m.mul.xml fragments 162-172.
 ///
 /// Checks that:
-/// - frag_idx 162 has sc_code "sn5.1" (from checked override)
-/// - frag_idx 163-171 have non-null sc_code values (propagated)
-/// - frag_idx 172 has sc_code "sn6.1"
-/// - All fragments with sc_code also have non-null sc_sutta titles
-fn verify_s0301m_sc_code_propagation(db_path: &Path) {
+/// - frag_idx_code 162.0 has sc_code "sn5.1" (from checked override)
+/// - frag_idx_code 163.0-171.0 have non-null sc_code values (propagated)
+/// - frag_idx_code 172.0 has sc_code "sn6.1"
+/// - If `check_sc_sutta` is true, also verifies that all fragments with sc_code have sc_sutta titles
+fn verify_s0301m_sc_code_propagation(db_path: &Path, check_sc_sutta: bool) {
     use diesel::prelude::*;
     use diesel::sqlite::SqliteConnection;
     use tipitaka_xml_parser::fragments_schema::xml_fragments;
@@ -256,71 +278,74 @@ fn verify_s0301m_sc_code_propagation(db_path: &Path) {
         .expect("Failed to connect to database");
 
     // Query fragments 162-172 from s0301m.mul.xml
-    let fragments: Vec<(i32, Option<String>, Option<String>)> = xml_fragments::table
+    let fragments: Vec<(String, Option<String>, Option<String>)> = xml_fragments::table
         .filter(xml_fragments::cst_file.eq("s0301m.mul.xml"))
-        .filter(xml_fragments::frag_idx.ge(162))
-        .filter(xml_fragments::frag_idx.le(172))
-        .select((xml_fragments::frag_idx, xml_fragments::sc_code, xml_fragments::sc_sutta))
-        .order_by(xml_fragments::frag_idx.asc())
+        .filter(xml_fragments::frag_idx_code.ge("162.0"))
+        .filter(xml_fragments::frag_idx_code.le("172.0"))
+        .select((xml_fragments::frag_idx_code, xml_fragments::sc_code, xml_fragments::sc_sutta))
+        .order_by(xml_fragments::frag_idx_code.asc())
         .load(&mut conn)
         .expect("Failed to query fragments");
 
     eprintln!("\nVerifying sc_code and sc_sutta propagation for s0301m.mul.xml:");
-    for (frag_idx, sc_code, sc_sutta) in &fragments {
-        eprintln!("  frag_idx {}: sc_code = {:?}, sc_sutta = {:?}", frag_idx, sc_code, sc_sutta);
+    for (frag_idx_code, sc_code, sc_sutta) in &fragments {
+        eprintln!("  frag_idx_code {}: sc_code = {:?}, sc_sutta = {:?}", frag_idx_code, sc_code, sc_sutta);
     }
 
-    // Verify frag_idx 162 has sc_code "sn5.1"
-    let frag_162 = fragments.iter().find(|(idx, _, _)| *idx == 162)
+    // Verify frag_idx_code "162.0" has sc_code "sn5.1"
+    let frag_162 = fragments.iter().find(|(idx, _, _)| idx == "162.0")
         .expect("Fragment 162 not found");
     assert_eq!(
         frag_162.1.as_deref(),
         Some("sn5.1"),
-        "frag_idx 162 should have sc_code 'sn5.1' from checked override"
+        "frag_idx_code 162.0 should have sc_code 'sn5.1' from checked override"
     );
 
-    // Verify frag_idx 163-171 have non-null sc_code values (should be propagated)
-    for frag_idx in 163..=171 {
-        let frag = fragments.iter().find(|(idx, _, _)| *idx == frag_idx)
-            .expect(&format!("Fragment {} not found", frag_idx));
+    // Verify frag_idx_code "163.0"-"171.0" have non-null sc_code values (should be propagated)
+    for frag_idx_code in ["163.0", "164.0", "165.0", "166.0", "167.0", "168.0", "169.0", "170.0", "171.0"] {
+        let frag = fragments.iter().find(|(idx, _, _)| idx == frag_idx_code)
+            .expect(&format!("Fragment {} not found", frag_idx_code));
         assert!(
             frag.1.is_some(),
-            "frag_idx {} should have sc_code filled in after regeneration (was null before), got: {:?}",
-            frag_idx,
+            "frag_idx_code {} should have sc_code filled in after regeneration (was null before), got: {:?}",
+            frag_idx_code,
             frag.1
         );
     }
 
-    // Verify frag_idx 172 has sc_code "sn6.1"
-    let frag_172 = fragments.iter().find(|(idx, _, _)| *idx == 172)
+    // Verify frag_idx_code "172.0" has sc_code "sn6.1"
+    let frag_172 = fragments.iter().find(|(idx, _, _)| idx == "172.0")
         .expect("Fragment 172 not found");
     assert_eq!(
         frag_172.1.as_deref(),
         Some("sn6.1"),
-        "frag_idx 172 should have sc_code 'sn6.1'"
+        "frag_idx_code 172.0 should have sc_code 'sn6.1'"
     );
 
     eprintln!("✓ sc_code propagation verified successfully");
 
-    // Verify that all fragments with sc_code also have sc_sutta titles
-    eprintln!("\nVerifying sc_sutta titles are populated:");
-    for (frag_idx, sc_code, sc_sutta) in &fragments {
-        if sc_code.is_some() {
-            assert!(
-                sc_sutta.is_some() && !sc_sutta.as_ref().unwrap().is_empty(),
-                "frag_idx {} has sc_code {:?} but sc_sutta is missing or empty: {:?}",
-                frag_idx,
-                sc_code,
-                sc_sutta
-            );
-            eprintln!("  ✓ frag_idx {}: sc_sutta = {:?}", frag_idx, sc_sutta);
+    // Verify that all fragments with sc_code also have sc_sutta titles (only if ArangoDB was available)
+    if check_sc_sutta {
+        eprintln!("\nVerifying sc_sutta titles are populated:");
+        for (frag_idx_code, sc_code, sc_sutta) in &fragments {
+            if sc_code.is_some() {
+                assert!(
+                    sc_sutta.is_some() && !sc_sutta.as_ref().unwrap().is_empty(),
+                    "frag_idx_code {} has sc_code {:?} but sc_sutta is missing or empty: {:?}",
+                    frag_idx_code,
+                    sc_code,
+                    sc_sutta
+                );
+                eprintln!("  ✓ frag_idx_code {}: sc_sutta = {:?}", frag_idx_code, sc_sutta);
+            }
         }
+        eprintln!("✓ sc_sutta titles verified successfully");
+    } else {
+        eprintln!("\nSkipping sc_sutta verification (ArangoDB not available)");
     }
-
-    eprintln!("✓ sc_sutta titles verified successfully");
 }
 
-/// Helper function to verify that s0101m.mul.xml frag_idx 14 remains "Header" type.
+/// Helper function to verify that s0101m.mul.xml frag_idx_code 14.0 remains "Header" type.
 ///
 /// This fragment has a "checked" review status correction override where the type
 /// is "Header". After regeneration with corrections applied, it should remain "Header",
@@ -334,36 +359,36 @@ fn verify_s0101m_frag_14_type(db_path: &Path) {
         .expect("Failed to connect to database");
 
     // Query fragment 14 from s0101m.mul.xml
-    let fragment: Option<(i32, String)> = xml_fragments::table
+    let fragment: Option<(String, String)> = xml_fragments::table
         .filter(xml_fragments::cst_file.eq("s0101m.mul.xml"))
-        .filter(xml_fragments::frag_idx.eq(14))
-        .select((xml_fragments::frag_idx, xml_fragments::frag_type))
+        .filter(xml_fragments::frag_idx_code.eq("14.0"))
+        .select((xml_fragments::frag_idx_code, xml_fragments::frag_type))
         .first(&mut conn)
         .optional()
         .expect("Failed to query fragment");
 
     match fragment {
-        Some((frag_idx, frag_type)) => {
-            eprintln!("\nVerifying s0101m.mul.xml frag_idx 14:");
-            eprintln!("  frag_idx {}: frag_type = {:?}", frag_idx, frag_type);
+        Some((frag_idx_code, frag_type)) => {
+            eprintln!("\nVerifying s0101m.mul.xml frag_idx_code 14.0:");
+            eprintln!("  frag_idx_code {}: frag_type = {:?}", frag_idx_code, frag_type);
 
             assert_eq!(
                 frag_type,
                 "Header",
-                "s0101m.mul.xml frag_idx 14 should remain 'Header' type (has 'checked' override), but got '{}'",
+                "s0101m.mul.xml frag_idx_code 14.0 should remain 'Header' type (has 'checked' override), but got '{}'",
                 frag_type
             );
 
-            eprintln!("✓ s0101m.mul.xml frag_idx 14 type verified as 'Header'");
+            eprintln!("✓ s0101m.mul.xml frag_idx_code 14.0 type verified as 'Header'");
         }
         None => {
-            panic!("s0101m.mul.xml frag_idx 14 not found in database");
+            panic!("s0101m.mul.xml frag_idx_code 14.0 not found in database");
         }
     }
 }
 
 /// Helper function to verify that for every distinct cst_file,
-/// the first and last frag_idx are "Header" type fragments.
+/// the first and last frag_idx_code are "Header" type fragments.
 ///
 /// This is a structural invariant: XML files should always start and end
 /// with Header fragments (containing metadata), not Sutta fragments.
@@ -388,22 +413,24 @@ fn verify_first_last_fragments_are_headers(db_path: &Path) {
     let mut errors: Vec<String> = Vec::new();
 
     for cst_file in &files {
-        // Get the minimum and maximum frag_idx for this file
-        let min_max: Option<(i32, i32)> = xml_fragments::table
+        // Get the minimum and maximum frag_idx_code for this file
+        // Note: frag_idx_code is stored as text (e.g., "9.0", "14.0"), so we must cast to REAL
+        // for proper numeric ordering (otherwise "9.0" > "14.0" in lexicographic order)
+        let min_max: Option<(String, String)> = xml_fragments::table
             .filter(xml_fragments::cst_file.eq(cst_file))
             .select((
-                diesel::dsl::sql::<diesel::sql_types::Integer>("MIN(frag_idx)"),
-                diesel::dsl::sql::<diesel::sql_types::Integer>("MAX(frag_idx)"),
+                diesel::dsl::sql::<diesel::sql_types::Text>("MIN(CAST(frag_idx_code AS REAL))"),
+                diesel::dsl::sql::<diesel::sql_types::Text>("MAX(CAST(frag_idx_code AS REAL))"),
             ))
             .first(&mut conn)
             .optional()
-            .expect(&format!("Failed to query min/max frag_idx for {}", cst_file));
+            .expect(&format!("Failed to query min/max frag_idx_code for {}", cst_file));
 
-        if let Some((min_frag_idx, max_frag_idx)) = min_max {
+        if let Some((min_frag_idx_code, max_frag_idx_code)) = min_max {
             // Query the first fragment type
             let first_frag_type: String = xml_fragments::table
                 .filter(xml_fragments::cst_file.eq(cst_file))
-                .filter(xml_fragments::frag_idx.eq(min_frag_idx))
+                .filter(xml_fragments::frag_idx_code.eq(&min_frag_idx_code))
                 .select(xml_fragments::frag_type)
                 .first(&mut conn)
                 .expect(&format!("Failed to query first fragment for {}", cst_file));
@@ -411,7 +438,7 @@ fn verify_first_last_fragments_are_headers(db_path: &Path) {
             // Query the last fragment type
             let last_frag_type: String = xml_fragments::table
                 .filter(xml_fragments::cst_file.eq(cst_file))
-                .filter(xml_fragments::frag_idx.eq(max_frag_idx))
+                .filter(xml_fragments::frag_idx_code.eq(&max_frag_idx_code))
                 .select(xml_fragments::frag_type)
                 .first(&mut conn)
                 .expect(&format!("Failed to query last fragment for {}", cst_file));
@@ -419,8 +446,8 @@ fn verify_first_last_fragments_are_headers(db_path: &Path) {
             // Check first fragment
             if first_frag_type != "Header" {
                 let msg = format!(
-                    "{}: first fragment (frag_idx {}) is '{}', expected 'Header'",
-                    cst_file, min_frag_idx, first_frag_type
+                    "{}: first fragment (frag_idx_code {}) is '{}', expected 'Header'",
+                    cst_file, min_frag_idx_code, first_frag_type
                 );
                 eprintln!("  ✗ {}", msg);
                 errors.push(msg);
@@ -429,15 +456,15 @@ fn verify_first_last_fragments_are_headers(db_path: &Path) {
             // Check last fragment
             if last_frag_type != "Header" {
                 let msg = format!(
-                    "{}: last fragment (frag_idx {}) is '{}', expected 'Header'",
-                    cst_file, max_frag_idx, last_frag_type
+                    "{}: last fragment (frag_idx_code {}) is '{}', expected 'Header'",
+                    cst_file, max_frag_idx_code, last_frag_type
                 );
                 eprintln!("  ✗ {}", msg);
                 errors.push(msg);
             }
 
             if first_frag_type == "Header" && last_frag_type == "Header" {
-                eprintln!("  ✓ {}: first={}, last={}", cst_file, min_frag_idx, max_frag_idx);
+                eprintln!("  ✓ {}: first={}, last={}", cst_file, min_frag_idx_code, max_frag_idx_code);
             }
         }
     }
@@ -452,7 +479,7 @@ fn verify_first_last_fragments_are_headers(db_path: &Path) {
     eprintln!("✓ All {} files have Header fragments as first and last", files.len());
 }
 
-/// Test that s0302m.mul.xml frag_idx 146 has sc_code and sc_sutta populated.
+/// Test that s0302m.mul.xml frag_idx_code 146.0 has sc_code and sc_sutta populated.
 ///
 /// This tests the fix for when derived cst_code values are not in the lookup data:
 /// - If the derived cst_code is not in the lookup data, compare the current fragment's
@@ -460,20 +487,21 @@ fn verify_first_last_fragments_are_headers(db_path: &Path) {
 /// - If only the sutta number increased (e.g., sn15.20 → sn15.21), increment the sutta
 /// - If a new group started (e.g., sn15.20 → sn16.1), increment group and reset sutta to 1
 /// - Use pali_titles from ArangoDB for sc_sutta lookup
+///
+/// **Requires ArangoDB**: This test is skipped if ArangoDB is not available.
 #[test]
 fn test_s0302m_frag_146_sc_code_propagation() {
     use tipitaka_xml_parser::nikaya_detector::detect_nikaya_structure;
     use tipitaka_xml_parser::parse_into_fragments;
     use tipitaka_xml_parser::types::ParserOverrides;
 
-    let pali_titles = tokio::runtime::Runtime::new()
-        .expect("Failed to create tokio runtime")
-        .block_on(async {
-            match arangodb::get_pali_titles().await {
-                Ok(titles) => Some(titles),
-                Err(_) => None,
-            }
-        });
+    let pali_titles = match try_get_pali_titles() {
+        Some(titles) => Some(titles),
+        None => {
+            skip_without_arangodb();
+            return;
+        }
+    };
 
     let overrides = ParserOverrides {
         pali_titles,
@@ -498,47 +526,48 @@ fn test_s0302m_frag_146_sc_code_propagation() {
 
     assert!(
         fragment.sc_code.is_some() && !fragment.sc_code.as_ref().unwrap().is_empty(),
-        "frag_idx 146 should have sc_code populated, got {:?}",
+        "frag_idx_code 146.0 should have sc_code populated, got {:?}",
         fragment.sc_code
     );
 
     assert!(
         fragment.sc_sutta.is_some() && !fragment.sc_sutta.as_ref().unwrap().is_empty(),
-        "frag_idx 146 should have sc_sutta populated, got {:?}",
+        "frag_idx_code 146.0 should have sc_sutta populated, got {:?}",
         fragment.sc_sutta
     );
 
     assert_eq!(
         fragment.sc_code.as_deref(),
         Some("sn16.1"),
-        "frag_idx 146 should have sc_code 'sn16.1'"
+        "frag_idx_code 146.0 should have sc_code 'sn16.1'"
     );
 
     assert_eq!(
         fragment.sc_sutta.as_deref(),
         Some("Santuṭṭhasutta"),
-        "frag_idx 146 should have sc_sutta 'Santuṭṭhasutta' from ArangoDB"
+        "frag_idx_code 146.0 should have sc_sutta 'Santuṭṭhasutta' from ArangoDB"
     );
 }
 
-/// Test that s0302m.mul.xml frag_idx 76 has sc_code and sc_sutta populated after a range.
+/// Test that s0302m.mul.xml frag_idx_code 76.0 has sc_code and sc_sutta populated after a range.
 ///
 /// This tests the case when the previous fragment has a range sc_code (e.g., sn12.93-103).
 /// The propagate_sc_codes_from_previous() should handle ranges correctly.
+///
+/// **Requires ArangoDB**: This test is skipped if ArangoDB is not available.
 #[test]
 fn test_s0302m_frag_76_after_range() {
     use tipitaka_xml_parser::nikaya_detector::detect_nikaya_structure;
     use tipitaka_xml_parser::parse_into_fragments;
     use tipitaka_xml_parser::types::ParserOverrides;
 
-    let pali_titles = tokio::runtime::Runtime::new()
-        .expect("Failed to create tokio runtime")
-        .block_on(async {
-            match arangodb::get_pali_titles().await {
-                Ok(titles) => Some(titles),
-                Err(_) => None,
-            }
-        });
+    let pali_titles = match try_get_pali_titles() {
+        Some(titles) => Some(titles),
+        None => {
+            skip_without_arangodb();
+            return;
+        }
+    };
 
     let overrides = ParserOverrides {
         pali_titles,
@@ -559,31 +588,31 @@ fn test_s0302m_frag_76_after_range() {
         true,
     ).expect("Failed to parse fragments");
 
-    // frag_idx 75 has range sc_code sn12.93-103
-    // frag_idx 76 should have sc_code derived from previous
+    // frag_idx_code 75.0 has range sc_code sn12.93-103
+    // frag_idx_code 76.0 should have sc_code derived from previous
     let frag_76 = fragments.get(76).expect("Fragment 76 not found");
 
     assert!(
         frag_76.sc_code.is_some() && !frag_76.sc_code.as_ref().unwrap().is_empty(),
-        "frag_idx 76 should have sc_code populated, got {:?}",
+        "frag_idx_code 76.0 should have sc_code populated, got {:?}",
         frag_76.sc_code
     );
 
     assert!(
         frag_76.sc_sutta.is_some() && !frag_76.sc_sutta.as_ref().unwrap().is_empty(),
-        "frag_idx 76 should have sc_sutta populated, got {:?}",
+        "frag_idx_code 76.0 should have sc_sutta populated, got {:?}",
         frag_76.sc_sutta
     );
 
     assert_eq!(
         frag_76.sc_code.as_deref(),
         Some("sn13.1"),
-        "frag_idx 76 should have sc_code 'sn13.1'"
+        "frag_idx_code 76.0 should have sc_code 'sn13.1'"
     );
 
     assert_eq!(
         frag_76.sc_sutta.as_deref(),
         Some("Nakhasikhāsutta"),
-        "frag_idx 76 should have sc_sutta 'Nakhasikhāsutta' from ArangoDB"
+        "frag_idx_code 76.0 should have sc_sutta 'Nakhasikhāsutta' from ArangoDB"
     );
 }

@@ -4,8 +4,8 @@
 //! cst_code "sn1.3.3.10" instead of the correct "sn1.3.2.10".
 //! 
 //! The bug occurs when parsing s0301m.mul.xml (SamyuttaNikayaMula), specifically:
-//! - frag_idx 132: cst_code "sn1.3.2.9" for "9. Paṭhamaaputtakasuttaṃ" (correct)
-//! - frag_idx 133: cst_code should be "sn1.3.2.10" for "10. Dutiyaaputtakasuttaṃ" (was "sn1.3.3.10")
+//! - frag_idx_code 132.0: cst_code "sn1.3.2.9" for "9. Paṭhamaaputtakasuttaṃ" (correct)
+//! - frag_idx_code 133.0: cst_code should be "sn1.3.2.10" for "10. Dutiyaaputtakasuttaṃ" (was "sn1.3.3.10")
 //!
 //! The issue is that the parser was prematurely incrementing the vagga number when
 //! encountering the vagga 3 title, even though sutta 10 is still in vagga 2.
@@ -14,7 +14,7 @@ use std::fs;
 use tipitaka_xml_parser::{
     nikaya_detector::detect_nikaya_structure,
     parsers::samyutta_nikaya_mula::parse_into_fragments,
-    types::{FragmentType, GroupType, ParserOverrides},
+    types::{FragmentType, GroupType, ParserOverrides, parse_frag_idx_code},
 };
 
 #[test]
@@ -101,28 +101,28 @@ fn test_s0301m_mul_sutta_10_vagga_2() {
         .collect();
     
     // Debug: print Kosalasaṃyuttaṃ vagga 3 suttas
-    eprintln!("Sutta 10 frag_idx: {}", sutta_10.frag_idx);
+    eprintln!("Sutta 10 frag_idx_code: {}", sutta_10.frag_idx_code);
     eprintln!("Kosalasaṃyuttaṃ vagga 3 suttas: {}", kosala_samyutta_vagga_3_suttas.len());
     for sutta in &kosala_samyutta_vagga_3_suttas {
-        eprintln!("  frag_idx={}, vagga={:?}, sutta={:?}, cst_code={:?}",
-            sutta.frag_idx, sutta.cst_vagga, sutta.cst_sutta, sutta.cst_code);
+        eprintln!("  frag_idx_code={}, vagga={:?}, sutta={:?}, cst_code={:?}",
+            sutta.frag_idx_code, sutta.cst_vagga, sutta.cst_sutta, sutta.cst_code);
     }
     
     // Check that Kosalasaṃyuttaṃ vagga 3 suttas come after sutta 10 in fragment order
     if let Some(first_vagga_3_sutta) = kosala_samyutta_vagga_3_suttas.first() {
         // Skip if this is a header/intro fragment (cst_code would be sn1.3.3.0)
         if first_vagga_3_sutta.cst_code.as_deref() == Some("sn1.3.3.0") {
-            eprintln!("Skipping header fragment at frag_idx {}", first_vagga_3_sutta.frag_idx);
+            eprintln!("Skipping header fragment at frag_idx_code {}", first_vagga_3_sutta.frag_idx_code);
             // Check the next one
             if let Some(second_vagga_3_sutta) = kosala_samyutta_vagga_3_suttas.get(1) {
-                assert!(second_vagga_3_sutta.frag_idx > sutta_10.frag_idx,
-                    "Kosalasaṃyuttaṃ vagga 3 suttas should come after sutta 10 in fragment order (frag_idx {} vs {})",
-                    second_vagga_3_sutta.frag_idx, sutta_10.frag_idx);
+                assert!(parse_frag_idx_code(&second_vagga_3_sutta.frag_idx_code) > parse_frag_idx_code(&sutta_10.frag_idx_code),
+                    "Kosalasaṃyuttaṃ vagga 3 suttas should come after sutta 10 in fragment order (frag_idx_code {} vs {})",
+                    second_vagga_3_sutta.frag_idx_code, sutta_10.frag_idx_code);
             }
         } else {
-            assert!(first_vagga_3_sutta.frag_idx > sutta_10.frag_idx,
-                "Kosalasaṃyuttaṃ vagga 3 suttas should come after sutta 10 in fragment order (frag_idx {} vs {})",
-                first_vagga_3_sutta.frag_idx, sutta_10.frag_idx);
+            assert!(parse_frag_idx_code(&first_vagga_3_sutta.frag_idx_code) > parse_frag_idx_code(&sutta_10.frag_idx_code),
+                "Kosalasaṃyuttaṃ vagga 3 suttas should come after sutta 10 in fragment order (frag_idx_code {} vs {})",
+                first_vagga_3_sutta.frag_idx_code, sutta_10.frag_idx_code);
         }
     } else {
         panic!("Should find at least one sutta in Kosalasaṃyuttaṃ vagga 3");

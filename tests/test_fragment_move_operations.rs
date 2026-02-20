@@ -39,7 +39,7 @@ fn setup_test_db() -> (TempDir, SqliteConnection) {
         "CREATE TABLE xml_fragments (
             id INTEGER PRIMARY KEY NOT NULL,
             cst_file TEXT NOT NULL,
-            frag_idx INTEGER NOT NULL,
+            frag_idx_code TEXT NOT NULL,
             frag_type TEXT NOT NULL,
             frag_review TEXT,
             nikaya TEXT NOT NULL,
@@ -58,7 +58,7 @@ fn setup_test_db() -> (TempDir, SqliteConnection) {
             group_levels TEXT NOT NULL,
             created_at TIMESTAMP,
             FOREIGN KEY (nikaya) REFERENCES nikaya_structures(nikaya),
-            UNIQUE(cst_file, frag_idx)
+            UNIQUE(cst_file, frag_idx_code)
         )"
     )
     .execute(&mut conn)
@@ -82,7 +82,7 @@ fn setup_test_db() -> (TempDir, SqliteConnection) {
 fn insert_fragment(
     conn: &mut SqliteConnection,
     cst_file: &str,
-    frag_idx: i32,
+    frag_idx_code: &str,
     content: &str,
     start_line: i32,
     end_line: i32,
@@ -90,7 +90,7 @@ fn insert_fragment(
 ) -> i32 {
     let fragment = NewXmlFragment {
         cst_file,
-        frag_idx,
+        frag_idx_code,
         frag_type: "sutta",
         frag_review,
         nikaya: "test_nikaya",
@@ -108,16 +108,16 @@ fn insert_fragment(
         end_char: 100,
         group_levels: "[]",
     };
-    
+
     diesel::insert_into(xml_fragments::table)
         .values(&fragment)
         .execute(conn)
         .expect("Failed to insert fragment");
-    
+
     // Return the ID of the inserted fragment
     xml_fragments::table
         .filter(xml_fragments::cst_file.eq(cst_file))
-        .filter(xml_fragments::frag_idx.eq(frag_idx))
+        .filter(xml_fragments::frag_idx_code.eq(frag_idx_code))
         .select(xml_fragments::id)
         .first(conn)
         .expect("Failed to retrieve inserted fragment ID")
@@ -128,17 +128,17 @@ fn test_move_to_prev_basic() {
     let (_temp_dir, mut conn) = setup_test_db();
     
     // Insert two fragments
-    insert_fragment(&mut conn, "test.xml", 1, "Fragment 1 content", 1, 10, None);
-    insert_fragment(&mut conn, "test.xml", 2, "Fragment 2 content", 11, 20, None);
+    insert_fragment(&mut conn, "test.xml", "1.0", "Fragment 1 content", 1, 10, None);
+    insert_fragment(&mut conn, "test.xml", "2.0", "Fragment 2 content", 11, 20, None);
     
     // Move fragment 2 to previous
-    let result = move_fragment_content(&mut conn, "test.xml", 2, Direction::Prev);
+    let result = move_fragment_content(&mut conn, "test.xml", "2.0", Direction::Prev);
     assert!(result.is_ok(), "Move operation should succeed");
     
     let (current, target) = result.unwrap();
     
-    // Verify current fragment (frag_idx=2) is now empty and marked as moved
-    assert_eq!(current.frag_idx, 2);
+    // Verify current fragment (frag_idx_code=2.0) is now empty and marked as moved
+    assert_eq!(current.frag_idx_code, "2.0");
     assert_eq!(current.content_xml, "");
     assert_eq!(current.frag_review, Some("moved".to_string()));
     assert_eq!(current.cst_code, None);
@@ -146,8 +146,8 @@ fn test_move_to_prev_basic() {
     assert_eq!(current.cst_vagga, None);
     assert_eq!(current.cst_sutta, None);
     
-    // Verify target fragment (frag_idx=1) has merged content and updated boundaries
-    assert_eq!(target.frag_idx, 1);
+    // Verify target fragment (frag_idx_code=1.0) has merged content and updated boundaries
+    assert_eq!(target.frag_idx_code, "1.0");
     assert!(target.content_xml.contains("Fragment 1 content"));
     assert!(target.content_xml.contains("Fragment 2 content"));
     assert_eq!(target.start_line, 1);
@@ -159,22 +159,22 @@ fn test_move_to_next_basic() {
     let (_temp_dir, mut conn) = setup_test_db();
     
     // Insert two fragments
-    insert_fragment(&mut conn, "test.xml", 1, "Fragment 1 content", 1, 10, None);
-    insert_fragment(&mut conn, "test.xml", 2, "Fragment 2 content", 11, 20, None);
+    insert_fragment(&mut conn, "test.xml", "1.0", "Fragment 1 content", 1, 10, None);
+    insert_fragment(&mut conn, "test.xml", "2.0", "Fragment 2 content", 11, 20, None);
     
     // Move fragment 1 to next
-    let result = move_fragment_content(&mut conn, "test.xml", 1, Direction::Next);
+    let result = move_fragment_content(&mut conn, "test.xml", "1.0", Direction::Next);
     assert!(result.is_ok(), "Move operation should succeed");
     
     let (current, target) = result.unwrap();
     
-    // Verify current fragment (frag_idx=1) is now empty and marked as moved
-    assert_eq!(current.frag_idx, 1);
+    // Verify current fragment (frag_idx_code=1.0) is now empty and marked as moved
+    assert_eq!(current.frag_idx_code, "1.0");
     assert_eq!(current.content_xml, "");
     assert_eq!(current.frag_review, Some("moved".to_string()));
     
-    // Verify target fragment (frag_idx=2) has merged content and updated boundaries
-    assert_eq!(target.frag_idx, 2);
+    // Verify target fragment (frag_idx_code=2.0) has merged content and updated boundaries
+    assert_eq!(target.frag_idx_code, "2.0");
     assert!(target.content_xml.contains("Fragment 1 content"));
     assert!(target.content_xml.contains("Fragment 2 content"));
     assert_eq!(target.start_line, 1); // Should extend to include fragment 1's start
@@ -186,23 +186,23 @@ fn test_skip_moved_fragments_to_prev() {
     let (_temp_dir, mut conn) = setup_test_db();
     
     // Insert three fragments, with middle one already marked as moved
-    insert_fragment(&mut conn, "test.xml", 1, "Fragment 1 content", 1, 10, None);
-    insert_fragment(&mut conn, "test.xml", 2, "", 11, 20, Some("moved"));
-    insert_fragment(&mut conn, "test.xml", 3, "Fragment 3 content", 21, 30, None);
+    insert_fragment(&mut conn, "test.xml", "1.0", "Fragment 1 content", 1, 10, None);
+    insert_fragment(&mut conn, "test.xml", "2.0", "", 11, 20, Some("moved"));
+    insert_fragment(&mut conn, "test.xml", "3.0", "Fragment 3 content", 21, 30, None);
     
     // Move fragment 3 to previous - should skip fragment 2 and merge with fragment 1
-    let result = move_fragment_content(&mut conn, "test.xml", 3, Direction::Prev);
+    let result = move_fragment_content(&mut conn, "test.xml", "3.0", Direction::Prev);
     assert!(result.is_ok(), "Move operation should succeed");
     
     let (current, target) = result.unwrap();
     
-    // Verify current fragment (frag_idx=3) is now empty and marked as moved
-    assert_eq!(current.frag_idx, 3);
+    // Verify current fragment (frag_idx_code=3.0) is now empty and marked as moved
+    assert_eq!(current.frag_idx_code, "3.0");
     assert_eq!(current.content_xml, "");
     assert_eq!(current.frag_review, Some("moved".to_string()));
     
-    // Verify target fragment (frag_idx=1) has merged content (skipped fragment 2)
-    assert_eq!(target.frag_idx, 1);
+    // Verify target fragment (frag_idx_code=1.0) has merged content (skipped fragment 2)
+    assert_eq!(target.frag_idx_code, "1.0");
     assert!(target.content_xml.contains("Fragment 1 content"));
     assert!(target.content_xml.contains("Fragment 3 content"));
     assert!(!target.content_xml.contains("Fragment 2"));
@@ -213,23 +213,23 @@ fn test_skip_moved_fragments_to_next() {
     let (_temp_dir, mut conn) = setup_test_db();
     
     // Insert three fragments, with middle one already marked as moved
-    insert_fragment(&mut conn, "test.xml", 1, "Fragment 1 content", 1, 10, None);
-    insert_fragment(&mut conn, "test.xml", 2, "", 11, 20, Some("moved"));
-    insert_fragment(&mut conn, "test.xml", 3, "Fragment 3 content", 21, 30, None);
+    insert_fragment(&mut conn, "test.xml", "1.0", "Fragment 1 content", 1, 10, None);
+    insert_fragment(&mut conn, "test.xml", "2.0", "", 11, 20, Some("moved"));
+    insert_fragment(&mut conn, "test.xml", "3.0", "Fragment 3 content", 21, 30, None);
     
     // Move fragment 1 to next - should skip fragment 2 and merge with fragment 3
-    let result = move_fragment_content(&mut conn, "test.xml", 1, Direction::Next);
+    let result = move_fragment_content(&mut conn, "test.xml", "1.0", Direction::Next);
     assert!(result.is_ok(), "Move operation should succeed");
     
     let (current, target) = result.unwrap();
     
-    // Verify current fragment (frag_idx=1) is now empty and marked as moved
-    assert_eq!(current.frag_idx, 1);
+    // Verify current fragment (frag_idx_code=1.0) is now empty and marked as moved
+    assert_eq!(current.frag_idx_code, "1.0");
     assert_eq!(current.content_xml, "");
     assert_eq!(current.frag_review, Some("moved".to_string()));
     
-    // Verify target fragment (frag_idx=3) has merged content (skipped fragment 2)
-    assert_eq!(target.frag_idx, 3);
+    // Verify target fragment (frag_idx_code=3.0) has merged content (skipped fragment 2)
+    assert_eq!(target.frag_idx_code, "3.0");
     assert!(target.content_xml.contains("Fragment 1 content"));
     assert!(target.content_xml.contains("Fragment 3 content"));
     assert!(!target.content_xml.contains("Fragment 2"));
@@ -240,10 +240,10 @@ fn test_move_to_prev_boundary_error() {
     let (_temp_dir, mut conn) = setup_test_db();
     
     // Insert only one fragment
-    insert_fragment(&mut conn, "test.xml", 1, "Fragment 1 content", 1, 10, None);
+    insert_fragment(&mut conn, "test.xml", "1.0", "Fragment 1 content", 1, 10, None);
     
     // Try to move fragment 1 to previous - should fail (no previous fragment)
-    let result = move_fragment_content(&mut conn, "test.xml", 1, Direction::Prev);
+    let result = move_fragment_content(&mut conn, "test.xml", "1.0", Direction::Prev);
     assert!(result.is_err(), "Move operation should fail at boundary");
     
     let error_msg = result.unwrap_err().to_string();
@@ -255,10 +255,10 @@ fn test_move_to_next_boundary_error() {
     let (_temp_dir, mut conn) = setup_test_db();
     
     // Insert only one fragment
-    insert_fragment(&mut conn, "test.xml", 1, "Fragment 1 content", 1, 10, None);
+    insert_fragment(&mut conn, "test.xml", "1.0", "Fragment 1 content", 1, 10, None);
     
     // Try to move fragment 1 to next - should fail (no next fragment)
-    let result = move_fragment_content(&mut conn, "test.xml", 1, Direction::Next);
+    let result = move_fragment_content(&mut conn, "test.xml", "1.0", Direction::Next);
     assert!(result.is_err(), "Move operation should fail at boundary");
     
     let error_msg = result.unwrap_err().to_string();
@@ -270,11 +270,11 @@ fn test_metadata_cleared_on_move() {
     let (_temp_dir, mut conn) = setup_test_db();
     
     // Insert fragments with metadata
-    insert_fragment(&mut conn, "test.xml", 1, "Fragment 1 content", 1, 10, None);
-    insert_fragment(&mut conn, "test.xml", 2, "Fragment 2 content", 11, 20, None);
+    insert_fragment(&mut conn, "test.xml", "1.0", "Fragment 1 content", 1, 10, None);
+    insert_fragment(&mut conn, "test.xml", "2.0", "Fragment 2 content", 11, 20, None);
     
     // Move fragment 2 to previous
-    let result = move_fragment_content(&mut conn, "test.xml", 2, Direction::Prev);
+    let result = move_fragment_content(&mut conn, "test.xml", "2.0", Direction::Prev);
     assert!(result.is_ok());
     
     let (current, _target) = result.unwrap();
@@ -294,11 +294,11 @@ fn test_boundaries_updated_correctly() {
     let (_temp_dir, mut conn) = setup_test_db();
     
     // Insert fragments with specific boundaries
-    insert_fragment(&mut conn, "test.xml", 1, "Fragment 1 content", 10, 20, None);
-    insert_fragment(&mut conn, "test.xml", 2, "Fragment 2 content", 25, 35, None);
+    insert_fragment(&mut conn, "test.xml", "1.0", "Fragment 1 content", 10, 20, None);
+    insert_fragment(&mut conn, "test.xml", "2.0", "Fragment 2 content", 25, 35, None);
     
     // Move fragment 2 to previous
-    let result = move_fragment_content(&mut conn, "test.xml", 2, Direction::Prev);
+    let result = move_fragment_content(&mut conn, "test.xml", "2.0", Direction::Prev);
     assert!(result.is_ok());
     
     let (_current, target) = result.unwrap();

@@ -26,7 +26,7 @@ pub struct NikayaStructureRecord {
 #[diesel(table_name = xml_fragments)]
 pub struct NewXmlFragment<'a> {
     pub cst_file: &'a str,
-    pub frag_idx: i32,
+    pub frag_idx_code: &'a str,
     pub frag_type: &'a str,
     pub frag_review: Option<&'a str>,
     pub nikaya: &'a str,
@@ -46,13 +46,13 @@ pub struct NewXmlFragment<'a> {
 }
 
 /// Queryable XML fragment model
-#[derive(Debug, Queryable, Selectable)]
+#[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = xml_fragments)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct XmlFragmentRecord {
     pub id: i32,
     pub cst_file: String,
-    pub frag_idx: i32,
+    pub frag_idx_code: String,
     pub frag_type: String,
     pub frag_review: Option<String>,
     pub nikaya: String,
@@ -109,9 +109,9 @@ pub struct UpdateFragmentBoundary {
     pub content_xml: String,
 }
 
-/// Changeset for updating fragment index
+/// Changeset for updating fragment index code
 #[derive(AsChangeset)]
 #[diesel(table_name = xml_fragments)]
-pub struct UpdateFragmentIndex {
-    pub frag_idx: i32,
+pub struct UpdateFragmentIndexCode {
+    pub frag_idx_code: String,
 }

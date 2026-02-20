@@ -41,7 +41,7 @@ pub use nikaya_structure::NikayaStructure;
 pub use nikaya_detector::detect_nikaya_structure;
 pub use xml_parser::parse_into_fragments;
 pub use fragment_exporter::{export_fragments_to_db, validate_fragments_db, ValidationStats, count_fragments_in_db};
-pub use fragment_reconstructor::reconstruct_xml_from_db;
+pub use fragment_reconstructor::{reconstruct_xml_from_db, reconstruct_xml_with_conn};
 pub use fragment_tsv_exporter::export_fragments_to_tsv;
 pub use tsv_diff_checker::{check_tsv_improvements, DiffCheckResult, ValidationError};
 pub use integration::{TipitakaImporter, FileImportStats, ProcessingStats};

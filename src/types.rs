@@ -4,6 +4,7 @@
 //! XML fragments, group hierarchies, and nikaya structures.
 
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 /// Type of XML fragment
@@ -52,8 +53,9 @@ pub struct XmlFragment {
     pub nikaya: String,
     /// Source XML filename for tracking which file this fragment came from.
     pub cst_file: String,
-    /// Index of this fragment in the list of fragments parsed from the XML file (0-indexed)
-    pub frag_idx: usize,
+    /// Fragment index code in "major.minor" format (e.g., "0.0", "21.1").
+    /// Generated fragments have minor=0; inserted fragments have minor>0.
+    pub frag_idx_code: String,
     /// Type of this fragment
     pub frag_type: FragmentType,
     /// Comments on the review status of this fragment
@@ -88,7 +90,8 @@ pub struct XmlFragment {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FragmentKey {
     pub cst_file: String,
-    pub frag_idx: usize,
+    /// Fragment index code in "major.minor" format (e.g., "0.0", "21.1")
+    pub frag_idx_code: String,
 }
 
 /// Override data from a corrected fragment in the database.
@@ -108,6 +111,11 @@ pub struct CorrectionFragmentOverride {
     /// If true, collapse this fragment to zero-width (for "moved" fragments).
     /// The parser will set end = start, producing an empty fragment.
     pub collapse: bool,
+    /// Override start line (1-indexed). Applied during fragment finalization.
+    /// Used when a previous inserted fragment has modified where this fragment should begin.
+    pub start_line: Option<usize>,
+    /// Override start character position (0-indexed). Applied during fragment finalization.
+    pub start_char: Option<usize>,
     /// Override end line (1-indexed). Applied during fragment finalization.
     /// Ignored when `collapse` is true.
     pub end_line: Option<usize>,
@@ -133,8 +141,53 @@ pub struct CorrectionFragmentOverride {
 }
 
 /// Container for correction fragment overrides extracted from the database.
-/// Key is `(cst_file, frag_idx)` matching the `FragmentKey` type.
+/// Key is `(cst_file, frag_idx_code)` matching the `FragmentKey` type.
 pub type CorrectionFragmentOverrides = HashMap<FragmentKey, CorrectionFragmentOverride>;
+
+/// Full data for an inserted fragment (sub-index > 0) that needs preservation during regeneration.
+///
+/// Unlike `CorrectionFragmentOverride` which stores only override values for generated fragments,
+/// this struct stores the complete fragment data since inserted fragments don't exist in the
+/// freshly parsed output and must be re-injected.
+#[derive(Debug, Clone)]
+pub struct InsertedFragmentData {
+    /// The fragment index code (e.g., "21.1", "21.2")
+    pub frag_idx_code: String,
+    /// XML content of the fragment
+    pub content_xml: String,
+    /// Starting line number in source file (1-indexed)
+    pub start_line: usize,
+    /// Starting character position within start_line (0-indexed)
+    pub start_char: usize,
+    /// Ending line number in source file (1-indexed)
+    pub end_line: usize,
+    /// Ending character position within end_line (0-indexed)
+    pub end_char: usize,
+    /// Fragment type (Header or Sutta)
+    pub frag_type: FragmentType,
+    /// Review status (typically "checked" for inserted fragments)
+    pub frag_review: Option<String>,
+    /// CST code
+    pub cst_code: Option<String>,
+    /// SC code
+    pub sc_code: Option<String>,
+    /// CST vagga
+    pub cst_vagga: Option<String>,
+    /// CST sutta
+    pub cst_sutta: Option<String>,
+    /// CST paranum
+    pub cst_paranum: Option<String>,
+    /// SC sutta
+    pub sc_sutta: Option<String>,
+    /// Nikaya name
+    pub nikaya: String,
+    /// Group levels JSON (serialized)
+    pub group_levels: String,
+}
+
+/// Container for inserted fragment data, grouped by cst_file.
+/// For each file, fragments are stored in a Vec sorted by frag_idx_code.
+pub type InsertedFragmentsMap = HashMap<String, Vec<InsertedFragmentData>>;
 
 /// Combined override configuration for parsing.
 ///
@@ -144,6 +197,9 @@ pub struct ParserOverrides {
     /// Correction fragment overrides extracted from the database.
     /// Contains both boundary and SC field overrides, plus collapse flag for moved fragments.
     pub correction_overrides: Option<CorrectionFragmentOverrides>,
+    /// Inserted fragments (sub-index > 0) that need to be re-injected after parsing.
+    /// Keyed by cst_file, each value is a sorted Vec of inserted fragments.
+    pub inserted_fragments: Option<InsertedFragmentsMap>,
     /// Pali titles cache from ArangoDB for populating sc_sutta fields.
     /// Maps SC code (e.g., "sn5.2") to Pali title (e.g., "Somāsutta").
     /// Used during SC code propagation to automatically fill in sc_sutta titles.
@@ -190,7 +246,7 @@ pub enum ParserError {
     ReconstructionVerificationFailed { filename: String, details: String },
 
     /// Critical: fragment count differs from reference DB.
-    /// Override data may be stale — frag_idx values no longer align.
+    /// Override data may be stale — frag_idx_code values no longer align.
     #[error("Row count mismatch for {filename}: new parser produced {new_count} fragments, reference db has {ref_count}")]
     RowCountMismatch {
         filename: String,
@@ -218,6 +274,187 @@ impl ParserError {
             ParserError::RowCountMismatch { .. } |
             ParserError::HeaderValidationFailed { .. }
         )
+    }
+}
+
+/// Parses a fragment index code into (major, minor) components.
+///
+/// # Examples
+/// - `"21.3"` → `(21, 3)`
+/// - `"0.0"` → `(0, 0)`
+/// - `"100.15"` → `(100, 15)`
+///
+/// # Panics
+/// Panics if the code is not in the expected "N.M" format.
+pub fn parse_frag_idx_code(code: &str) -> (usize, usize) {
+    let parts: Vec<&str> = code.split('.').collect();
+    assert!(parts.len() == 2, "Invalid frag_idx_code format: {}", code);
+    let major: usize = parts[0].parse().expect("Invalid major component");
+    let minor: usize = parts[1].parse().expect("Invalid minor component");
+    (major, minor)
+}
+
+/// Formats a fragment index code from major and minor components.
+///
+/// # Examples
+/// - `(21, 3)` → `"21.3"`
+/// - `(0, 0)` → `"0.0"`
+pub fn format_frag_idx_code(major: usize, minor: usize) -> String {
+    format!("{}.{}", major, minor)
+}
+
+/// Compares two fragment index codes using version-style numeric comparison.
+///
+/// Splits each code on "." and compares major and minor components numerically.
+///
+/// # Examples
+/// - `compare_frag_idx_code("2.0", "10.0")` returns `Less` (not lexicographic)
+/// - `compare_frag_idx_code("21.0", "21.1")` returns `Less`
+/// - `compare_frag_idx_code("21.2", "21.2")` returns `Equal`
+pub fn compare_frag_idx_code(a: &str, b: &str) -> Ordering {
+    let (a_major, a_minor) = parse_frag_idx_code(a);
+    let (b_major, b_minor) = parse_frag_idx_code(b);
+    match a_major.cmp(&b_major) {
+        Ordering::Equal => a_minor.cmp(&b_minor),
+        other => other,
+    }
+}
+
+/// Finds the next available sub-index for a given major index.
+///
+/// Given existing fragment codes and a major index, returns the next minor
+/// index that doesn't conflict with existing codes.
+///
+/// # Examples
+/// - `existing = ["21.0", "22.0"], major = 21` → `"21.1"` (first insertion after 21.0)
+/// - `existing = ["21.0", "21.1"], major = 21` → `"21.2"` (second insertion after 21.0)
+/// - `existing = ["21.0", "21.2"], major = 21` → `"21.1"` (fills gap)
+/// - `existing = [], major = 5` → `"5.1"` (first insertion for this major)
+pub fn next_sub_index(existing_codes: &[&str], major: usize) -> String {
+    let major_str = format!("{}.", major);
+    let mut used_minors: Vec<usize> = existing_codes
+        .iter()
+        .filter(|code| code.starts_with(&major_str))
+        .map(|code| parse_frag_idx_code(code).1)
+        .collect();
+    used_minors.sort();
+
+    let mut candidate = 1;
+    for &used in &used_minors {
+        if candidate < used {
+            break;
+        }
+        candidate = used + 1;
+    }
+    format_frag_idx_code(major, candidate)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cmp::Ordering;
+
+    #[test]
+    fn test_parse_frag_idx_code() {
+        assert_eq!(parse_frag_idx_code("0.0"), (0, 0));
+        assert_eq!(parse_frag_idx_code("1.0"), (1, 0));
+        assert_eq!(parse_frag_idx_code("21.3"), (21, 3));
+        assert_eq!(parse_frag_idx_code("100.15"), (100, 15));
+        assert_eq!(parse_frag_idx_code("9.9"), (9, 9));
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid frag_idx_code format")]
+    fn test_parse_frag_idx_code_no_dot() {
+        parse_frag_idx_code("21");
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid frag_idx_code format")]
+    fn test_parse_frag_idx_code_too_many_dots() {
+        parse_frag_idx_code("21.3.5");
+    }
+
+    #[test]
+    fn test_format_frag_idx_code() {
+        assert_eq!(format_frag_idx_code(0, 0), "0.0");
+        assert_eq!(format_frag_idx_code(1, 0), "1.0");
+        assert_eq!(format_frag_idx_code(21, 3), "21.3");
+        assert_eq!(format_frag_idx_code(100, 15), "100.15");
+    }
+
+    #[test]
+    fn test_compare_frag_idx_code_equal() {
+        assert_eq!(compare_frag_idx_code("0.0", "0.0"), Ordering::Equal);
+        assert_eq!(compare_frag_idx_code("21.0", "21.0"), Ordering::Equal);
+        assert_eq!(compare_frag_idx_code("21.3", "21.3"), Ordering::Equal);
+    }
+
+    #[test]
+    fn test_compare_frag_idx_code_major_different() {
+        // Test version-style comparison (not lexicographic)
+        assert_eq!(compare_frag_idx_code("2.0", "10.0"), Ordering::Less);
+        assert_eq!(compare_frag_idx_code("10.0", "2.0"), Ordering::Greater);
+        assert_eq!(compare_frag_idx_code("9.0", "10.0"), Ordering::Less);
+        assert_eq!(compare_frag_idx_code("99.0", "100.0"), Ordering::Less);
+    }
+
+    #[test]
+    fn test_compare_frag_idx_code_minor_different() {
+        assert_eq!(compare_frag_idx_code("21.0", "21.1"), Ordering::Less);
+        assert_eq!(compare_frag_idx_code("21.1", "21.0"), Ordering::Greater);
+        assert_eq!(compare_frag_idx_code("21.0", "21.9"), Ordering::Less);
+        assert_eq!(compare_frag_idx_code("21.9", "21.10"), Ordering::Less); // 9 < 10
+    }
+
+    #[test]
+    fn test_compare_frag_idx_code_sorting() {
+        let mut codes = vec!["10.0", "2.0", "2.1", "1.0", "21.0", "21.1", "21.2"];
+        codes.sort_by(|a, b| compare_frag_idx_code(a, b));
+        assert_eq!(codes, vec!["1.0", "2.0", "2.1", "10.0", "21.0", "21.1", "21.2"]);
+    }
+
+    #[test]
+    fn test_next_sub_index_empty() {
+        assert_eq!(next_sub_index(&[], 5), "5.1");
+        assert_eq!(next_sub_index(&[], 0), "0.1");
+    }
+
+    #[test]
+    fn test_next_sub_index_first_insertion() {
+        assert_eq!(next_sub_index(&["21.0", "22.0"], 21), "21.1");
+        assert_eq!(next_sub_index(&["0.0", "1.0"], 0), "0.1");
+    }
+
+    #[test]
+    fn test_next_sub_index_multiple_insertions() {
+        assert_eq!(next_sub_index(&["21.0", "21.1"], 21), "21.2");
+        assert_eq!(next_sub_index(&["21.0", "21.1", "21.2"], 21), "21.3");
+    }
+
+    #[test]
+    fn test_next_sub_index_fills_gap() {
+        // When there's a gap, it fills from 1
+        assert_eq!(next_sub_index(&["21.0", "21.2"], 21), "21.1");
+        assert_eq!(next_sub_index(&["21.0", "21.3"], 21), "21.1");
+    }
+
+    #[test]
+    fn test_next_sub_index_ignores_other_majors() {
+        // Only considers codes matching the requested major index
+        let existing = ["20.0", "20.1", "21.0", "22.0", "22.1"];
+        assert_eq!(next_sub_index(&existing, 21), "21.1");
+        assert_eq!(next_sub_index(&existing, 20), "20.2");
+        assert_eq!(next_sub_index(&existing, 22), "22.2");
+    }
+
+    #[test]
+    fn test_roundtrip_format_parse() {
+        for (major, minor) in [(0, 0), (1, 0), (21, 3), (100, 99)] {
+            let formatted = format_frag_idx_code(major, minor);
+            let parsed = parse_frag_idx_code(&formatted);
+            assert_eq!(parsed, (major, minor));
+        }
     }
 }
 

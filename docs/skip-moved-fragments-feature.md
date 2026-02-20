@@ -24,7 +24,7 @@ Changed the visibility of `find_target_fragment` from `fn` to `pub fn` so it can
 pub fn find_target_fragment(
     conn: &mut SqliteConnection,
     cst_file: &str,
-    current_idx: i32,
+    current_frag_idx_code: &str,
     direction: Direction,
 ) -> Result<Option<XmlFragmentRecord>>
 ```
@@ -39,14 +39,14 @@ This function:
 
 **File:** `src/web/routes.rs`
 
-Modified the `get_fragment_detail` function to use `find_target_fragment` instead of directly querying for `frag_idx - 1` and `frag_idx + 1`.
+Modified the `get_fragment_detail` function to use `find_target_fragment` instead of directly querying for adjacent fragments by index.
 
 **Before:**
 ```rust
-// Get previous fragment (same file, frag_idx - 1)
+// Get previous fragment (same file, adjacent frag_idx_code)
 let prev_fragment: Option<AdjacentFragment> = xml_fragments::table
     .filter(xml_fragments::cst_file.eq(&current.cst_file))
-    .filter(xml_fragments::frag_idx.eq(current.frag_idx - 1))
+    .filter(xml_fragments::frag_idx_code.eq(...))
     .first::<XmlFragmentRecord>(&mut conn)
     .optional()
     // ...
@@ -60,7 +60,7 @@ use crate::fragment_operations::{find_target_fragment, Direction};
 let prev_fragment: Option<AdjacentFragment> = find_target_fragment(
     &mut conn,
     &current.cst_file,
-    current.frag_idx,
+    &current.frag_idx_code,
     Direction::Prev,
 )
     .map_err(|e| format!("Failed to find previous fragment: {}", e))?
@@ -74,14 +74,14 @@ let prev_fragment: Option<AdjacentFragment> = find_target_fragment(
 When a fragment is selected:
 
 1. **Previous Textarea:** Shows the content of the nearest non-moved fragment before the current fragment
-   - If the immediate previous fragment (frag_idx - 1) is moved, skip to frag_idx - 2
+   - If the immediate previous fragment is moved, skip to the one before
    - Continue skipping backwards until a non-moved fragment is found
    - If all previous fragments are moved or boundary is reached, show empty
 
 2. **Current Textarea:** Always shows the selected fragment's content (may be empty if it's a moved fragment)
 
 3. **Next Textarea:** Shows the content of the nearest non-moved fragment after the current fragment
-   - If the immediate next fragment (frag_idx + 1) is moved, skip to frag_idx + 2
+   - If the immediate next fragment is moved, skip to the one after
    - Continue skipping forwards until a non-moved fragment is found
    - If all next fragments are moved or boundary is reached, show empty
 
@@ -143,12 +143,12 @@ The `find_target_fragment` function uses a loop to step through fragments, but:
 - Most common case: finds target on first try (no moved fragments)
 - Worst case: O(n) where n = number of consecutive moved fragments
 - In practice, this is negligible since moved fragments are relatively rare
-- Database queries are simple indexed lookups on `(cst_file, frag_idx)`
+- Database queries are simple indexed lookups on `(cst_file, frag_idx_code)`
 
 ## Future Enhancements
 
 Potential improvements (not currently implemented):
 1. Add a visual indicator in the UI showing when prev/next has skipped over moved fragments
-2. Display the frag_idx of the prev/next fragment in the UI for clarity
+2. Display the frag_idx_code of the prev/next fragment in the UI for clarity
 3. Add a "jump to" button to quickly navigate to the displayed prev/next fragment
 4. Consider caching the skip-over logic if performance becomes an issue with many moved fragments

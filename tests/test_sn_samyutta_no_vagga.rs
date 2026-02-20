@@ -40,7 +40,7 @@ fn test_sn_vaṅgīsa_samyutta_no_vagga() {
     
     if let Some(frag_208) = frag_208_opt {
         println!("\nFragment 208 (sn1.7.2.12):");
-        println!("  frag_idx: {}", frag_208.frag_idx);
+        println!("  frag_idx_code: {}", frag_208.frag_idx_code);
         println!("  cst_code: {:?}", frag_208.cst_code);
         println!("  cst_vagga: {:?}", frag_208.cst_vagga);
         println!("  cst_sutta: {:?}", frag_208.cst_sutta);
@@ -60,7 +60,7 @@ fn test_sn_vaṅgīsa_samyutta_no_vagga() {
     let frag_209 = frag_209_opt.unwrap();
     
     println!("\nFragment 209 (sn1.8.1.1):");
-    println!("  frag_idx: {}", frag_209.frag_idx);
+    println!("  frag_idx_code: {}", frag_209.frag_idx_code);
     println!("  cst_code: {:?}", frag_209.cst_code);
     println!("  cst_vagga: {:?}", frag_209.cst_vagga);
     println!("  cst_sutta: {:?}", frag_209.cst_sutta);

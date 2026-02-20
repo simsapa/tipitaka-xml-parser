@@ -15,21 +15,21 @@
 //! values can be populated from the Pali titles cache fetched from ArangoDB.
 
 use std::collections::HashMap;
-use std::path::Path;
 use diesel::prelude::*;
 use serde::{Serialize, Deserialize};
 
 use crate::fragments_schema::xml_fragments;
-use crate::fragment_reconstructor::reconstruct_xml_from_db;
+use crate::fragment_reconstructor::reconstruct_xml_with_conn;
 use crate::parsers::helpers::is_cst_code_range;
+use crate::types::compare_frag_idx_code;
 
 /// A validation error found during a check
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidationError {
     /// The CST XML filename containing the fragment
     pub cst_file: String,
-    /// The fragment index within the file
-    pub frag_idx: i32,
+    /// The fragment index code within the file (e.g., "21.0")
+    pub frag_idx_code: String,
     /// The database ID of the fragment
     pub fragment_id: i32,
     /// Human-readable description of the error
@@ -43,7 +43,7 @@ impl Default for ValidationError {
     fn default() -> Self {
         Self {
             cst_file: String::new(),
-            frag_idx: 0,
+            frag_idx_code: String::new(),
             fragment_id: 0,
             message: String::new(),
             frag_review: None,
@@ -58,8 +58,8 @@ pub struct AutoFix {
     pub fragment_id: i32,
     /// The CST XML filename containing the fragment
     pub cst_file: String,
-    /// The fragment index within the file
-    pub frag_idx: i32,
+    /// The fragment index code within the file (e.g., "21.0")
+    pub frag_idx_code: String,
     /// The sc_code of the fragment (for display purposes)
     pub sc_code: String,
     /// The suggested value to apply
@@ -88,12 +88,12 @@ pub struct ValidationCheckResult {
 /// - frag_review != 'moved' (and optionally != 'checked' if include_checked is false)
 /// - sc_code IS NULL OR sc_code = ''
 pub fn check_missing_sc_code(conn: &mut SqliteConnection, include_checked: bool) -> ValidationCheckResult {
-    let results: Vec<(i32, String, i32, Option<String>, Option<String>)> = if include_checked {
+    let results: Vec<(i32, String, String, Option<String>, Option<String>)> = if include_checked {
         xml_fragments::table
             .select((
                 xml_fragments::id,
                 xml_fragments::cst_file,
-                xml_fragments::frag_idx,
+                xml_fragments::frag_idx_code,
                 xml_fragments::sc_code,
                 xml_fragments::frag_review,
             ))
@@ -107,7 +107,7 @@ pub fn check_missing_sc_code(conn: &mut SqliteConnection, include_checked: bool)
             .select((
                 xml_fragments::id,
                 xml_fragments::cst_file,
-                xml_fragments::frag_idx,
+                xml_fragments::frag_idx_code,
                 xml_fragments::sc_code,
                 xml_fragments::frag_review,
             ))
@@ -121,9 +121,9 @@ pub fn check_missing_sc_code(conn: &mut SqliteConnection, include_checked: bool)
 
     let errors: Vec<ValidationError> = results
         .into_iter()
-        .map(|(id, cst_file, frag_idx, _, frag_review)| ValidationError {
+        .map(|(id, cst_file, frag_idx_code, _, frag_review)| ValidationError {
             cst_file,
-            frag_idx,
+            frag_idx_code,
             fragment_id: id,
             message: "Sutta fragment is missing sc_code".to_string(),
             frag_review,
@@ -153,12 +153,12 @@ pub fn check_missing_sc_sutta(
     pali_titles: Option<&HashMap<String, String>>,
     include_checked: bool,
 ) -> ValidationCheckResult {
-    let results: Vec<(i32, String, i32, Option<String>, Option<String>, Option<String>)> = if include_checked {
+    let results: Vec<(i32, String, String, Option<String>, Option<String>, Option<String>)> = if include_checked {
         xml_fragments::table
             .select((
                 xml_fragments::id,
                 xml_fragments::cst_file,
-                xml_fragments::frag_idx,
+                xml_fragments::frag_idx_code,
                 xml_fragments::sc_code,
                 xml_fragments::sc_sutta,
                 xml_fragments::frag_review,
@@ -174,7 +174,7 @@ pub fn check_missing_sc_sutta(
             .select((
                 xml_fragments::id,
                 xml_fragments::cst_file,
-                xml_fragments::frag_idx,
+                xml_fragments::frag_idx_code,
                 xml_fragments::sc_code,
                 xml_fragments::sc_sutta,
                 xml_fragments::frag_review,
@@ -191,12 +191,12 @@ pub fn check_missing_sc_sutta(
     let mut errors = Vec::new();
     let mut auto_fixes = Vec::new();
 
-    for (id, cst_file, frag_idx, sc_code_opt, _, frag_review) in results {
+    for (id, cst_file, frag_idx_code, sc_code_opt, _, frag_review) in results {
         let sc_code = sc_code_opt.unwrap_or_default();
 
         errors.push(ValidationError {
             cst_file: cst_file.clone(),
-            frag_idx,
+            frag_idx_code: frag_idx_code.clone(),
             fragment_id: id,
             message: format!("Fragment with sc_code '{}' is missing sc_sutta title", sc_code),
             frag_review,
@@ -211,7 +211,7 @@ pub fn check_missing_sc_sutta(
                 auto_fixes.push(AutoFix {
                     fragment_id: id,
                     cst_file,
-                    frag_idx,
+                    frag_idx_code,
                     sc_code: sc_code.clone(),
                     suggested_value: title.clone(),
                 });
@@ -239,11 +239,11 @@ pub fn check_missing_sc_sutta(
 /// This check always filters out "checked" and "moved" status regardless of the
 /// include_checked parameter, as these are considered valid/complete states.
 pub fn check_sutta_review_status(conn: &mut SqliteConnection, _include_checked: bool) -> ValidationCheckResult {
-    let results: Vec<(i32, String, i32, Option<String>)> = xml_fragments::table
+    let results: Vec<(i32, String, String, Option<String>)> = xml_fragments::table
         .select((
             xml_fragments::id,
             xml_fragments::cst_file,
-            xml_fragments::frag_idx,
+            xml_fragments::frag_idx_code,
             xml_fragments::frag_review,
         ))
         .filter(xml_fragments::frag_type.eq("Sutta"))
@@ -258,11 +258,11 @@ pub fn check_sutta_review_status(conn: &mut SqliteConnection, _include_checked: 
 
     let errors: Vec<ValidationError> = results
         .into_iter()
-        .map(|(id, cst_file, frag_idx, frag_review)| {
+        .map(|(id, cst_file, frag_idx_code, frag_review)| {
             let status = frag_review.clone().unwrap_or_else(|| "unknown".to_string());
             ValidationError {
                 cst_file,
-                frag_idx,
+                frag_idx_code,
                 fragment_id: id,
                 message: format!("Sutta fragment needs attention (status: '{}')", status),
                 frag_review,
@@ -282,15 +282,14 @@ pub fn check_sutta_review_status(conn: &mut SqliteConnection, _include_checked: 
 /// Check XML reconstruction for all files in the database
 ///
 /// Uses the same reconstruction procedure as the regeneration process:
-/// calls `reconstruct_xml_from_db` for each file and reports any failures.
-/// Reports the problematic cst_file and first frag_idx when reconstruction fails.
+/// calls `reconstruct_xml_with_conn` for each file and reports any failures.
+/// Reports the problematic cst_file and first frag_idx_code when reconstruction fails.
 ///
 /// Always include all fragments for reconstruction validation.
 /// The frag_review = 'moved' fragments are empty, they don't need to be filtered,
 /// so we are not filtering on any frag_review fragment types.
 pub fn check_xml_reconstruction(
     conn: &mut SqliteConnection,
-    db_path: &Path,
     _include_checked: bool,
 ) -> ValidationCheckResult {
     // Get all unique cst_file values - always include checked for reconstruction validation
@@ -306,17 +305,18 @@ pub fn check_xml_reconstruction(
     // Test reconstruction for each file using the same method as regeneration
     for cst_file in cst_files {
         // Get first fragment for error reporting
-        let first_fragment: Option<(i32, i32, Option<String>)> = xml_fragments::table
-            .select((xml_fragments::id, xml_fragments::frag_idx, xml_fragments::frag_review))
+        let mut fragments: Vec<(i32, String, Option<String>)> = xml_fragments::table
+            .select((xml_fragments::id, xml_fragments::frag_idx_code, xml_fragments::frag_review))
             .filter(xml_fragments::cst_file.eq(&cst_file))
-            .order_by(xml_fragments::frag_idx)
-            .first(conn)
-            .optional()
-            .unwrap_or(None);
+            .load(conn)
+            .unwrap_or_default();
 
-        if let Some((fragment_id, frag_idx, frag_review)) = first_fragment {
-            // Attempt reconstruction using the same function used during regeneration
-            match reconstruct_xml_from_db(db_path, &cst_file) {
+        fragments.sort_by(|a, b| compare_frag_idx_code(&a.1, &b.1));
+        let first_fragment = fragments.into_iter().next();
+
+        if let Some((fragment_id, frag_idx_code, frag_review)) = first_fragment {
+            // Attempt reconstruction using the connection (no migrations triggered)
+            match reconstruct_xml_with_conn(conn, &cst_file) {
                 Ok(_reconstructed_xml) => {
                     // Reconstruction succeeded, no error
                 }
@@ -324,7 +324,7 @@ pub fn check_xml_reconstruction(
                     // Reconstruction failed, report error
                     errors.push(ValidationError {
                         cst_file: cst_file.clone(),
-                        frag_idx,
+                        frag_idx_code,
                         fragment_id,
                         message: format!("XML reconstruction failed: {}", e),
                         frag_review,
@@ -420,7 +420,7 @@ fn format_sutta_range(start: u32, end: u32) -> String {
 
 /// Check that sc_code values increase gradually within each file
 ///
-/// For each file, retrieves Sutta fragments ordered by frag_idx and validates:
+/// For each file, retrieves Sutta fragments ordered by frag_idx_code and validates:
 /// - Sutta numbers increase by 1 within the same group
 /// - When group changes, it must increase by 1
 /// - When group changes, sutta number must restart at 1
@@ -443,25 +443,26 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection, include_checked: bool
     let mut errors = Vec::new();
 
     for cst_file in cst_files {
-        // Get Sutta fragments for this file, ordered by frag_idx
+        // Get Sutta fragments for this file, ordered by frag_idx_code
         // Always include checked fragments for sequence validation
-        let fragments: Vec<(i32, i32, Option<String>, Option<String>)> = xml_fragments::table
+        let mut fragments: Vec<(i32, String, Option<String>, Option<String>)> = xml_fragments::table
             .select((
                 xml_fragments::id,
-                xml_fragments::frag_idx,
+                xml_fragments::frag_idx_code,
                 xml_fragments::sc_code,
                 xml_fragments::frag_review,
             ))
             .filter(xml_fragments::cst_file.eq(&cst_file))
             .filter(xml_fragments::frag_type.eq("Sutta"))
             .filter(xml_fragments::frag_review.ne("moved").or(xml_fragments::frag_review.is_null()))
-            .order_by(xml_fragments::frag_idx)
             .load(conn)
             .unwrap_or_default();
 
+        fragments.sort_by(|a, b| compare_frag_idx_code(&a.1, &b.1));
+
         let mut prev_parsed: Option<ParsedScCode> = None;
 
-        for (id, frag_idx, sc_code_opt, frag_review) in fragments {
+        for (id, frag_idx_code, sc_code_opt, frag_review) in fragments {
             // Skip null/empty sc_code values
             let sc_code = match &sc_code_opt {
                 Some(code) if !code.is_empty() => code,
@@ -474,7 +475,7 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection, include_checked: bool
                 None => {
                     errors.push(ValidationError {
                         cst_file: cst_file.clone(),
-                        frag_idx,
+                        frag_idx_code,
                         fragment_id: id,
                         message: format!("Cannot parse sc_code '{}' format", sc_code),
                         frag_review,
@@ -489,7 +490,7 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection, include_checked: bool
                 if parsed.nikaya != prev.nikaya {
                     errors.push(ValidationError {
                         cst_file: cst_file.clone(),
-                        frag_idx,
+                        frag_idx_code,
                         fragment_id: id,
                         message: format!(
                             "Nikaya changed from '{}' to '{}' - expected same nikaya within file",
@@ -511,7 +512,7 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection, include_checked: bool
                             if parsed.sutta_start != prev.sutta_end + 1 {
                                 errors.push(ValidationError {
                                     cst_file: cst_file.clone(),
-                                    frag_idx,
+                                    frag_idx_code,
                                     fragment_id: id,
                                     message: format!(
                                         "Sutta number jump from {}{}.{} to {}{}.{} - expected step of 1",
@@ -526,7 +527,7 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection, include_checked: bool
                             if parsed.sutta_start != 1 {
                                 errors.push(ValidationError {
                                     cst_file: cst_file.clone(),
-                                    frag_idx,
+                                    frag_idx_code,
                                     fragment_id: id,
                                     message: format!(
                                         "Group changed from {} to {} but sutta starts at {} instead of 1",
@@ -539,7 +540,7 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection, include_checked: bool
                             // Group jump is not by 1
                             errors.push(ValidationError {
                                 cst_file: cst_file.clone(),
-                                frag_idx,
+                                frag_idx_code,
                                 fragment_id: id,
                                 message: format!(
                                     "Group jump from {} to {} - expected step of 1",
@@ -554,7 +555,7 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection, include_checked: bool
                         if parsed.sutta_start != prev.sutta_end + 1 {
                         errors.push(ValidationError {
                             cst_file: cst_file.clone(),
-                            frag_idx,
+                            frag_idx_code,
                             fragment_id: id,
                             message: format!(
                                 "Sutta number jump from {}{} to {}{} - expected step of 1",
@@ -569,7 +570,7 @@ pub fn check_sc_code_sequence(conn: &mut SqliteConnection, include_checked: bool
                     _ => {
                         errors.push(ValidationError {
                             cst_file: cst_file.clone(),
-                            frag_idx,
+                            frag_idx_code,
                             fragment_id: id,
                             message: format!(
                                 "Inconsistent sc_code format: mixing grouped and non-grouped formats"
@@ -616,11 +617,11 @@ pub fn check_code_uniqueness(conn: &mut SqliteConnection, _include_checked: bool
     // Check cst_code uniqueness within each file
     // Query fragments with non-empty cst_code, excluding moved and Header fragments
     // Always include checked fragments for uniqueness checking
-    let cst_code_fragments: Vec<(i32, String, i32, Option<String>, Option<String>)> = xml_fragments::table
+    let cst_code_fragments: Vec<(i32, String, String, Option<String>, Option<String>)> = xml_fragments::table
         .select((
             xml_fragments::id,
             xml_fragments::cst_file,
-            xml_fragments::frag_idx,
+            xml_fragments::frag_idx_code,
             xml_fragments::cst_code,
             xml_fragments::frag_review,
         ))
@@ -632,23 +633,23 @@ pub fn check_code_uniqueness(conn: &mut SqliteConnection, _include_checked: bool
         .unwrap_or_default();
 
     // Group by (cst_file, cst_code) to find duplicates within each file
-    let mut cst_code_map: HashMap<(String, String), Vec<(i32, i32, Option<String>)>> = HashMap::new();
-    for (id, cst_file, frag_idx, cst_code_opt, frag_review) in cst_code_fragments {
+    let mut cst_code_map: HashMap<(String, String), Vec<(i32, String, Option<String>)>> = HashMap::new();
+    for (id, cst_file, frag_idx_code, cst_code_opt, frag_review) in cst_code_fragments {
         if let Some(cst_code) = cst_code_opt {
             cst_code_map
                 .entry((cst_file, cst_code))
                 .or_insert_with(Vec::new)
-                .push((id, frag_idx, frag_review));
+                .push((id, frag_idx_code, frag_review));
         }
     }
 
     // Report duplicates for cst_code
     for ((cst_file, code), fragments) in &cst_code_map {
         if fragments.len() > 1 {
-            for (id, frag_idx, frag_review) in fragments {
+            for (id, frag_idx_code, frag_review) in fragments {
                 errors.push(ValidationError {
                     cst_file: cst_file.clone(),
-                    frag_idx: *frag_idx,
+                    frag_idx_code: frag_idx_code.clone(),
                     fragment_id: *id,
                     message: format!(
                         "Duplicate cst_code '{}' (found in {} fragments in this file)",
@@ -664,11 +665,11 @@ pub fn check_code_uniqueness(conn: &mut SqliteConnection, _include_checked: bool
     // Check sc_code uniqueness within each file
     // Query fragments with non-empty sc_code, excluding moved and Header fragments
     // Always include checked fragments for uniqueness checking
-    let sc_code_fragments: Vec<(i32, String, i32, Option<String>, Option<String>)> = xml_fragments::table
+    let sc_code_fragments: Vec<(i32, String, String, Option<String>, Option<String>)> = xml_fragments::table
         .select((
             xml_fragments::id,
             xml_fragments::cst_file,
-            xml_fragments::frag_idx,
+            xml_fragments::frag_idx_code,
             xml_fragments::sc_code,
             xml_fragments::frag_review,
         ))
@@ -680,23 +681,23 @@ pub fn check_code_uniqueness(conn: &mut SqliteConnection, _include_checked: bool
         .unwrap_or_default();
 
     // Group by (cst_file, sc_code) to find duplicates within each file
-    let mut sc_code_map: HashMap<(String, String), Vec<(i32, i32, Option<String>)>> = HashMap::new();
-    for (id, cst_file, frag_idx, sc_code_opt, frag_review) in sc_code_fragments {
+    let mut sc_code_map: HashMap<(String, String), Vec<(i32, String, Option<String>)>> = HashMap::new();
+    for (id, cst_file, frag_idx_code, sc_code_opt, frag_review) in sc_code_fragments {
         if let Some(sc_code) = sc_code_opt {
             sc_code_map
                 .entry((cst_file, sc_code))
                 .or_insert_with(Vec::new)
-                .push((id, frag_idx, frag_review));
+                .push((id, frag_idx_code, frag_review));
         }
     }
 
     // Report duplicates for sc_code
     for ((cst_file, code), fragments) in &sc_code_map {
         if fragments.len() > 1 {
-            for (id, frag_idx, frag_review) in fragments {
+            for (id, frag_idx_code, frag_review) in fragments {
                 errors.push(ValidationError {
                     cst_file: cst_file.clone(),
-                    frag_idx: *frag_idx,
+                    frag_idx_code: frag_idx_code.clone(),
                     fragment_id: *id,
                     message: format!(
                         "Duplicate sc_code '{}' (found in {} fragments in this file)",
@@ -709,10 +710,10 @@ pub fn check_code_uniqueness(conn: &mut SqliteConnection, _include_checked: bool
         }
     }
 
-    // Sort errors by file and frag_idx for consistent ordering
+    // Sort errors by file and frag_idx_code for consistent ordering
     errors.sort_by(|a, b| {
         a.cst_file.cmp(&b.cst_file)
-            .then_with(|| a.frag_idx.cmp(&b.frag_idx))
+            .then_with(|| a.frag_idx_code.cmp(&b.frag_idx_code))
     });
 
     ValidationCheckResult {
@@ -750,12 +751,12 @@ fn is_sc_code_range(sc_code: &str) -> bool {
 /// fragments with frag_review = 'checked' are also excluded.
 /// The frag_review = 'checked' items can be filtered at the initial collection stage because this validation doesn't rely on walking through items in sequence.
 pub fn check_cst_sc_range_consistency(conn: &mut SqliteConnection, include_checked: bool) -> ValidationCheckResult {
-    let results: Vec<(i32, String, i32, Option<String>, Option<String>, Option<String>)> = if include_checked {
+    let results: Vec<(i32, String, String, Option<String>, Option<String>, Option<String>)> = if include_checked {
         xml_fragments::table
             .select((
                 xml_fragments::id,
                 xml_fragments::cst_file,
-                xml_fragments::frag_idx,
+                xml_fragments::frag_idx_code,
                 xml_fragments::cst_code,
                 xml_fragments::sc_code,
                 xml_fragments::frag_review,
@@ -773,7 +774,7 @@ pub fn check_cst_sc_range_consistency(conn: &mut SqliteConnection, include_check
             .select((
                 xml_fragments::id,
                 xml_fragments::cst_file,
-                xml_fragments::frag_idx,
+                xml_fragments::frag_idx_code,
                 xml_fragments::cst_code,
                 xml_fragments::sc_code,
                 xml_fragments::frag_review,
@@ -791,7 +792,7 @@ pub fn check_cst_sc_range_consistency(conn: &mut SqliteConnection, include_check
 
     let errors: Vec<ValidationError> = results
         .into_iter()
-        .filter_map(|(id, cst_file, frag_idx, cst_code_opt, sc_code_opt, frag_review)| {
+        .filter_map(|(id, cst_file, frag_idx_code, cst_code_opt, sc_code_opt, frag_review)| {
             let cst_code = cst_code_opt?;
             let sc_code = sc_code_opt?;
 
@@ -802,7 +803,7 @@ pub fn check_cst_sc_range_consistency(conn: &mut SqliteConnection, include_check
             if cst_is_range && !sc_is_range {
                 Some(ValidationError {
                     cst_file,
-                    frag_idx,
+                    frag_idx_code,
                     fragment_id: id,
                     message: format!(
                         "cst_code '{}' is a range but sc_code '{}' is not a range",
@@ -871,12 +872,12 @@ pub fn sc_code_exists_in_titles(code: &str, titles: &HashMap<String, String>) ->
 pub fn expand_sc_code_range(sc_code: &str) -> Vec<String> {
     // First remove any colon suffix
     let base = sc_code.split(':').next().unwrap_or(sc_code);
-    
+
     // Check if it's a range (contains '-')
     if let Some(dash_pos) = base.find('-') {
         let prefix = &base[..dash_pos];
         let suffix = &base[dash_pos + 1..];
-        
+
         // Try to parse the numbers
         if let Some(period_pos) = prefix.rfind('.') {
             let num_part = &prefix[period_pos + 1..];
@@ -888,7 +889,7 @@ pub fn expand_sc_code_range(sc_code: &str) -> Vec<String> {
             }
         }
     }
-    
+
     // Not a range, return as-is
     vec![sc_code.to_string()]
 }
@@ -922,12 +923,12 @@ pub fn check_sc_code_not_in_arangodb(
     };
 
     // Get all unique sc_codes from the database with their fragment info
-    let results: Vec<(i32, String, i32, Option<String>, Option<String>)> = if include_checked {
+    let results: Vec<(i32, String, String, Option<String>, Option<String>)> = if include_checked {
         xml_fragments::table
             .select((
                 xml_fragments::id,
                 xml_fragments::cst_file,
-                xml_fragments::frag_idx,
+                xml_fragments::frag_idx_code,
                 xml_fragments::sc_code,
                 xml_fragments::frag_review,
             ))
@@ -942,7 +943,7 @@ pub fn check_sc_code_not_in_arangodb(
             .select((
                 xml_fragments::id,
                 xml_fragments::cst_file,
-                xml_fragments::frag_idx,
+                xml_fragments::frag_idx_code,
                 xml_fragments::sc_code,
                 xml_fragments::frag_review,
             ))
@@ -957,7 +958,7 @@ pub fn check_sc_code_not_in_arangodb(
 
     let errors: Vec<ValidationError> = results
         .into_iter()
-        .filter_map(|(id, cst_file, frag_idx, sc_code_opt, frag_review)| {
+        .filter_map(|(id, cst_file, frag_idx_code, sc_code_opt, frag_review)| {
             let sc_code = sc_code_opt?;
 
             // Extract base sc_code (without colon suffix, e.g., "dn1" from "dn1:1.2")
@@ -991,7 +992,7 @@ pub fn check_sc_code_not_in_arangodb(
             } else {
                 format!(
                     "sc_code '{}' not found in ArangoDB (expanded from '{}', missing: {})",
-                    missing_codes[0], 
+                    missing_codes[0],
                     base_code,
                     missing_codes.join(", ")
                 )
@@ -999,7 +1000,7 @@ pub fn check_sc_code_not_in_arangodb(
 
             Some(ValidationError {
                 cst_file,
-                frag_idx,
+                frag_idx_code,
                 fragment_id: id,
                 message,
                 frag_review,
@@ -1024,7 +1025,6 @@ pub fn check_sc_code_not_in_arangodb(
 /// will be excluded from validation checks (similar to how `frag_review = 'moved'` is excluded).
 pub fn run_all_validations(
     conn: &mut SqliteConnection,
-    db_path: &Path,
     pali_titles: Option<&HashMap<String, String>>,
     include_checked: bool,
 ) -> HashMap<String, ValidationCheckResult> {
@@ -1047,7 +1047,7 @@ pub fn run_all_validations(
 
     results.insert(
         "xml_reconstruction".to_string(),
-        check_xml_reconstruction(conn, db_path, include_checked),
+        check_xml_reconstruction(conn, include_checked),
     );
 
     results.insert(
@@ -1088,12 +1088,33 @@ mod tests {
         let mut conn = SqliteConnection::establish(db_path.to_str().unwrap())
             .expect("Failed to create database connection");
 
+        // Create migrations tracking table and mark all migrations as applied
+        // This prevents the reconstruction code from trying to run migrations
+        diesel::sql_query(
+            "CREATE TABLE IF NOT EXISTS __diesel_schema_migrations (version VARCHAR(50) PRIMARY KEY)"
+        )
+        .execute(&mut conn)
+        .expect("Failed to create migrations table");
+
+        // Mark both migrations as applied
+        diesel::sql_query(
+            "INSERT OR IGNORE INTO __diesel_schema_migrations (version) VALUES ('2025-01-01-000000_create_fragments_tables')"
+        )
+        .execute(&mut conn)
+        .expect("Failed to mark first migration as applied");
+
+        diesel::sql_query(
+            "INSERT OR IGNORE INTO __diesel_schema_migrations (version) VALUES ('2025-01-02-000000_frag_idx_to_frag_idx_code')"
+        )
+        .execute(&mut conn)
+        .expect("Failed to mark second migration as applied");
+
         // Create the schema (matching the actual database schema)
         diesel::sql_query(
             r#"CREATE TABLE xml_fragments (
                 id INTEGER PRIMARY KEY,
                 cst_file TEXT NOT NULL,
-                frag_idx INTEGER NOT NULL,
+                frag_idx_code TEXT NOT NULL,
                 frag_type TEXT NOT NULL,
                 frag_review TEXT,
                 nikaya TEXT NOT NULL,
@@ -1127,27 +1148,7 @@ mod tests {
         let fragments = vec![
             NewXmlFragment {
                 cst_file: "test.xml",
-                frag_idx: 0,
-                frag_type: "Sutta",
-                frag_review: None, // Empty is valid
-                nikaya: "digha",
-                cst_code: Some("1"),
-                sc_code: Some("dn1"),
-                content_xml: "<p>Test 1</p>",
-                content_html: None,
-                cst_vagga: None,
-                cst_sutta: None,
-                cst_paranum: None,
-                sc_sutta: None,
-                start_line: 1,
-                start_char: 0,
-                end_line: 1,
-                end_char: 14,
-                group_levels: "[]",
-            },
-            NewXmlFragment {
-                cst_file: "test.xml",
-                frag_idx: 1,
+                frag_idx_code: "1.0",
                 frag_type: "Sutta",
                 frag_review: Some("checked"), // "checked" is valid
                 nikaya: "digha",
@@ -1167,7 +1168,7 @@ mod tests {
             },
             NewXmlFragment {
                 cst_file: "test.xml",
-                frag_idx: 2,
+                frag_idx_code: "2.0",
                 frag_type: "Sutta",
                 frag_review: Some("moved"), // "moved" is valid
                 nikaya: "digha",
@@ -1210,7 +1211,7 @@ mod tests {
         let fragments = vec![
             NewXmlFragment {
                 cst_file: "test.xml",
-                frag_idx: 0,
+                frag_idx_code: "0.0",
                 frag_type: "Sutta",
                 frag_review: Some("in-progress"), // Needs attention
                 nikaya: "digha",
@@ -1230,7 +1231,7 @@ mod tests {
             },
             NewXmlFragment {
                 cst_file: "test.xml",
-                frag_idx: 1,
+                frag_idx_code: "1.0",
                 frag_type: "Sutta",
                 frag_review: Some("needs-review"), // Needs attention
                 nikaya: "digha",
@@ -1250,7 +1251,7 @@ mod tests {
             },
             NewXmlFragment {
                 cst_file: "test.xml",
-                frag_idx: 2,
+                frag_idx_code: "2.0",
                 frag_type: "Sutta",
                 frag_review: Some("checked"), // Valid - should not be reported
                 nikaya: "digha",
@@ -1289,8 +1290,8 @@ mod tests {
         assert!(result.errors.iter().any(|e| e.message.contains("needs-review")),
             "Should report needs-review status");
 
-        // Check that frag_idx 2 (checked) is not reported
-        assert!(!result.errors.iter().any(|e| e.frag_idx == 2),
+        // Check that frag_idx_code "2.0" (checked) is not reported
+        assert!(!result.errors.iter().any(|e| e.frag_idx_code == "2.0"),
             "Should not report checked status");
     }
 
@@ -1301,7 +1302,7 @@ mod tests {
         // Insert Header fragment with "in-progress" - should be ignored
         let fragment = NewXmlFragment {
             cst_file: "test.xml",
-            frag_idx: 0,
+            frag_idx_code: "0.0",
             frag_type: "Header", // Not Sutta
             frag_review: Some("in-progress"),
             nikaya: "digha",
@@ -1334,14 +1335,13 @@ mod tests {
 
     #[test]
     fn test_xml_reconstruction_valid_fragments() {
-        let (mut conn, temp_db) = setup_test_db();
-        let db_path = temp_db.path();
+        let (mut conn, _temp_db) = setup_test_db();
 
         // Insert valid fragments
         let fragments = vec![
             NewXmlFragment {
                 cst_file: "test.xml",
-                frag_idx: 0,
+                frag_idx_code: "0.0",
                 frag_type: "Header",
                 frag_review: None,
                 nikaya: "digha",
@@ -1361,7 +1361,7 @@ mod tests {
             },
             NewXmlFragment {
                 cst_file: "test.xml",
-                frag_idx: 1,
+                frag_idx_code: "1.0",
                 frag_type: "Sutta",
                 frag_review: None,
                 nikaya: "digha",
@@ -1389,7 +1389,7 @@ mod tests {
         }
 
         // Run validation
-        let result = check_xml_reconstruction(&mut conn, db_path, false);
+        let result = check_xml_reconstruction(&mut conn, false);
 
         // Should have no errors
         if result.errors.len() > 0 {
@@ -1402,8 +1402,7 @@ mod tests {
 
     #[test]
     fn test_xml_reconstruction_no_fragments() {
-        let (mut conn, temp_db) = setup_test_db();
-        let db_path = temp_db.path();
+        let (mut conn, _temp_db) = setup_test_db();
 
         // Don't insert any fragments - this should cause reconstruction to fail
         // when trying to get the nikaya (no fragments found)
@@ -1415,7 +1414,7 @@ mod tests {
         // For this test, let's just verify that reconstruction works with minimal valid content
         let fragment = NewXmlFragment {
             cst_file: "test.xml",
-            frag_idx: 0,
+            frag_idx_code: "0.0",
             frag_type: "Header",
             frag_review: None,
             nikaya: "digha",
@@ -1440,7 +1439,7 @@ mod tests {
             .expect("Failed to insert fragment");
 
         // Run validation
-        let result = check_xml_reconstruction(&mut conn, db_path, false);
+        let result = check_xml_reconstruction(&mut conn, false);
 
         // Should succeed with minimal valid content
         assert_eq!(result.errors.len(), 0, "Should have no errors for minimal valid content");
@@ -1448,13 +1447,12 @@ mod tests {
 
     #[test]
     fn test_xml_reconstruction_invalid_position() {
-        let (mut conn, temp_db) = setup_test_db();
-        let db_path = temp_db.path();
+        let (mut conn, _temp_db) = setup_test_db();
 
         // Insert fragment with invalid position (end before start)
         let fragment = NewXmlFragment {
             cst_file: "test.xml",
-            frag_idx: 0,
+            frag_idx_code: "0.0",
             frag_type: "Sutta",
             frag_review: None,
             nikaya: "digha",
@@ -1479,7 +1477,7 @@ mod tests {
             .expect("Failed to insert fragment");
 
         // Run validation
-        let _result = check_xml_reconstruction(&mut conn, db_path, false);
+        let _result = check_xml_reconstruction(&mut conn, false);
 
         // The reconstruction function should handle this gracefully
         // It may or may not fail depending on the implementation
@@ -1489,14 +1487,13 @@ mod tests {
 
     #[test]
     fn test_xml_reconstruction_gap_detection() {
-        let (mut conn, temp_db) = setup_test_db();
-        let db_path = temp_db.path();
+        let (mut conn, _temp_db) = setup_test_db();
 
         // Insert fragments with a gap between them
         let fragments = vec![
             NewXmlFragment {
                 cst_file: "test.xml",
-                frag_idx: 0,
+                frag_idx_code: "0.0",
                 frag_type: "Sutta",
                 frag_review: None,
                 nikaya: "digha",
@@ -1516,7 +1513,7 @@ mod tests {
             },
             NewXmlFragment {
                 cst_file: "test.xml",
-                frag_idx: 1,
+                frag_idx_code: "1.0",
                 frag_type: "Sutta",
                 frag_review: None,
                 nikaya: "digha",
@@ -1544,7 +1541,7 @@ mod tests {
         }
 
         // Run validation
-        let _result = check_xml_reconstruction(&mut conn, db_path, false);
+        let _result = check_xml_reconstruction(&mut conn, false);
 
         // The reconstruction function should handle this gracefully
         // Gaps in line positions don't necessarily mean reconstruction will fail
@@ -1636,35 +1633,35 @@ mod tests {
         // Valid sequence: sn1.1 -> sn1.2 -> sn1.3 -> sn2.1 -> sn2.2
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.1"),
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "1.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.2"),
                 content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 2, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "2.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.3"),
                 content_xml: "<p>3</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 3, start_char: 0, end_line: 3, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 3, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "3.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some("sn2.1"),
                 content_xml: "<p>4</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 4, start_char: 0, end_line: 4, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 4, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "4.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some("sn2.2"),
                 content_xml: "<p>5</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -1690,21 +1687,21 @@ mod tests {
         // Invalid: sn1.1 -> sn1.2 -> sn1.6 (jump from 2 to 6)
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.1"),
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "1.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.2"),
                 content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 2, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "2.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.6"),
                 content_xml: "<p>3</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -1731,14 +1728,14 @@ mod tests {
         // Invalid: sn1.3 -> sn2.2 (group change but sutta doesn't start at 1)
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.3"),
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "1.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some("sn2.2"),
                 content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -1766,14 +1763,14 @@ mod tests {
         // Invalid: sn1.1 -> sn5.1 (group jump from 1 to 5)
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.1"),
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "1.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some("sn5.1"),
                 content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -1802,35 +1799,35 @@ mod tests {
         // Also tests that Header fragments are ignored (only Sutta fragments are checked)
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.1"),
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "1.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: None, // null sc_code
                 content_xml: "<p>H</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 2, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "2.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some(""), // empty sc_code
                 content_xml: "<p>H2</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 3, start_char: 0, end_line: 3, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 3, frag_type: "Header", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "3.0", frag_type: "Header", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some("sn99.99"), // Header ignored
                 content_xml: "<h>H</h>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 4, start_char: 0, end_line: 4, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 4, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "4.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.2"),
                 content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -1856,21 +1853,21 @@ mod tests {
         // Valid sequence without groups: dn1 -> dn2 -> dn3
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: None, sc_code: Some("dn1"),
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "1.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: None, sc_code: Some("dn2"),
                 content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 2, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "2.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: None, sc_code: Some("dn3"),
                 content_xml: "<p>3</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -1896,21 +1893,21 @@ mod tests {
         // Valid sequence with ranges: sn1.54 -> sn1.55-57 -> sn1.58
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.54"),
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "1.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.55-57"),
                 content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 2, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "2.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: None, sc_code: Some("sn1.58"),
                 content_xml: "<p>3</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -1940,21 +1937,21 @@ mod tests {
         // All unique codes - should have no errors
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"),
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "1.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: Some("2"), sc_code: Some("dn2"),
                 content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 2, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "2.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: Some("3"), sc_code: Some("dn3"),
                 content_xml: "<p>3</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -1981,14 +1978,14 @@ mod tests {
         // Duplicate cst_code "1" in two fragments
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"),
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "1.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn2"), // Duplicate cst_code
                 content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -2016,14 +2013,14 @@ mod tests {
         // Duplicate sc_code "dn1" in two fragments
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"),
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "1.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: Some("2"), sc_code: Some("dn1"), // Duplicate sc_code
                 content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -2051,14 +2048,14 @@ mod tests {
         // Duplicate cst_code "1" but one fragment is "moved" - should not report error
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"),
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: Some("moved"),
+                cst_file: "test.xml", frag_idx_code: "1.0", frag_type: "Sutta", frag_review: Some("moved"),
                 nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"), // Duplicate but moved
                 content_xml: "", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -2084,21 +2081,21 @@ mod tests {
         // Multiple fragments with empty/null codes - should not report as duplicates
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: None, sc_code: None,
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "1.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: Some(""), sc_code: Some(""),
                 content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 2, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "2.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: None, sc_code: None,
                 content_xml: "<p>3</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -2124,21 +2121,21 @@ mod tests {
         // Header fragments with duplicate codes - should be excluded from check
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Header", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Header", frag_review: None,
                 nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"),
                 content_xml: "<h>H1</h>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 1, frag_type: "Header", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "1.0", frag_type: "Header", frag_review: None,
                 nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"), // Duplicate but Header
                 content_xml: "<h>H2</h>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 2, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "2.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"), // Same code in Sutta - only one, so OK
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -2165,14 +2162,14 @@ mod tests {
         // (uniqueness is only required within the same file)
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "file1.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "file1.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"),
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "file2.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "file2.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"), // Same codes, different file - OK
                 content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -2198,21 +2195,21 @@ mod tests {
         // Duplicate sc_code "dn1" within the same file - should be reported
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"),
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "1.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: Some("2"), sc_code: Some("dn1"), // Duplicate sc_code in same file
                 content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 2, start_char: 0, end_line: 2, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "other.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "other.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"), // Same code but different file - OK
                 content_xml: "<p>3</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -2275,7 +2272,7 @@ mod tests {
         // Both cst_code and sc_code are ranges - should be valid
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: Some("sn2.1.9.2-12"), sc_code: Some("sn12.93-103"),
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -2301,7 +2298,7 @@ mod tests {
         // Both cst_code and sc_code are single values (not ranges) - should be valid
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: Some("1"), sc_code: Some("dn1"),
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -2327,7 +2324,7 @@ mod tests {
         // cst_code is a range but sc_code is not - should error
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "samyutta", cst_code: Some("sn2.1.9.2-12"), sc_code: Some("sn12.93"),
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -2357,14 +2354,14 @@ mod tests {
         // Null cst_code or sc_code should be skipped
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: None, sc_code: Some("dn1"),
                 content_xml: "<p>1</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
                 start_line: 1, start_char: 0, end_line: 1, end_char: 10, group_levels: "[]",
             },
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 1, frag_type: "Sutta", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "1.0", frag_type: "Sutta", frag_review: None,
                 nikaya: "digha", cst_code: Some("1"), sc_code: None,
                 content_xml: "<p>2</p>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,
@@ -2390,7 +2387,7 @@ mod tests {
         // Header fragments should be ignored
         let fragments = vec![
             NewXmlFragment {
-                cst_file: "test.xml", frag_idx: 0, frag_type: "Header", frag_review: None,
+                cst_file: "test.xml", frag_idx_code: "0.0", frag_type: "Header", frag_review: None,
                 nikaya: "samyutta", cst_code: Some("sn2.1.9.2-12"), sc_code: Some("sn12.93"),
                 content_xml: "<h>Header</h>", content_html: None, cst_vagga: None,
                 cst_sutta: None, cst_paranum: None, sc_sutta: None,

@@ -27,7 +27,7 @@ where
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct FragmentTsvRow {
     pub cst_file: String,
-    pub frag_idx: i32,
+    pub frag_idx_code: String,
     #[serde(deserialize_with = "deserialize_option_string")]
     pub cst_code: Option<String>,
     #[serde(deserialize_with = "deserialize_option_string")]
@@ -52,7 +52,7 @@ pub struct DiffCheckResult {
 #[derive(Debug)]
 pub struct ValidationError {
     pub cst_file: String,
-    pub frag_idx: i32,
+    pub frag_idx_code: String,
     pub cst_code: String,
     pub actual_cst_sutta: Option<String>,
     pub expected_cst_sutta: String,
@@ -118,17 +118,17 @@ pub fn check_tsv_improvements(old_tsv_path: &Path, new_tsv_path: &Path) -> Resul
     let new_rows = parse_tsv_file(new_tsv_path)
         .context("Failed to parse new TSV file")?;
     
-    // Create lookup maps (cst_file, frag_idx) -> row
-    let old_map: HashMap<(String, i32), &FragmentTsvRow> = old_rows.iter()
-        .map(|row| ((row.cst_file.clone(), row.frag_idx), row))
+    // Create lookup maps (cst_file, frag_idx_code) -> row
+    let old_map: HashMap<(String, String), &FragmentTsvRow> = old_rows.iter()
+        .map(|row| ((row.cst_file.clone(), row.frag_idx_code.clone()), row))
         .collect();
-    
+
     let mut differing_rows = 0;
     let mut validation_errors = Vec::new();
-    
+
     // Check each row in new TSV
     for new_row in &new_rows {
-        let key = (new_row.cst_file.clone(), new_row.frag_idx);
+        let key = (new_row.cst_file.clone(), new_row.frag_idx_code.clone());
         
         // Check if this row differs from the old version
         if let Some(old_row) = old_map.get(&key) {
@@ -169,7 +169,7 @@ pub fn check_tsv_improvements(old_tsv_path: &Path, new_tsv_path: &Path) -> Resul
                             if !new_is_correct {
                                 validation_errors.push(ValidationError {
                                     cst_file: new_row.cst_file.clone(),
-                                    frag_idx: new_row.frag_idx,
+                                    frag_idx_code: new_row.frag_idx_code.clone(),
                                     cst_code: old_cst_code.clone(),
                                     actual_cst_sutta: new_row.cst_sutta.clone(),
                                     expected_cst_sutta: reference_sutta.clone(),
@@ -213,24 +213,24 @@ mod tests {
     #[test]
     fn test_parse_tsv_file() {
         // Note: The TSV format requires all 16 fields to be present
-        let tsv_content = "cst_file\tfrag_idx\tfrag_type\tfrag_review\tnikaya\tcst_code\tsc_code\tcst_vagga\tcst_sutta\tcst_paranum\tsc_sutta\tstart_line\tstart_char\tend_line\tend_char\tgroup_levels
-s0101m.mul.xml\t0\tHeader\t\tdigha\t\t\t\t\t\t\t1\t0\t6\t42\t[]
-s0101m.mul.xml\t1\tSutta\t\tdigha\tdn1.1\tdn1\t\t1. Brahmajālasuttaṃ\t1\tBrahmajālasutta\t6\t42\t100\t0\t[]
+        let tsv_content = "cst_file\tfrag_idx_code\tfrag_type\tfrag_review\tnikaya\tcst_code\tsc_code\tcst_vagga\tcst_sutta\tcst_paranum\tsc_sutta\tstart_line\tstart_char\tend_line\tend_char\tgroup_levels
+s0101m.mul.xml\t0.0\tHeader\t\tdigha\t\t\t\t\t\t\t1\t0\t6\t42\t[]
+s0101m.mul.xml\t1.0\tSutta\t\tdigha\tdn1.1\tdn1\t\t1. Brahmajālasuttaṃ\t1\tBrahmajālasutta\t6\t42\t100\t0\t[]
 ";
-        
+
         let mut temp_file = NamedTempFile::new().unwrap();
         temp_file.write_all(tsv_content.as_bytes()).unwrap();
         temp_file.flush().unwrap();
-        
+
         let rows = parse_tsv_file(temp_file.path()).unwrap();
-        
+
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].cst_file, "s0101m.mul.xml");
-        assert_eq!(rows[0].frag_idx, 0);
+        assert_eq!(rows[0].frag_idx_code, "0.0");
         assert_eq!(rows[0].cst_code, None);
-        
+
         assert_eq!(rows[1].cst_file, "s0101m.mul.xml");
-        assert_eq!(rows[1].frag_idx, 1);
+        assert_eq!(rows[1].frag_idx_code, "1.0");
         assert_eq!(rows[1].cst_code, Some("dn1.1".to_string()));
         assert_eq!(rows[1].cst_sutta, Some("1. Brahmajālasuttaṃ".to_string()));
     }
@@ -238,12 +238,12 @@ s0101m.mul.xml\t1\tSutta\t\tdigha\tdn1.1\tdn1\t\t1. Brahmajālasuttaṃ\t1\tBrah
     #[test]
     fn test_check_tsv_improvements_old_wrong_new_fixed() {
         // Test: Old was wrong, new is fixed - should have NO errors
-        let old_tsv = "cst_file\tfrag_idx\tfrag_type\tfrag_review\tnikaya\tcst_code\tsc_code\tcst_vagga\tcst_sutta\tcst_paranum\tsc_sutta\tstart_line\tstart_char\tend_line\tend_char\tgroup_levels
-s0101m.mul.xml\t1\tSutta\t\tdigha\tdn1.1\tdn1\t\tWrong Title\t1\tBrahmajālasutta\t6\t42\t100\t0\t[]
+        let old_tsv = "cst_file\tfrag_idx_code\tfrag_type\tfrag_review\tnikaya\tcst_code\tsc_code\tcst_vagga\tcst_sutta\tcst_paranum\tsc_sutta\tstart_line\tstart_char\tend_line\tend_char\tgroup_levels
+s0101m.mul.xml\t1.0\tSutta\t\tdigha\tdn1.1\tdn1\t\tWrong Title\t1\tBrahmajālasutta\t6\t42\t100\t0\t[]
 ";
-        
-        let new_tsv = "cst_file\tfrag_idx\tfrag_type\tfrag_review\tnikaya\tcst_code\tsc_code\tcst_vagga\tcst_sutta\tcst_paranum\tsc_sutta\tstart_line\tstart_char\tend_line\tend_char\tgroup_levels
-s0101m.mul.xml\t1\tSutta\t\tdigha\tdn1.1\tdn1\t\t1. Brahmajālasuttaṃ\t1\tBrahmajālasutta\t6\t42\t100\t0\t[]
+
+        let new_tsv = "cst_file\tfrag_idx_code\tfrag_type\tfrag_review\tnikaya\tcst_code\tsc_code\tcst_vagga\tcst_sutta\tcst_paranum\tsc_sutta\tstart_line\tstart_char\tend_line\tend_char\tgroup_levels
+s0101m.mul.xml\t1.0\tSutta\t\tdigha\tdn1.1\tdn1\t\t1. Brahmajālasuttaṃ\t1\tBrahmajālasutta\t6\t42\t100\t0\t[]
 ";
         
         let mut old_file = NamedTempFile::new().unwrap();
@@ -264,12 +264,12 @@ s0101m.mul.xml\t1\tSutta\t\tdigha\tdn1.1\tdn1\t\t1. Brahmajālasuttaṃ\t1\tBrah
     #[test]
     fn test_check_tsv_regression() {
         // Test: Old was correct, new is wrong - should have 1 error (regression!)
-        let old_tsv = "cst_file\tfrag_idx\tfrag_type\tfrag_review\tnikaya\tcst_code\tsc_code\tcst_vagga\tcst_sutta\tcst_paranum\tsc_sutta\tstart_line\tstart_char\tend_line\tend_char\tgroup_levels
-s0101m.mul.xml\t1\tSutta\t\tdigha\tdn1.1\tdn1\t\t1. Brahmajālasuttaṃ\t1\tBrahmajālasutta\t6\t42\t100\t0\t[]
+        let old_tsv = "cst_file\tfrag_idx_code\tfrag_type\tfrag_review\tnikaya\tcst_code\tsc_code\tcst_vagga\tcst_sutta\tcst_paranum\tsc_sutta\tstart_line\tstart_char\tend_line\tend_char\tgroup_levels
+s0101m.mul.xml\t1.0\tSutta\t\tdigha\tdn1.1\tdn1\t\t1. Brahmajālasuttaṃ\t1\tBrahmajālasutta\t6\t42\t100\t0\t[]
 ";
-        
-        let new_tsv = "cst_file\tfrag_idx\tfrag_type\tfrag_review\tnikaya\tcst_code\tsc_code\tcst_vagga\tcst_sutta\tcst_paranum\tsc_sutta\tstart_line\tstart_char\tend_line\tend_char\tgroup_levels
-s0101m.mul.xml\t1\tSutta\t\tdigha\tdn1.1\tdn1\t\tWrong Title\t1\tBrahmajālasutta\t6\t42\t100\t0\t[]
+
+        let new_tsv = "cst_file\tfrag_idx_code\tfrag_type\tfrag_review\tnikaya\tcst_code\tsc_code\tcst_vagga\tcst_sutta\tcst_paranum\tsc_sutta\tstart_line\tstart_char\tend_line\tend_char\tgroup_levels
+s0101m.mul.xml\t1.0\tSutta\t\tdigha\tdn1.1\tdn1\t\tWrong Title\t1\tBrahmajālasutta\t6\t42\t100\t0\t[]
 ";
         
         let mut old_file = NamedTempFile::new().unwrap();

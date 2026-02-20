@@ -163,7 +163,7 @@ pub fn regenerate_fragments_db(config: &RegenerateConfig) -> RegenerateResult {
                     output.push_str(&format!("\nFound {} regressions:\n", result.validation_errors.len()));
                     for error in &result.validation_errors {
                         output.push_str(&format!("  - File: {}, Fragment: {}, CST Code: {}\n",
-                            error.cst_file, error.frag_idx, error.cst_code));
+                            error.cst_file, error.frag_idx_code, error.cst_code));
                     }
                     output.push_str("\n");
                 }
@@ -224,27 +224,32 @@ pub fn parse_tipitaka_xml_files(
     reference_fragments_db: Option<&Path>,
     pali_titles: Option<std::collections::HashMap<String, String>>,
 ) -> Result<usize> {
-    // Extract correction overrides from reference database if provided
-    let correction_overrides = if let Some(ref_db_path) = reference_fragments_db {
+    // Extract correction overrides and inserted fragments from reference database if provided
+    let (correction_overrides, inserted_fragments) = if let Some(ref_db_path) = reference_fragments_db {
         match extract_all_correction_overrides(ref_db_path) {
-            Ok(overrides) => {
+            Ok((overrides, inserted)) => {
                 if !overrides.is_empty() {
                     logger::info(&format!("Loaded {} correction overrides from reference database", overrides.len()));
                 }
-                Some(overrides)
+                if !inserted.is_empty() {
+                    let total_inserted: usize = inserted.values().map(|v| v.len()).sum();
+                    logger::info(&format!("Loaded {} inserted fragments from reference database", total_inserted));
+                }
+                (Some(overrides), Some(inserted))
             }
             Err(e) => {
                 logger::warn(&format!("Failed to load correction overrides from reference: {}", e));
-                None
+                (None, None)
             }
         }
     } else {
-        None
+        (None, None)
     };
 
     // Build ParserOverrides using the provided pali_titles
     let overrides = ParserOverrides {
         correction_overrides,
+        inserted_fragments,
         pali_titles,
     };
 

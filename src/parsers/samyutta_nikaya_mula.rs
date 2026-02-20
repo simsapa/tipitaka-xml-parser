@@ -48,6 +48,13 @@ pub fn parse_into_fragments(
     let mut hierarchy = HierarchyTracker::new(nikaya_structure.clone());
     let detector = FragmentBoundaryDetector::new(nikaya_structure, cst_file);
 
+    // Extract inserted fragments for this file (for boundary adjustment)
+    let inserted_fragments_slice: Option<&[crate::types::InsertedFragmentData]> = overrides
+        .inserted_fragments
+        .as_ref()
+        .and_then(|map| map.get(cst_file))
+        .map(|v| v.as_slice());
+
     let mut fragments: Vec<XmlFragment> = Vec::new();
     // Track: (byte_pos, line_num, char_pos)
     let mut current_fragment_start: Option<(usize, usize, usize)>;
@@ -121,23 +128,24 @@ pub fn parse_into_fragments(
                         (current_fragment_start, current_frag_type.as_ref()) {
 
                         // Apply overrides if any
-                        let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
+                        let (end_pos, end_line, end_char, collapsed, chain_end_pos, chain_end_line, chain_end_char) = apply_fragment_adjustment(
                             xml_content,
                             current_pos,
                             current_line,
                             current_char,
                             cst_file,
-                            fragments.len(),
+                            &format!("{}.0", fragments.len()),
                             frag_start_pos,
                             frag_start_line,
                             frag_start_char,
                             overrides.correction_overrides.as_ref(),
+                            inserted_fragments_slice,
                         )?;
 
                         // Use adjusted end position as next fragment's start to ensure continuous boundaries
-                        next_frag_start_pos = end_pos;
-                        next_frag_start_line = end_line;
-                        next_frag_start_char = end_char;
+                        next_frag_start_pos = chain_end_pos;
+                        next_frag_start_line = chain_end_line;
+                        next_frag_start_char = chain_end_char;
 
                         let content_xml = xml_content[frag_start_pos..end_pos].to_string();
                         if collapsed || !content_xml.trim().is_empty() {
@@ -151,7 +159,7 @@ pub fn parse_into_fragments(
                                 end_char,
                                 group_levels: current_fragment_group_levels.clone(),
                                 cst_file: cst_file.to_string(),
-                                frag_idx: fragments.len(),
+                                frag_idx_code: format!("{}.0", fragments.len()),
                                 frag_review: None,
                                 cst_code: None,
                                 cst_vagga: None,
@@ -200,17 +208,18 @@ pub fn parse_into_fragments(
 
                                     if has_sutta_content {
                                         // Close at the current position (before the new vagga/sutta div)
-                                        let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
+                                        let (end_pos, end_line, end_char, collapsed, chain_end_pos, chain_end_line, chain_end_char) = apply_fragment_adjustment(
                                             xml_content,
                                             event_start_pos,
                                             event_start_line,
                                             event_start_char,
                                             cst_file,
-                                            fragments.len(),
+                                            &format!("{}.0", fragments.len()),
                                             frag_start_pos,
                                             frag_start_line,
                                             frag_start_char,
                                             overrides.correction_overrides.as_ref(),
+                                            inserted_fragments_slice,
                                         )?;
 
                                         // Create content with adjusted end position
@@ -227,7 +236,7 @@ pub fn parse_into_fragments(
                                         end_char,
                                         group_levels: current_fragment_group_levels.clone(),
                                         cst_file: cst_file.to_string(),
-                                        frag_idx: fragments.len(),
+                                        frag_idx_code: format!("{}.0", fragments.len()),
                                         frag_review: None,
                                         cst_code: None,
                                         cst_vagga: None,
@@ -240,7 +249,7 @@ pub fn parse_into_fragments(
 
                                         // Start new fragment at the adjusted end position of the previous fragment
                                         // This ensures no gap in XML reconstruction when overrides are used
-                                        current_fragment_start = Some((end_pos, end_line, end_char));
+                                        current_fragment_start = Some((chain_end_pos, chain_end_line, chain_end_char));
 
                                         // For Samyutta boundaries, don't set fragment type yet - wait for actual sutta
                                         // This prevents creating a fragment for just the samyutta/vagga headings
@@ -308,17 +317,18 @@ pub fn parse_into_fragments(
 
                                         if has_sutta_content {
                                             // Close at the current position (before the new vagga chapter)
-                                            let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
+                                            let (end_pos, end_line, end_char, collapsed, chain_end_pos, chain_end_line, chain_end_char) = apply_fragment_adjustment(
                                                 xml_content,
                                                 event_start_pos,
                                                 event_start_line,
                                                 event_start_char,
                                                 cst_file,
-                                                fragments.len(),
+                                                &format!("{}.0", fragments.len()),
                                                 frag_start_pos,
                                                 frag_start_line,
                                                 frag_start_char,
                                                 overrides.correction_overrides.as_ref(),
+                                                inserted_fragments_slice,
                                             )?;
 
                                             let content_xml = xml_content[frag_start_pos..end_pos].to_string();
@@ -334,7 +344,7 @@ pub fn parse_into_fragments(
                                                     end_char,
                                                     group_levels: current_fragment_group_levels.clone(),
                                                     cst_file: cst_file.to_string(),
-                                                    frag_idx: fragments.len(),
+                                                    frag_idx_code: format!("{}.0", fragments.len()),
                                                     frag_review: None,
                                                     cst_code: None,
                                                     cst_vagga: None,
@@ -346,7 +356,7 @@ pub fn parse_into_fragments(
                                             }
 
                                             // Start new fragment at the adjusted end position
-                                            current_fragment_start = Some((end_pos, end_line, end_char));
+                                            current_fragment_start = Some((chain_end_pos, chain_end_line, chain_end_char));
                                             current_frag_type = Some(FragmentType::Sutta);
                                             // For SN vagga title, store position so the next sutta starts here
                                             if is_sn_vagga_title {
@@ -435,17 +445,18 @@ pub fn parse_into_fragments(
                         // intermediate content (samyutta heading, vagga heading) as a non-sutta fragment.
                         if let Some((frag_start_pos, frag_start_line, frag_start_char)) = current_fragment_start {
                             // Apply overrides if any
-                            let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
+                            let (end_pos, end_line, end_char, collapsed, chain_end_pos, chain_end_line, chain_end_char) = apply_fragment_adjustment(
                                 xml_content,
                                 close_pos,
                                 close_line,
                                 close_char,
                                 cst_file,
-                                fragments.len(),
+                                &format!("{}.0", fragments.len()),
                                 frag_start_pos,
                                 frag_start_line,
                                 frag_start_char,
                                 overrides.correction_overrides.as_ref(),
+                                inserted_fragments_slice,
                             )?;
 
                             let content_xml = xml_content[frag_start_pos..end_pos].to_string();
@@ -464,7 +475,7 @@ pub fn parse_into_fragments(
                                     end_char,
                                     group_levels: current_fragment_group_levels.clone(),
                                     cst_file: cst_file.to_string(),
-                                    frag_idx: fragments.len(),
+                                    frag_idx_code: format!("{}.0", fragments.len()),
                                     frag_review: None,
                                     cst_code: None,
                                     cst_vagga: None,
@@ -476,7 +487,7 @@ pub fn parse_into_fragments(
 
                                 // If we adjusted the end position, start the next fragment there
                                 // to avoid gaps in XML reconstruction
-                                current_fragment_start = Some((end_pos, end_line, end_char));
+                                current_fragment_start = Some((chain_end_pos, chain_end_line, chain_end_char));
                             } else {
                                 // No fragment was written (either empty or no frag_type)
                                 // Start from the original position
@@ -556,17 +567,18 @@ pub fn parse_into_fragments(
                                 if current_frag_type.is_some() {
                                     // Normal case: close the previous sutta fragment
                                     // Apply overrides if any
-                                    let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
+                                    let (end_pos, end_line, end_char, collapsed, chain_end_pos, chain_end_line, chain_end_char) = apply_fragment_adjustment(
                                         xml_content,
                                         close_pos,
                                         close_line,
                                         close_char,
                                         cst_file,
-                                        fragments.len(),
+                                        &format!("{}.0", fragments.len()),
                                         frag_start_pos,
                                         frag_start_line,
                                         frag_start_char,
                                         overrides.correction_overrides.as_ref(),
+                                        inserted_fragments_slice,
                                     )?;
 
                                     let content_xml = xml_content[frag_start_pos..end_pos].to_string();
@@ -582,7 +594,7 @@ pub fn parse_into_fragments(
                                             end_char,
                                             group_levels: current_fragment_group_levels.clone(),
                                             cst_file: cst_file.to_string(),
-                                            frag_idx: fragments.len(),
+                                            frag_idx_code: format!("{}.0", fragments.len()),
                                             frag_review: None,
                                             cst_code: None,
                                             cst_vagga: None,
@@ -594,7 +606,7 @@ pub fn parse_into_fragments(
                                     }
 
                                     // Start the next fragment at the adjusted end position
-                                    current_fragment_start = Some((end_pos, end_line, end_char));
+                                    current_fragment_start = Some((chain_end_pos, chain_end_line, chain_end_char));
                                 }
                         } else {
                             // No previous fragment start position, start from the current position
@@ -689,17 +701,18 @@ pub fn parse_into_fragments(
                         (current_fragment_start, current_frag_type.as_ref()) {
 
                         // Apply overrides if any
-                        let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
+                        let (end_pos, end_line, end_char, collapsed, chain_end_pos, chain_end_line, chain_end_char) = apply_fragment_adjustment(
                             xml_content,
                             event_start_pos,
                             event_start_line,
                             event_start_char,
                             cst_file,
-                            fragments.len(),
+                            &format!("{}.0", fragments.len()),
                             frag_start_pos,
                             frag_start_line,
                             frag_start_char,
                             overrides.correction_overrides.as_ref(),
+                            inserted_fragments_slice,
                         )?;
 
                         // Include everything from start up to the adjusted end position
@@ -715,7 +728,7 @@ pub fn parse_into_fragments(
                 end_char,
                 group_levels: current_fragment_group_levels.clone(),
                 cst_file: cst_file.to_string(),
-                frag_idx: fragments.len(),
+                frag_idx_code: format!("{}.0", fragments.len()),
                 frag_review: None,
                 cst_code: None,
                 cst_vagga: None,
@@ -727,7 +740,7 @@ pub fn parse_into_fragments(
 
             // Start the final Header fragment at the adjusted end position
             // to avoid gaps in XML reconstruction
-            current_fragment_start = Some((end_pos, end_line, end_char));
+            current_fragment_start = Some((chain_end_pos, chain_end_line, chain_end_char));
         } else {
             // No content was written, start from the original position
             current_fragment_start = Some((event_start_pos, event_start_line, event_start_char));
@@ -754,17 +767,18 @@ pub fn parse_into_fragments(
         (current_fragment_start, current_frag_type) {
 
         // Apply overrides if any
-        let (end_pos, end_line, end_char, collapsed) = apply_fragment_adjustment(
+        let (end_pos, end_line, end_char, collapsed, chain_end_pos, chain_end_line, chain_end_char) = apply_fragment_adjustment(
             xml_content,
             xml_content.len(),
             reader.current_line(),
             reader.current_char(),
             cst_file,
-            fragments.len(),
+            &format!("{}.0", fragments.len()),
             frag_start_pos,
             frag_start_line,
             frag_start_char,
             overrides.correction_overrides.as_ref(),
+            inserted_fragments_slice,
         )?;
 
         let content_xml = xml_content[frag_start_pos..end_pos].to_string();
@@ -779,7 +793,7 @@ pub fn parse_into_fragments(
                                 end_char,
                                 group_levels: current_fragment_group_levels.clone(),
                                 cst_file: cst_file.to_string(),
-                                frag_idx: fragments.len(),
+                                frag_idx_code: format!("{}.0", fragments.len()),
                                 frag_review: None,
                                 cst_code: None,
                                 cst_vagga: None,

@@ -13,23 +13,49 @@ pub mod validation;
 // Re-export commonly used functions
 pub use settings::{load_settings, load_settings_from_path, load_or_create_default_settings, generate_default_paths};
 
-use rocket::{Rocket, Build, Config};
+use rocket::{Rocket, Build, Config, Request, Data};
 use rocket::figment::Figment;
 use rocket::fs::FileServer;
+use rocket::fairing::{Fairing, Info, Kind};
 use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use crate::web::state::DbState;
 
+/// Custom request logging fairing that skips noisy status endpoints
+pub struct SelectiveLogger;
+
+/// Routes to exclude from request logging
+const SILENT_ROUTES: &[&str] = &["/api/arangodb/status"];
+
+#[rocket::async_trait]
+impl Fairing for SelectiveLogger {
+    fn info(&self) -> Info {
+        Info {
+            name: "Selective Request Logger",
+            kind: Kind::Request,
+        }
+    }
+
+    async fn on_request(&self, request: &mut Request<'_>, _data: &mut Data<'_>) {
+        let path = request.uri().path().as_str();
+        if !SILENT_ROUTES.contains(&path) {
+            println!("{} {}", request.method(), path);
+        }
+    }
+}
+
 /// Initialize and configure the Rocket web server
 fn build_server(db_path: &Path, port: u16) -> Rocket<Build> {
     let figment = Figment::from(Config::default())
-        .merge(("port", port));
-    
+        .merge(("port", port))
+        .merge(("log_level", "off")); // Disable default Rocket logging
+
     // Get the path to static files relative to the binary location
     let static_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/static");
-    
+
     rocket::custom(figment)
+        .attach(SelectiveLogger) // Custom logging that skips noisy routes
         .manage(DbState {
             db_path: db_path.to_path_buf(),
         })

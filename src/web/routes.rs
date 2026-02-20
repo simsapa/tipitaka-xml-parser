@@ -1,5 +1,5 @@
 /// API endpoint handlers for the web UI
-/// 
+///
 /// This module contains Rocket route handlers for serving the fragment
 /// review API endpoints.
 
@@ -13,25 +13,29 @@ use diesel::prelude::*;
 use crate::web::state::DbState;
 use crate::web::models::{
     FileListItem, FragmentListItem, FragmentDetail, AdjacentFragment,
-    UpdateMetadataRequest, BoundaryAdjustmentRequest, BoundaryAdjustmentResponse, BoundaryAction, CreateFragmentRequest, CreateFragmentResponse, MoveFragmentRequest, MoveFragmentResponse, AppSettings, NikayaGroup,
+    UpdateMetadataRequest, BoundaryAdjustmentRequest, BoundaryAdjustmentResponse, BoundaryAction, BoundaryDiscontinuityInfo, ContentIntegrityErrorInfo, CreateFragmentRequest, CreateFragmentResponse, MoveFragmentRequest, MoveFragmentResponse, AppSettings, NikayaGroup,
     ArangoStatusResponse, PaliTitlesResponse,
     ValidationRunRequest, ValidationRunResponse, AutoFixRequest, AutoFixResponse,
+    InsertFragmentRequest, InsertFragmentResponse,
+    RecalculateBoundariesRequest, RecalculateBoundariesResponse,
+    ResetFileRequest, ResetFileResponse,
 };
 use crate::web::settings;
 use crate::web::arangodb;
 use crate::web::validation;
 use crate::fragments_schema::xml_fragments;
 use crate::fragments_models::{
-    XmlFragmentRecord, UpdateFragmentMetadata, UpdateFragmentBoundary, UpdateFragmentIndex, NewXmlFragment
+    XmlFragmentRecord, UpdateFragmentMetadata, UpdateFragmentBoundary, UpdateFragmentIndexCode, NewXmlFragment
 };
-use crate::fragment_operations::{Direction, move_fragment_content};
+use crate::fragment_operations::{Direction, move_fragment_content, find_target_fragment, increment_frag_idx_code, insert_fragment, validate_boundary_chain, recalculate_boundaries, validate_content_integrity};
+use crate::types::compare_frag_idx_code;
 
 /// Serve the main index.html page
 #[get("/")]
 fn index() -> RawHtml<String> {
     let static_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/static");
     let index_path = static_dir.join("index.html");
-    
+
     match fs::read_to_string(index_path) {
         Ok(content) => RawHtml(content),
         Err(_) => RawHtml("<h1>Error loading index.html</h1>".to_string()),
@@ -43,7 +47,7 @@ fn index() -> RawHtml<String> {
 fn get_files(db_state: &State<DbState>) -> Result<Json<Vec<NikayaGroup>>, String> {
     let mut conn = db_state.connect()
         .map_err(|e| format!("Database connection failed: {}", e))?;
-    
+
     // Get distinct filenames with their nikaya (first occurrence for each file)
     let files_with_nikaya: Vec<(String, String)> = xml_fragments::table
         .select((xml_fragments::cst_file, xml_fragments::nikaya))
@@ -51,10 +55,10 @@ fn get_files(db_state: &State<DbState>) -> Result<Json<Vec<NikayaGroup>>, String
         .order_by((xml_fragments::nikaya, xml_fragments::cst_file))
         .load(&mut conn)
         .map_err(|e| format!("Query failed: {}", e))?;
-    
+
     // Group files by nikaya and get fragment counts
     let mut nikaya_groups: std::collections::HashMap<String, Vec<FileListItem>> = std::collections::HashMap::new();
-    
+
     for (filename, nikaya) in files_with_nikaya {
         // Count fragments for this file
         let count: i64 = xml_fragments::table
@@ -62,16 +66,16 @@ fn get_files(db_state: &State<DbState>) -> Result<Json<Vec<NikayaGroup>>, String
             .count()
             .get_result(&mut conn)
             .map_err(|e| format!("Count query failed for file {}: {}", filename, e))?;
-        
+
         let file_item = FileListItem {
             filename: filename.clone(),
             fragment_count: count as i32,
             nikaya: nikaya.clone(),
         };
-        
+
         nikaya_groups.entry(nikaya).or_insert_with(Vec::new).push(file_item);
     }
-    
+
     // Convert to NikayaGroup structures with display names
     let mut groups: Vec<NikayaGroup> = nikaya_groups
         .into_iter()
@@ -84,7 +88,7 @@ fn get_files(db_state: &State<DbState>) -> Result<Json<Vec<NikayaGroup>>, String
                 "khuddaka" => "Khuddaka Nikāya".to_string(),
                 _ => format!("{} (Unknown)", nikaya),
             };
-            
+
             NikayaGroup {
                 nikaya,
                 display_name,
@@ -92,7 +96,7 @@ fn get_files(db_state: &State<DbState>) -> Result<Json<Vec<NikayaGroup>>, String
             }
         })
         .collect();
-    
+
     // Sort groups by traditional nikaya order
     groups.sort_by(|a, b| {
         let order = ["digha", "majjhima", "samyutta", "anguttara", "khuddaka"];
@@ -100,7 +104,7 @@ fn get_files(db_state: &State<DbState>) -> Result<Json<Vec<NikayaGroup>>, String
         let b_pos = order.iter().position(|&x| x == b.nikaya).unwrap_or(999);
         a_pos.cmp(&b_pos)
     });
-    
+
     Ok(Json(groups))
 }
 
@@ -112,25 +116,27 @@ fn get_file_fragments(
 ) -> Result<Json<Vec<FragmentListItem>>, String> {
     let mut conn = db_state.connect()
         .map_err(|e| format!("Database connection failed: {}", e))?;
-    
-    let results: Vec<XmlFragmentRecord> = xml_fragments::table
+
+    let mut results: Vec<XmlFragmentRecord> = xml_fragments::table
         .filter(xml_fragments::cst_file.eq(&filename))
-        .order_by(xml_fragments::frag_idx)
         .load(&mut conn)
         .map_err(|e| format!("Query failed: {}", e))?;
-    
+
+    // Sort using version-style comparison for frag_idx_code
+    results.sort_by(|a, b| compare_frag_idx_code(&a.frag_idx_code, &b.frag_idx_code));
+
     let fragments: Vec<FragmentListItem> = results
         .into_iter()
         .map(|r| FragmentListItem {
             id: r.id,
-            frag_idx: r.frag_idx,
+            frag_idx_code: r.frag_idx_code,
             frag_type: r.frag_type,
             frag_review: r.frag_review,
             cst_code: r.cst_code,
             sc_code: r.sc_code,
         })
         .collect();
-    
+
     Ok(Json(fragments))
 }
 
@@ -142,26 +148,26 @@ fn get_fragment_detail(
 ) -> Result<Json<FragmentDetail>, String> {
     let mut conn = db_state.connect()
         .map_err(|e| format!("Database connection failed: {}", e))?;
-    
+
     // Get the current fragment
     let current: XmlFragmentRecord = xml_fragments::table
         .find(fragment_id)
         .first(&mut conn)
         .map_err(|e| format!("Fragment not found: {}", e))?;
-    
+
     // Get previous fragment (skip over moved fragments)
     use crate::fragment_operations::{find_target_fragment, Direction};
-    
+
     let prev_fragment: Option<AdjacentFragment> = find_target_fragment(
         &mut conn,
         &current.cst_file,
-        current.frag_idx,
+        &current.frag_idx_code,
         Direction::Prev,
     )
         .map_err(|e| format!("Failed to find previous fragment: {}", e))?
         .map(|r| AdjacentFragment {
             id: r.id,
-            frag_idx: r.frag_idx,
+            frag_idx_code: r.frag_idx_code,
             frag_type: r.frag_type,
             content_xml: r.content_xml,
             cst_code: r.cst_code,
@@ -175,13 +181,13 @@ fn get_fragment_detail(
     let next_fragment: Option<AdjacentFragment> = find_target_fragment(
         &mut conn,
         &current.cst_file,
-        current.frag_idx,
+        &current.frag_idx_code,
         Direction::Next,
     )
         .map_err(|e| format!("Failed to find next fragment: {}", e))?
         .map(|r| AdjacentFragment {
             id: r.id,
-            frag_idx: r.frag_idx,
+            frag_idx_code: r.frag_idx_code,
             frag_type: r.frag_type,
             content_xml: r.content_xml,
             cst_code: r.cst_code,
@@ -190,11 +196,11 @@ fn get_fragment_detail(
             cst_sutta: r.cst_sutta,
             sc_sutta: r.sc_sutta,
         });
-    
+
     let detail = FragmentDetail {
         id: current.id,
         cst_file: current.cst_file,
-        frag_idx: current.frag_idx,
+        frag_idx_code: current.frag_idx_code,
         frag_type: current.frag_type,
         frag_review: current.frag_review,
         nikaya: current.nikaya,
@@ -213,7 +219,7 @@ fn get_fragment_detail(
         prev_fragment,
         next_fragment,
     };
-    
+
     Ok(Json(detail))
 }
 
@@ -236,27 +242,27 @@ fn update_fragment_metadata(
         cst_paranum: update_request.cst_paranum.clone(),
         sc_sutta: update_request.sc_sutta.clone(),
     };
-    
+
     diesel::update(xml_fragments::table.find(fragment_id))
         .set(&changeset)
         .execute(&mut conn)
         .map_err(|e| format!("Update failed: {}", e))?;
-    
+
     // Fetch and return the updated fragment
     let updated: XmlFragmentRecord = xml_fragments::table
         .find(fragment_id)
         .first(&mut conn)
         .map_err(|e| format!("Failed to fetch updated fragment: {}", e))?;
-    
+
     let fragment_item = FragmentListItem {
         id: updated.id,
-        frag_idx: updated.frag_idx,
+        frag_idx_code: updated.frag_idx_code,
         frag_type: updated.frag_type,
         frag_review: updated.frag_review,
         cst_code: updated.cst_code,
         sc_code: updated.sc_code,
     };
-    
+
     Ok(Json(fragment_item))
 }
 
@@ -269,50 +275,51 @@ fn adjust_fragment_boundary(
 ) -> Result<Json<BoundaryAdjustmentResponse>, String> {
     let mut conn = db_state.connect()
         .map_err(|e| format!("Database connection failed: {}", e))?;
-    
-    // Start a transaction
-    conn.transaction::<_, diesel::result::Error, _>(|conn| {
+
+    // Start a transaction - returns (cst_file, target_id, other_id)
+    let (cst_file, target_id, other_id) = conn.transaction::<_, diesel::result::Error, _>(|conn| {
         // Get the current fragment
         let current: XmlFragmentRecord = xml_fragments::table
             .find(fragment_id)
             .first(conn)?;
-        
+
         // Determine which fragment to adjust (previous or next)
-        let (target_fragment, other_fragment): (XmlFragmentRecord, XmlFragmentRecord) = 
+        let (target_fragment, other_fragment): (XmlFragmentRecord, XmlFragmentRecord) =
             if request.direction == "prev" {
                 // Adjusting boundary with previous fragment
-                let prev: XmlFragmentRecord = xml_fragments::table
-                    .filter(xml_fragments::cst_file.eq(&current.cst_file))
-                    .filter(xml_fragments::frag_idx.eq(current.frag_idx - 1))
-                    .first(conn)?;
+                let prev = find_target_fragment(conn, &current.cst_file, &current.frag_idx_code, Direction::Prev)
+                    .map_err(|e| diesel::result::Error::QueryBuilderError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))))?
+                    .ok_or_else(|| diesel::result::Error::NotFound)?;
                 (prev, current)
             } else {
                 // Adjusting boundary with next fragment
-                let next: XmlFragmentRecord = xml_fragments::table
-                    .filter(xml_fragments::cst_file.eq(&current.cst_file))
-                    .filter(xml_fragments::frag_idx.eq(current.frag_idx + 1))
-                    .first(conn)?;
+                let next = find_target_fragment(conn, &current.cst_file, &current.frag_idx_code, Direction::Next)
+                    .map_err(|e| diesel::result::Error::QueryBuilderError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))))?
+                    .ok_or_else(|| diesel::result::Error::NotFound)?;
                 (current, next)
             };
-        
+
+        let target_id = target_fragment.id;
+        let other_id = other_fragment.id;
+
          // Calculate new boundaries and update content_xml based on action
-        let (new_target_end_line, new_target_end_char, new_other_start_line, new_other_start_char, 
-             new_target_content, new_other_content) = 
+        let (new_target_end_line, new_target_end_char, new_other_start_line, new_other_start_char,
+             new_target_content, new_other_content) =
             match request.action {
                 BoundaryAction::LineUp => {
                     // Line Up: DECREASE line number (move boundary up in file)
                     // This shrinks the target fragment and grows the other fragment
                     // Remove the last line from target and add it to the beginning of other
                     // Preserve original whitespace and line endings
-                    
+
                     // Find the last newline position to split the content
                     if let Some(last_newline_pos) = target_fragment.content_xml.rfind('\n') {
                         // Split at the last newline, preserving the newline with the moved content
                         let new_target = target_fragment.content_xml[..last_newline_pos].to_string();
                         let moved_content = &target_fragment.content_xml[last_newline_pos..];
                         let new_other = format!("{}{}", moved_content, other_fragment.content_xml);
-                        
-                        (target_fragment.end_line - 1, target_fragment.end_char, 
+
+                        (target_fragment.end_line - 1, target_fragment.end_char,
                          other_fragment.start_line - 1, 0, new_target, new_other)
                     } else {
                         // No newline found, can't move line
@@ -326,15 +333,15 @@ fn adjust_fragment_boundary(
                     // This grows the target fragment and shrinks the other fragment
                     // Move the first line from other to the end of target
                     // Preserve original whitespace and line endings
-                    
+
                     // Find the first newline position to split the content
                     if let Some(first_newline_pos) = other_fragment.content_xml.find('\n') {
                         // Split at the first newline, preserving the newline with the moved content
                         let moved_content = &other_fragment.content_xml[..=first_newline_pos]; // Include newline
                         let new_other = &other_fragment.content_xml[first_newline_pos + 1..];
                         let new_target = format!("{}{}", target_fragment.content_xml, moved_content);
-                        
-                        (target_fragment.end_line + 1, 0, 
+
+                        (target_fragment.end_line + 1, 0,
                          other_fragment.start_line + 1, 0, new_target, new_other.to_string())
                     } else {
                         // No newline found, can't move line
@@ -348,16 +355,16 @@ fn adjust_fragment_boundary(
                     if target_fragment.end_char > 0 {
                         // Remove last character from target and add to beginning of other
                         // Preserve all whitespace exactly as it appears
-                        
+
                         if !target_fragment.content_xml.is_empty() {
                             if let Some(last_char_start) = target_fragment.content_xml.char_indices().rev().next() {
                                 let (last_char_pos, _) = last_char_start;
                                 let new_target = &target_fragment.content_xml[..last_char_pos];
                                 let moved_char = &target_fragment.content_xml[last_char_pos..];
                                 let new_other = format!("{}{}", moved_char, other_fragment.content_xml);
-                                
+
                                 (target_fragment.end_line, target_fragment.end_char - 1,
-                                 other_fragment.start_line, other_fragment.start_char - 1, 
+                                 other_fragment.start_line, other_fragment.start_char - 1,
                                  new_target.to_string(), new_other)
                             } else {
                                 (target_fragment.end_line, target_fragment.end_char,
@@ -379,15 +386,15 @@ fn adjust_fragment_boundary(
                     // Move character right (increase char position)
                     // Move first character from other to end of target
                     // Preserve all whitespace exactly as it appears
-                    
+
                     if !other_fragment.content_xml.is_empty() {
                         if let Some((first_char_end, _)) = other_fragment.content_xml.char_indices().next() {
                             let moved_char = &other_fragment.content_xml[..=first_char_end]; // Include full char
                             let new_other = &other_fragment.content_xml[first_char_end + 1..];
                             let new_target = format!("{}{}", target_fragment.content_xml, moved_char);
-                            
+
                             (target_fragment.end_line, target_fragment.end_char + 1,
-                             other_fragment.start_line, other_fragment.start_char + 1, 
+                             other_fragment.start_line, other_fragment.start_char + 1,
                              new_target, new_other.to_string())
                         } else {
                             (target_fragment.end_line, target_fragment.end_char,
@@ -401,8 +408,8 @@ fn adjust_fragment_boundary(
                     }
                 }
             };
-        
-        // Update target fragment
+
+        // Update target fragment (boundary and content)
         let target_update = UpdateFragmentBoundary {
             start_line: target_fragment.start_line,
             start_char: target_fragment.start_char,
@@ -410,12 +417,20 @@ fn adjust_fragment_boundary(
             end_char: new_target_end_char,
             content_xml: new_target_content,
         };
-        
+
         diesel::update(xml_fragments::table.find(target_fragment.id))
             .set(&target_update)
             .execute(conn)?;
-        
-        // Update other fragment
+
+        // Mark target fragment as needing override if not already set
+        // This ensures it gets proper boundary overrides during regeneration
+        if target_fragment.frag_review.is_none() {
+            diesel::update(xml_fragments::table.find(target_fragment.id))
+                .set(xml_fragments::frag_review.eq(Some("checked")))
+                .execute(conn)?;
+        }
+
+        // Update other fragment (boundary and content)
         let other_update = UpdateFragmentBoundary {
             start_line: new_other_start_line,
             start_char: new_other_start_char,
@@ -423,18 +438,215 @@ fn adjust_fragment_boundary(
             end_char: other_fragment.end_char,
             content_xml: new_other_content,
         };
-        
+
         diesel::update(xml_fragments::table.find(other_fragment.id))
             .set(&other_update)
             .execute(conn)?;
-        
-        Ok(())
+
+        // Mark other fragment as needing override if not already set
+        if other_fragment.frag_review.is_none() {
+            diesel::update(xml_fragments::table.find(other_fragment.id))
+                .set(xml_fragments::frag_review.eq(Some("checked")))
+                .execute(conn)?;
+        }
+
+        Ok((target_fragment.cst_file.clone(), target_id, other_id))
     }).map_err(|e| format!("Transaction failed: {}", e))?;
-    
+
+    // Query updated fragments for UI refresh
+    let updated_fragments: Vec<FragmentListItem> = xml_fragments::table
+        .filter(xml_fragments::id.eq_any(vec![target_id, other_id]))
+        .select((
+            xml_fragments::id,
+            xml_fragments::frag_idx_code,
+            xml_fragments::frag_type,
+            xml_fragments::frag_review,
+            xml_fragments::cst_code,
+            xml_fragments::sc_code,
+        ))
+        .load::<(i32, String, String, Option<String>, Option<String>, Option<String>)>(&mut conn)
+        .map_err(|e| format!("Failed to load updated fragments: {}", e))?
+        .into_iter()
+        .map(|(id, frag_idx_code, frag_type, frag_review, cst_code, sc_code)| FragmentListItem {
+            id,
+            frag_idx_code,
+            frag_type,
+            frag_review,
+            cst_code,
+            sc_code,
+        })
+        .collect();
+
+    // Load settings to get XML directory for content validation
+    let settings = settings::load_settings()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+
+    // Validate content integrity (check for duplication or loss)
+    let content_integrity_error = if !settings.xml_dir.is_empty() {
+        let xml_dir = std::path::Path::new(&settings.xml_dir);
+        match validate_content_integrity(&mut conn, &cst_file, xml_dir) {
+            Ok(Some(err)) => Some(ContentIntegrityErrorInfo {
+                expected_bytes: err.expected_bytes,
+                actual_bytes: err.actual_bytes,
+                difference: err.difference,
+                message: err.message,
+            }),
+            Ok(None) => None,
+            Err(e) => {
+                // Log error but don't fail the request
+                eprintln!("Content integrity check failed: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Validate boundary chain after adjustment
+    let boundary_errors = validate_boundary_chain(&mut conn, &cst_file)
+        .map_err(|e| format!("Validation failed: {}", e))?;
+
+    let boundary_errors_info: Option<Vec<BoundaryDiscontinuityInfo>> = if boundary_errors.is_empty() {
+        None
+    } else {
+        Some(boundary_errors.into_iter().map(|d| BoundaryDiscontinuityInfo {
+            frag_idx_code: d.frag_idx_code,
+            expected_start_line: d.expected_start_line,
+            expected_start_char: d.expected_start_char,
+            actual_start_line: d.actual_start_line,
+            actual_start_char: d.actual_start_char,
+        }).collect())
+    };
+
+    let message = if content_integrity_error.is_some() {
+        Some("CRITICAL: Content integrity error detected! Use 'Reset Current File' to fix.".to_string())
+    } else if boundary_errors_info.is_some() {
+        Some("Boundary adjusted but chain has discontinuities".to_string())
+    } else {
+        Some("Boundary adjusted successfully".to_string())
+    };
+
     Ok(Json(BoundaryAdjustmentResponse {
-        success: true,
-        message: Some("Boundary adjusted successfully".to_string()),
+        success: content_integrity_error.is_none(),
+        message,
         deleted_fragment_id: None,
+        boundary_errors: boundary_errors_info,
+        content_integrity_error,
+        updated_fragments: Some(updated_fragments),
+    }))
+}
+
+/// POST /api/fragments/recalculate-boundaries - Recalculate all fragment boundaries for a file
+///
+/// This endpoint recalculates all start_line, start_char, end_line, end_char values
+/// for fragments in a file based on their content_xml, ensuring boundaries form a
+/// contiguous chain. Useful for fixing discontinuities after manual boundary adjustments.
+#[post("/api/fragments/recalculate-boundaries", data = "<request>")]
+fn recalculate_boundaries_route(
+    request: Json<RecalculateBoundariesRequest>,
+    db_state: &State<DbState>
+) -> Result<Json<RecalculateBoundariesResponse>, String> {
+    let mut conn = db_state.connect()
+        .map_err(|e| format!("Database connection failed: {}", e))?;
+
+    recalculate_boundaries(&mut conn, &request.cst_file)
+        .map_err(|e| format!("Recalculation failed: {}", e))?;
+
+    Ok(Json(RecalculateBoundariesResponse {
+        success: true,
+        message: Some(format!("Boundaries recalculated for {}", request.cst_file)),
+    }))
+}
+
+/// POST /api/fragments/reset-file - Delete all fragments for a file and reparse from scratch
+///
+/// This endpoint deletes all existing fragments for a file and reparses the XML file
+/// to create fresh fragments without any overrides. All manual corrections will be lost.
+/// SC codes are populated from the embedded TSV mapping.
+#[post("/api/fragments/reset-file", data = "<request>")]
+async fn reset_file_route(
+    request: Json<ResetFileRequest>,
+    db_state: &State<DbState>
+) -> Result<Json<ResetFileResponse>, String> {
+    use std::path::Path;
+    use crate::encoding::read_xml_file;
+    use crate::nikaya_detector::detect_nikaya_structure;
+    use crate::xml_parser::parse_into_fragments;
+    use crate::fragment_exporter::export_fragments_to_db;
+    use crate::types::ParserOverrides;
+
+    let cst_file = &request.cst_file;
+
+    // Load settings to get XML directory
+    let mut settings = settings::load_settings()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+    settings::generate_default_paths(&mut settings);
+
+    if settings.xml_dir.is_empty() {
+        return Err("XML directory not configured. Please configure settings first.".to_string());
+    }
+
+    // Step 1: Delete existing fragments for this file
+    {
+        let mut conn = db_state.connect()
+            .map_err(|e| format!("Database connection failed: {}", e))?;
+
+        let deleted_count = diesel::delete(
+            xml_fragments::table.filter(xml_fragments::cst_file.eq(cst_file))
+        )
+        .execute(&mut conn)
+        .map_err(|e| format!("Failed to delete fragments: {}", e))?;
+
+        if deleted_count == 0 {
+            return Err(format!("No fragments found for file: {}", cst_file));
+        }
+    }
+
+    // Fetch Pali titles from ArangoDB for sc_sutta population
+    let pali_titles = match arangodb::get_pali_titles().await {
+        Ok(titles) => Some(titles),
+        Err(_) => None, // Continue without titles if ArangoDB unavailable
+    };
+
+    // Step 2: Read and parse the XML file
+    let xml_path = Path::new(&settings.xml_dir).join(cst_file);
+    if !xml_path.exists() {
+        return Err(format!("XML file not found: {:?}", xml_path));
+    }
+
+    let xml_content = read_xml_file(&xml_path)
+        .map_err(|e| format!("Failed to read XML file: {}", e))?;
+
+    let structure = detect_nikaya_structure(&xml_content)
+        .map_err(|e| format!("Failed to detect nikaya structure: {}", e))?;
+
+    // Parse without correction overrides but with pali_titles for SC field population
+    let overrides = ParserOverrides {
+        correction_overrides: None,
+        inserted_fragments: None,
+        pali_titles,
+    };
+
+    let fragments = parse_into_fragments(
+        &xml_content,
+        &structure,
+        cst_file,
+        &overrides,
+        true,  // populate SC fields from TSV
+    )
+    .map_err(|e| format!("Failed to parse XML: {}", e))?;
+
+    let fragments_count = fragments.len();
+
+    // Step 3: Export to database
+    let db_path = Path::new(&settings.db_path);
+    export_fragments_to_db(&fragments, &structure, db_path)
+        .map_err(|e| format!("Failed to export fragments: {}", e))?;
+
+    Ok(Json(ResetFileResponse {
+        success: true,
+        message: format!("File reset successfully. Created {} fragments.", fragments_count),
+        fragments_count,
     }))
 }
 
@@ -448,21 +660,18 @@ fn delete_fragment(
 ) -> Result<Json<String>, String> {
     let mut conn = db_state.connect()
         .map_err(|e| format!("Database connection failed: {}", e))?;
-    
+
     conn.transaction::<_, diesel::result::Error, _>(|conn| {
         // Get the fragment to delete
         let fragment_to_delete: XmlFragmentRecord = xml_fragments::table
             .find(fragment_id)
             .first(conn)?;
-        
+
         // Always try to merge with the PREVIOUS fragment first (if it exists)
         // This ensures that when we delete a fragment, its content goes to the one before it
-        let prev_fragment: Option<XmlFragmentRecord> = xml_fragments::table
-            .filter(xml_fragments::cst_file.eq(&fragment_to_delete.cst_file))
-            .filter(xml_fragments::frag_idx.eq(fragment_to_delete.frag_idx - 1))
-            .first(conn)
-            .optional()?;
-        
+        let prev_fragment = find_target_fragment(conn, &fragment_to_delete.cst_file, &fragment_to_delete.frag_idx_code, Direction::Prev)
+            .map_err(|e| diesel::result::Error::QueryBuilderError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))))?;
+
         if let Some(prev_frag) = prev_fragment {
             // Extend the previous fragment's end boundary to include the deleted fragment
             let merge_update = UpdateFragmentBoundary {
@@ -473,18 +682,15 @@ fn delete_fragment(
                 // Combine content: previous first, then deleted
                 content_xml: format!("{}\n{}", prev_frag.content_xml, fragment_to_delete.content_xml),
             };
-            
+
             diesel::update(xml_fragments::table.find(prev_frag.id))
                 .set(&merge_update)
                 .execute(conn)?;
         } else {
             // If no previous fragment, merge with the next fragment
-            let next_fragment: Option<XmlFragmentRecord> = xml_fragments::table
-                .filter(xml_fragments::cst_file.eq(&fragment_to_delete.cst_file))
-                .filter(xml_fragments::frag_idx.eq(fragment_to_delete.frag_idx + 1))
-                .first(conn)
-                .optional()?;
-            
+            let next_fragment = find_target_fragment(conn, &fragment_to_delete.cst_file, &fragment_to_delete.frag_idx_code, Direction::Next)
+                .map_err(|e| diesel::result::Error::QueryBuilderError(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))))?;
+
             if let Some(next_frag) = next_fragment {
                 // Extend the next fragment's start boundary to include the deleted fragment
                 let merge_update = UpdateFragmentBoundary {
@@ -495,35 +701,23 @@ fn delete_fragment(
                     // Combine content: deleted first, then next
                     content_xml: format!("{}\n{}", fragment_to_delete.content_xml, next_frag.content_xml),
                 };
-                
+
                 diesel::update(xml_fragments::table.find(next_frag.id))
                     .set(&merge_update)
                     .execute(conn)?;
             }
         }
-        
+
         // Delete the fragment
         diesel::delete(xml_fragments::table.find(fragment_id))
             .execute(conn)?;
-        
-        // Update frag_idx for all subsequent fragments in the same file
-        let subsequent: Vec<XmlFragmentRecord> = xml_fragments::table
-            .filter(xml_fragments::cst_file.eq(&fragment_to_delete.cst_file))
-            .filter(xml_fragments::frag_idx.gt(fragment_to_delete.frag_idx))
-            .load(conn)?;
-        
-        for frag in subsequent {
-            let update = UpdateFragmentIndex {
-                frag_idx: frag.frag_idx - 1,
-            };
-            diesel::update(xml_fragments::table.find(frag.id))
-                .set(&update)
-                .execute(conn)?;
-        }
-        
+
+        // Note: With frag_idx_code (string identifiers like "21.0"), we don't need to
+        // reindex subsequent fragments. The codes are stable identifiers.
+
         Ok(())
     }).map_err(|e| format!("Delete transaction failed: {}", e))?;
-    
+
     Ok(Json("Fragment deleted and merged successfully".to_string()))
 }
 
@@ -543,41 +737,144 @@ fn move_fragment(
         "next" => Direction::Next,
         _ => return Err(format!("Invalid direction: {}. Must be 'prev' or 'next'", request.direction)),
     };
-    
+
     // Get database connection
     let mut conn = db_state.connect()
         .map_err(|e| format!("Database connection failed: {}", e))?;
-    
+
     // Call the helper function
     let (current_fragment, target_fragment) = move_fragment_content(
         &mut conn,
         &request.xml_file,
-        request.frag_idx,
+        &request.frag_idx_code,
         direction,
     ).map_err(|e| format!("Move operation failed: {}", e))?;
-    
+
     // Map XmlFragmentRecord to FragmentListItem DTOs
     let current_item = FragmentListItem {
         id: current_fragment.id,
-        frag_idx: current_fragment.frag_idx,
+        frag_idx_code: current_fragment.frag_idx_code,
         frag_type: current_fragment.frag_type,
         frag_review: current_fragment.frag_review,
         cst_code: current_fragment.cst_code,
         sc_code: current_fragment.sc_code,
     };
-    
+
     let target_item = FragmentListItem {
         id: target_fragment.id,
-        frag_idx: target_fragment.frag_idx,
+        frag_idx_code: target_fragment.frag_idx_code,
         frag_type: target_fragment.frag_type,
         frag_review: target_fragment.frag_review,
         cst_code: target_fragment.cst_code,
         sc_code: target_fragment.sc_code,
     };
-    
+
     Ok(Json(MoveFragmentResponse {
         current_fragment: current_item,
         target_fragment: target_item,
+    }))
+}
+
+/// POST /api/fragments/insert - Insert a new empty fragment before or after the specified fragment
+///
+/// This endpoint creates a new fragment with zero-width boundaries and empty content,
+/// copying metadata from the adjacent fragment. The new fragment is marked as "checked".
+///
+/// # Request Body
+/// - `frag_idx_code`: The currently selected fragment's code (e.g., "21.0")
+/// - `cst_file`: The XML file name
+/// - `direction`: "before" or "after"
+///
+/// # Returns
+/// The newly created fragment and a success indicator.
+#[post("/api/fragments/insert", data = "<request>")]
+fn insert_fragment_route(
+    request: Json<InsertFragmentRequest>,
+    db_state: &State<DbState>
+) -> Result<Json<InsertFragmentResponse>, String> {
+    // Parse direction string to Direction enum
+    let direction = match request.direction.as_str() {
+        "before" => Direction::Prev,
+        "after" => Direction::Next,
+        _ => return Err(format!("Invalid direction: {}. Must be 'before' or 'after'", request.direction)),
+    };
+
+    // Get database connection
+    let mut conn = db_state.connect()
+        .map_err(|e| format!("Database connection failed: {}", e))?;
+
+    // Call the insert operation
+    let new_fragment = insert_fragment(
+        &mut conn,
+        &request.cst_file,
+        &request.frag_idx_code,
+        direction,
+    ).map_err(|e| format!("Insert operation failed: {}", e))?;
+
+    // Load settings to get XML directory for content validation
+    let app_settings = settings::load_settings()
+        .map_err(|e| format!("Failed to load settings: {}", e))?;
+
+    // Validate content integrity (should be unchanged since new fragment is empty)
+    let content_integrity_error = if !app_settings.xml_dir.is_empty() {
+        let xml_dir = std::path::Path::new(&app_settings.xml_dir);
+        match validate_content_integrity(&mut conn, &request.cst_file, xml_dir) {
+            Ok(Some(err)) => Some(ContentIntegrityErrorInfo {
+                expected_bytes: err.expected_bytes,
+                actual_bytes: err.actual_bytes,
+                difference: err.difference,
+                message: err.message,
+            }),
+            Ok(None) => None,
+            Err(e) => {
+                eprintln!("Content integrity check failed: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Validate boundary chain after insertion
+    let boundary_errors = validate_boundary_chain(&mut conn, &request.cst_file)
+        .map_err(|e| format!("Validation failed: {}", e))?;
+
+    let boundary_errors_info: Option<Vec<BoundaryDiscontinuityInfo>> = if boundary_errors.is_empty() {
+        None
+    } else {
+        Some(boundary_errors.into_iter().map(|d| BoundaryDiscontinuityInfo {
+            frag_idx_code: d.frag_idx_code,
+            expected_start_line: d.expected_start_line,
+            expected_start_char: d.expected_start_char,
+            actual_start_line: d.actual_start_line,
+            actual_start_char: d.actual_start_char,
+        }).collect())
+    };
+
+    // Map to FragmentListItem for response
+    let fragment_item = FragmentListItem {
+        id: new_fragment.id,
+        frag_idx_code: new_fragment.frag_idx_code,
+        frag_type: new_fragment.frag_type,
+        frag_review: new_fragment.frag_review,
+        cst_code: new_fragment.cst_code,
+        sc_code: new_fragment.sc_code,
+    };
+
+    let message = if content_integrity_error.is_some() {
+        Some("CRITICAL: Content integrity error detected! Use 'Reset Current File' to fix.".to_string())
+    } else if boundary_errors_info.is_some() {
+        Some("New fragment inserted but chain has discontinuities".to_string())
+    } else {
+        Some("New fragment inserted successfully".to_string())
+    };
+
+    Ok(Json(InsertFragmentResponse {
+        success: content_integrity_error.is_none(),
+        new_fragment: fragment_item,
+        message,
+        content_integrity_error,
+        boundary_errors: boundary_errors_info,
     }))
 }
 
@@ -590,39 +887,42 @@ fn create_fragment(
 ) -> Result<Json<CreateFragmentResponse>, String> {
     let mut conn = db_state.connect()
         .map_err(|e| format!("Database connection failed: {}", e))?;
-    
+
     let new_fragment_id = conn.transaction::<_, diesel::result::Error, _>(|conn| {
         // Get the current fragment
         let current: XmlFragmentRecord = xml_fragments::table
             .find(fragment_id)
             .first(conn)?;
-        
+
         let direction = request.direction.as_str();
-        
+
         if direction == "prev" {
             // Create a new fragment BEFORE the current one
-            // 1. Increment frag_idx for current and all subsequent fragments
+            // Save original frag_idx_code before any modifications
+            let original_frag_idx_code = current.frag_idx_code.clone();
+
+            // 1. Increment frag_idx_code for current and all subsequent fragments
             let to_update: Vec<XmlFragmentRecord> = xml_fragments::table
                 .filter(xml_fragments::cst_file.eq(&current.cst_file))
-                .filter(xml_fragments::frag_idx.ge(current.frag_idx))
+                .filter(xml_fragments::frag_idx_code.ge(&original_frag_idx_code))
                 .load(conn)?;
-            
+
             for frag in to_update {
-                let update = UpdateFragmentIndex {
-                    frag_idx: frag.frag_idx + 1,
+                let update = UpdateFragmentIndexCode {
+                    frag_idx_code: increment_frag_idx_code(&frag.frag_idx_code),
                 };
                 diesel::update(xml_fragments::table.find(frag.id))
                     .set(&update)
                     .execute(conn)?;
             }
-            
-            // 2. Create new fragment at current's original frag_idx
+
+            // 2. Create new fragment at current's original frag_idx_code
             // Split the current fragment's content in half (approximately)
             let midpoint_line = (current.start_line + current.end_line) / 2;
-            
+
             let new_fragment = NewXmlFragment {
                 cst_file: &current.cst_file,
-                frag_idx: current.frag_idx,
+                frag_idx_code: &original_frag_idx_code,
                 frag_type: "Sutta",
                 frag_review: None,
                 nikaya: &current.nikaya,
@@ -640,17 +940,17 @@ fn create_fragment(
                 end_char: 0,
                 group_levels: &current.group_levels,
             };
-            
+
             diesel::insert_into(xml_fragments::table)
                 .values(&new_fragment)
                 .execute(conn)?;
-            
+
             // Get the ID of the newly created fragment
             let new_frag: XmlFragmentRecord = xml_fragments::table
                 .filter(xml_fragments::cst_file.eq(&current.cst_file))
-                .filter(xml_fragments::frag_idx.eq(current.frag_idx))
+                .filter(xml_fragments::frag_idx_code.eq(current.frag_idx_code))
                 .first(conn)?;
-            
+
             // Update the (now next) current fragment's start boundary
             let update_current = UpdateFragmentBoundary {
                 start_line: midpoint_line,
@@ -662,31 +962,32 @@ fn create_fragment(
             diesel::update(xml_fragments::table.find(fragment_id))
                 .set(&update_current)
                 .execute(conn)?;
-            
+
             Ok(new_frag.id)
         } else {
             // Create a new fragment AFTER the current one
-            // 1. Increment frag_idx for all subsequent fragments
+            // 1. Increment frag_idx_code for all subsequent fragments
             let to_update: Vec<XmlFragmentRecord> = xml_fragments::table
                 .filter(xml_fragments::cst_file.eq(&current.cst_file))
-                .filter(xml_fragments::frag_idx.gt(current.frag_idx))
+                .filter(xml_fragments::frag_idx_code.gt(&current.frag_idx_code))
                 .load(conn)?;
-            
+
             for frag in to_update {
-                let update = UpdateFragmentIndex {
-                    frag_idx: frag.frag_idx + 1,
+                let update = UpdateFragmentIndexCode {
+                    frag_idx_code: increment_frag_idx_code(&frag.frag_idx_code),
                 };
                 diesel::update(xml_fragments::table.find(frag.id))
                     .set(&update)
                     .execute(conn)?;
             }
-            
+
             // 2. Create new fragment after current
+            let new_frag_idx_code = increment_frag_idx_code(&current.frag_idx_code);
             let midpoint_line = (current.start_line + current.end_line) / 2;
-            
+
             let new_fragment = NewXmlFragment {
                 cst_file: &current.cst_file,
-                frag_idx: current.frag_idx + 1,
+                frag_idx_code: &new_frag_idx_code,
                 frag_type: "Sutta",
                 frag_review: None,
                 nikaya: &current.nikaya,
@@ -704,17 +1005,17 @@ fn create_fragment(
                 end_char: current.end_char,
                 group_levels: &current.group_levels,
             };
-            
+
             diesel::insert_into(xml_fragments::table)
                 .values(&new_fragment)
                 .execute(conn)?;
-            
+
             // Get the ID of the newly created fragment
             let new_frag: XmlFragmentRecord = xml_fragments::table
                 .filter(xml_fragments::cst_file.eq(&current.cst_file))
-                .filter(xml_fragments::frag_idx.eq(current.frag_idx + 1))
+                .filter(xml_fragments::frag_idx_code.eq(&new_frag_idx_code))
                 .first(conn)?;
-            
+
             // Update current fragment's end boundary
             let update_current = UpdateFragmentBoundary {
                 start_line: current.start_line,
@@ -726,11 +1027,11 @@ fn create_fragment(
             diesel::update(xml_fragments::table.find(fragment_id))
                 .set(&update_current)
                 .execute(conn)?;
-            
+
             Ok(new_frag.id)
         }
     }).map_err(|e| format!("Create fragment transaction failed: {}", e))?;
-    
+
     Ok(Json(CreateFragmentResponse {
         success: true,
         new_fragment_id,
@@ -743,7 +1044,7 @@ fn create_fragment(
 fn get_settings() -> Result<Json<AppSettings>, String> {
     let settings = settings::load_settings()
         .map_err(|e| format!("Failed to load settings: {}", e))?;
-    
+
     Ok(Json(settings))
 }
 
@@ -752,10 +1053,10 @@ fn get_settings() -> Result<Json<AppSettings>, String> {
 fn save_settings_endpoint(mut settings_data: Json<AppSettings>) -> Result<Json<String>, String> {
     // Generate default paths if not provided
     settings::generate_default_paths(&mut settings_data);
-    
+
     settings::save_settings(&settings_data)
         .map_err(|e| format!("Failed to save settings: {}", e))?;
-    
+
     Ok(Json("Settings saved successfully".to_string()))
 }
 
@@ -996,7 +1297,7 @@ async fn reparse_file(
     // during parsing via apply_sc_overrides(), no need for separate restoration step
     output.push_str("Step 2: Extracting correction overrides from current database...\n");
     let db_path = Path::new(&settings.db_path);
-    let (correction_overrides, _review_status) = match extract_correction_overrides(db_path, cst_file) {
+    let (correction_overrides, _review_status, inserted_fragments_vec) = match extract_correction_overrides(db_path, cst_file) {
         Ok(result) => result,
         Err(e) => {
             return Json(ReparseFileResponse {
@@ -1007,7 +1308,17 @@ async fn reparse_file(
             });
         }
     };
-    output.push_str(&format!("  Extracted {} correction overrides (includes frag_review status)\n\n", correction_overrides.len()));
+    output.push_str(&format!("  Extracted {} correction overrides (includes frag_review status)\n", correction_overrides.len()));
+    output.push_str(&format!("  Extracted {} inserted fragments\n\n", inserted_fragments_vec.len()));
+
+    // Convert inserted fragments Vec to InsertedFragmentsMap (HashMap keyed by cst_file)
+    let inserted_fragments_map: Option<crate::types::InsertedFragmentsMap> = if inserted_fragments_vec.is_empty() {
+        None
+    } else {
+        let mut map = std::collections::HashMap::new();
+        map.insert(cst_file.to_string(), inserted_fragments_vec);
+        Some(map)
+    };
 
     // Step 3: Fetch Pali titles from ArangoDB (for sc_sutta population)
     output.push_str("Step 3: Fetching Pali titles from ArangoDB...\n");
@@ -1027,6 +1338,7 @@ async fn reparse_file(
     output.push_str("Step 4: Constructing parser overrides...\n");
     let overrides = ParserOverrides {
         correction_overrides: if correction_overrides.is_empty() { None } else { Some(correction_overrides) },
+        inserted_fragments: inserted_fragments_map,
         pali_titles,
     };
     output.push_str("  ParserOverrides constructed\n\n");
@@ -1173,7 +1485,6 @@ async fn run_validation(
 
     let checks = validation::run_all_validations(
         &mut conn,
-        &db_state.db_path,
         pali_titles.as_ref(),
         request.include_checked,
     );
@@ -1231,7 +1542,7 @@ mod tests {
     fn test_line_up_content_transfer() {
         let target_content = "line1\nline2\nline3";
         let other_content = "other1\nother2";
-        
+
         // Test the actual implementation logic
         let (new_target, new_other) = if let Some(last_newline_pos) = target_content.rfind('\n') {
             let new_target = target_content[..last_newline_pos].to_string();
@@ -1241,16 +1552,16 @@ mod tests {
         } else {
             (target_content.to_string(), other_content.to_string())
         };
-        
+
         assert_eq!(new_target, "line1\nline2");
         assert_eq!(new_other, "\nline3other1\nother2");
     }
-    
+
     #[test]
     fn test_line_up_whitespace_preservation() {
         let target_content = "  <tag>content</tag>\n  \n  <next>data</next>";
         let other_content = "  <other>more</other>";
-        
+
         let (new_target, new_other) = if let Some(last_newline_pos) = target_content.rfind('\n') {
             let new_target = target_content[..last_newline_pos].to_string();
             let moved_content = &target_content[last_newline_pos..];
@@ -1259,16 +1570,16 @@ mod tests {
         } else {
             (target_content.to_string(), other_content.to_string())
         };
-        
+
         assert_eq!(new_target, "  <tag>content</tag>\n  ");
         assert_eq!(new_other, "\n  <next>data</next>  <other>more</other>");
     }
-    
+
     #[test]
     fn test_line_down_content_transfer() {
         let target_content = "line1\nline2";
         let other_content = "other1\nother2\nother3";
-        
+
         // Test the actual implementation logic
         let (new_target, new_other) = if let Some(first_newline_pos) = other_content.find('\n') {
             let moved_content = &other_content[..=first_newline_pos];
@@ -1278,16 +1589,16 @@ mod tests {
         } else {
             (target_content.to_string(), other_content.to_string())
         };
-        
+
         assert_eq!(new_target, "line1\nline2other1\n");
         assert_eq!(new_other, "other2\nother3");
     }
-    
+
     #[test]
     fn test_line_down_whitespace_preservation() {
         let target_content = "  <tag>content</tag>";
         let other_content = "  \n  <other>more</other>\n  ";
-        
+
         let (new_target, new_other) = if let Some(first_newline_pos) = other_content.find('\n') {
             let moved_content = &other_content[..=first_newline_pos];
             let new_other = &other_content[first_newline_pos + 1..];
@@ -1296,76 +1607,76 @@ mod tests {
         } else {
             (target_content.to_string(), other_content.to_string())
         };
-        
+
         assert_eq!(new_target, "  <tag>content</tag>  \n");
         assert_eq!(new_other, "  <other>more</other>\n  ");
     }
-    
+
     #[test]
     fn test_char_left_content_transfer() {
         let target_content = "hello";
         let other_content = "world";
-        
+
         // Test actual implementation logic
         if !target_content.is_empty() {
             if let Some((last_char_pos, _)) = target_content.char_indices().rev().next() {
                 let new_target = &target_content[..last_char_pos];
                 let moved_char = &target_content[last_char_pos..];
                 let new_other = format!("{}{}", moved_char, other_content);
-                
+
                 assert_eq!(new_target, "hell");
                 assert_eq!(new_other, "oworld");
             }
         }
     }
-    
+
     #[test]
     fn test_char_left_whitespace_preservation() {
         let target_content = "  <tag>content</tag>  ";
         let other_content = "  <other>data</other>";
-        
+
         if !target_content.is_empty() {
             if let Some((last_char_pos, _)) = target_content.char_indices().rev().next() {
                 let new_target = &target_content[..last_char_pos];
                 let moved_char = &target_content[last_char_pos..];
                 let new_other = format!("{}{}", moved_char, other_content);
-                
+
                 // The last character is a space, so it gets moved to other fragment
                 assert_eq!(new_target, "  <tag>content</tag> ");
                 assert_eq!(new_other, "   <other>data</other>");
             }
         }
     }
-    
+
     #[test]
     fn test_char_right_content_transfer() {
         let target_content = "hello";
         let other_content = "world";
-        
+
         // Test actual implementation logic
         if !other_content.is_empty() {
             if let Some((first_char_end, _)) = other_content.char_indices().next() {
                 let moved_char = &other_content[..=first_char_end];
                 let new_other = &other_content[first_char_end + 1..];
                 let new_target = format!("{}{}", target_content, moved_char);
-                
+
                 assert_eq!(new_target, "hellow");
                 assert_eq!(new_other, "orld");
             }
         }
     }
-    
+
     #[test]
     fn test_char_right_whitespace_preservation() {
         let target_content = "  <tag>content</tag>";
         let other_content = "  \n  <other>data</other>";
-        
+
         if !other_content.is_empty() {
             if let Some((first_char_end, _)) = other_content.char_indices().next() {
                 let moved_char = &other_content[..=first_char_end];
                 let new_other = &other_content[first_char_end + 1..];
                 let new_target = format!("{}{}", target_content, moved_char);
-                
+
                 // The first character is a space, so it gets moved to target fragment
                 // The remaining content still starts with a space and newline
                 assert_eq!(new_target, "  <tag>content</tag> ");
@@ -1384,8 +1695,11 @@ pub fn get_routes() -> Vec<Route> {
         get_fragment_detail,
         update_fragment_metadata,
         adjust_fragment_boundary,
+        recalculate_boundaries_route,
+        reset_file_route,
         delete_fragment,
         move_fragment,
+        insert_fragment_route,
         create_fragment,
         get_settings,
         save_settings_endpoint,
