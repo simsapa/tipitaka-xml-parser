@@ -714,7 +714,17 @@ fn main() {
                 }
             };
 
-            run_regenerate()
+            let res = run_regenerate();
+
+            // Play completion sound effect
+            let sound_path = std::path::Path::new("src/static/audio/freesound_community-vintage-game-sound-58050.mp3");
+            if sound_path.exists() {
+                let _ = std::process::Command::new("paplay")
+                    .arg(sound_path)
+                    .spawn();
+            }
+
+            res
         }
 
         Commands::TipitakaXmlToTestData { config, data_folder } => {

@@ -1405,7 +1405,9 @@ function openRegenerateModal() {
     document.getElementById('regenerate-output-container').style.display = 'none';
     document.getElementById('regenerate-output').textContent = '';
     document.getElementById('regenerate-with-reference').disabled = false;
+    document.getElementById('regenerate-with-reference').style.display = '';
     document.getElementById('regenerate-new-replace').disabled = false;
+    document.getElementById('regenerate-new-replace').style.display = '';
 
     // Reset modal title to default
     document.querySelector('#regenerate-modal .modal-card-title').textContent = 'Regenerate Fragments Database';
@@ -1742,6 +1744,14 @@ async function startRegeneration(useReferenceDb) {
         // Reset operation state and update buttons
         isOperationInProgress = false;
         updateReparseButtonsState();
+
+        // Play sound effect to signal completion
+        try {
+            const audio = new Audio('/static/audio/freesound_community-vintage-game-sound-58050.mp3');
+            audio.play();
+        } catch (e) {
+            console.warn('Could not play completion sound:', e);
+        }
     }
 }
 
@@ -1783,9 +1793,9 @@ async function reparseFile(cstFile) {
     document.getElementById('regenerate-output-container').style.display = 'block';
     document.getElementById('regenerate-output').textContent = '';
 
-    // Disable regenerate buttons during reparse
-    document.getElementById('regenerate-with-reference').disabled = true;
-    document.getElementById('regenerate-new-replace').disabled = true;
+    // Hide regenerate buttons during reparse
+    document.getElementById('regenerate-with-reference').style.display = 'none';
+    document.getElementById('regenerate-new-replace').style.display = 'none';
 
     // Set flag to refresh after close
     needsReloadAfterClose = false;
