@@ -233,8 +233,27 @@ fn update_fragment_metadata(
     let mut conn = db_state.connect()
         .map_err(|e| format!("Database connection failed: {}", e))?;
 
+    // Auto-promote review status: if the fragment is currently unchecked (None)
+    // and the request doesn't explicitly set a review status, promote to "checked".
+    // This matches the behavior of boundary adjustments.
+    let frag_review = if update_request.frag_review.is_none() || update_request.frag_review.as_deref() == Some("") {
+        // Check the current review status in the database
+        let current: XmlFragmentRecord = xml_fragments::table
+            .find(fragment_id)
+            .first(&mut conn)
+            .map_err(|e| format!("Failed to fetch fragment: {}", e))?;
+
+        if current.frag_review.is_none() {
+            Some("checked".to_string())
+        } else {
+            update_request.frag_review.clone()
+        }
+    } else {
+        update_request.frag_review.clone()
+    };
+
     let changeset = UpdateFragmentMetadata {
-        frag_review: update_request.frag_review.clone(),
+        frag_review,
         cst_code: update_request.cst_code.clone(),
         sc_code: update_request.sc_code.clone(),
         cst_vagga: update_request.cst_vagga.clone(),

@@ -704,6 +704,14 @@ async function updateFragmentMetadata() {
         // Use the returned fragment data to update the UI (no race condition)
         const updatedFragment = await response.json();
         updateFragmentItemInList(state.selectedFragmentId, updatedFragment);
+
+        // If the backend auto-promoted review status (e.g. unchecked -> checked),
+        // update the detail panel's review dropdown to reflect the new status
+        const currentReviewValue = document.getElementById('frag_review').value;
+        const returnedReview = updatedFragment.frag_review || '';
+        if (currentReviewValue !== returnedReview) {
+            document.getElementById('frag_review').value = returnedReview;
+        }
     } catch (error) {
         console.error('Error updating metadata:', error);
         alert('Failed to save metadata changes');
