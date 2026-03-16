@@ -617,6 +617,20 @@ async function fetchAndDisplayFragmentDetails(fragmentId) {
             el.disabled = currentIsMoved || !hasNext;
         }
 
+        // Merge-delete buttons: only enabled for sub-fragments (minor index > 0)
+        const fragParts = detail.frag_idx_code.split('.');
+        const isSubFragment = fragParts.length === 2 && parseInt(fragParts[1], 10) > 0;
+
+        el = document.getElementById('merge-delete-prev');
+        if (el) {
+            el.disabled = !(isSubFragment && hasPrev && currentIsSutta && prevIsSutta);
+        }
+
+        el = document.getElementById('merge-delete-next');
+        if (el) {
+            el.disabled = !(isSubFragment && hasNext && currentIsSutta && nextIsSutta);
+        }
+
         el = document.getElementById('create-prev-btn');
         if (el) {
             // Create new prev button: disabled if current is the first Header (no prev Header exists)
@@ -913,6 +927,56 @@ async function moveFragmentTo(direction) {
     }
 }
 
+// Delete a sub-fragment and merge its content into an adjacent fragment
+async function mergeDeleteFragment(direction) {
+    if (!state.selectedFragmentId) {
+        alert('No fragment selected');
+        return;
+    }
+
+    try {
+        const currentFragment = await getCurrentFragmentDetail();
+        if (!currentFragment) {
+            alert('Failed to get current fragment details');
+            return;
+        }
+
+        const requestBody = {
+            frag_idx_code: currentFragment.frag_idx_code,
+            xml_file: currentFragment.cst_file,
+            direction: direction
+        };
+
+        const response = await fetch('/api/fragments/merge-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || 'Failed to merge-delete fragment');
+        }
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Refresh the fragment list since an item was deleted
+            await fetchAndPopulateFragmentList(state.selectedFile);
+
+            // Select the target fragment that received the merged content
+            await selectFragment(result.target_fragment.id);
+
+            console.log(`Sub-fragment deleted and merged to ${direction} successfully`);
+        } else {
+            throw new Error(result.message || 'Merge-delete operation failed');
+        }
+    } catch (error) {
+        console.error('Error merge-deleting fragment:', error);
+        alert(`Failed to merge-delete fragment: ${error.message}`);
+    }
+}
+
 // Insert a new empty fragment before or after the current fragment
 async function insertFragment(direction) {
     if (!state.selectedFragmentId) {
@@ -1165,6 +1229,25 @@ function setupEventListeners() {
         el.onclick = () => {
             showConfirmModal("Insert a new empty fragment AFTER the current fragment?", () => {
                 insertFragment('after');
+            });
+        };
+    }
+
+    // Merge-delete buttons with confirmation
+    el = document.getElementById('merge-delete-prev');
+    if (el) {
+        el.onclick = () => {
+            showConfirmModal("DELETE this sub-fragment and merge its content into the PREVIOUS fragment? This cannot be undone.", () => {
+                mergeDeleteFragment('prev');
+            });
+        };
+    }
+
+    el = document.getElementById('merge-delete-next');
+    if (el) {
+        el.onclick = () => {
+            showConfirmModal("DELETE this sub-fragment and merge its content into the NEXT fragment? This cannot be undone.", () => {
+                mergeDeleteFragment('next');
             });
         };
     }

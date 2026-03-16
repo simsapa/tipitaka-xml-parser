@@ -239,6 +239,103 @@ pub fn move_fragment_content(
     })
 }
 
+/// Delete a sub-fragment and merge its content into an adjacent fragment
+///
+/// This is similar to `move_fragment_content` but instead of marking the source as "moved",
+/// it deletes the source fragment entirely from the database.
+///
+/// # Arguments
+/// * `conn` - Database connection
+/// * `cst_file` - The XML file name
+/// * `frag_idx_code` - The fragment to delete (must be a sub-fragment, i.e. minor index > 0)
+/// * `direction` - Which adjacent fragment to merge content into
+///
+/// # Returns
+/// * `Ok(target_fragment)` - The updated target fragment after merge
+/// * `Err(e)` - Error if operation fails
+pub fn merge_delete_fragment(
+    conn: &mut SqliteConnection,
+    cst_file: &str,
+    frag_idx_code: &str,
+    direction: Direction,
+) -> Result<XmlFragmentRecord> {
+    // Validate that this is a sub-fragment (minor index > 0)
+    let (_major, minor) = parse_frag_idx_code(frag_idx_code);
+    if minor == 0 {
+        return Err(anyhow!("Cannot merge-delete a primary fragment (minor index is 0). Only sub-fragments (e.g. 12.1, 12.2) can be merge-deleted."));
+    }
+
+    conn.transaction::<_, anyhow::Error, _>(|conn| {
+        // Load the current fragment
+        let current_fragment: XmlFragmentRecord = xml_fragments::table
+            .filter(xml_fragments::cst_file.eq(cst_file))
+            .filter(xml_fragments::frag_idx_code.eq(frag_idx_code))
+            .first(conn)
+            .context("Failed to load current fragment")?;
+
+        // Find the target fragment (skipping any moved fragments)
+        let target_fragment = find_target_fragment(conn, cst_file, frag_idx_code, direction)?
+            .ok_or_else(|| anyhow!(
+                "Cannot merge to {}: no valid target fragment found",
+                match direction {
+                    Direction::Prev => "previous",
+                    Direction::Next => "next",
+                }
+            ))?;
+
+        // Prepare content and boundary updates based on direction
+        let (new_content, new_start_line, new_start_char, new_end_line, new_end_char) = match direction {
+            Direction::Prev => {
+                // Merging into previous: append current content to target
+                (
+                    format!("{}\n{}", target_fragment.content_xml, current_fragment.content_xml),
+                    target_fragment.start_line,
+                    target_fragment.start_char,
+                    current_fragment.end_line,
+                    current_fragment.end_char,
+                )
+            }
+            Direction::Next => {
+                // Merging into next: prepend current content to target
+                (
+                    format!("{}\n{}", current_fragment.content_xml, target_fragment.content_xml),
+                    current_fragment.start_line,
+                    current_fragment.start_char,
+                    target_fragment.end_line,
+                    target_fragment.end_char,
+                )
+            }
+        };
+
+        // Update target fragment with merged content and new boundaries
+        let target_update = UpdateFragmentBoundary {
+            start_line: new_start_line,
+            start_char: new_start_char,
+            end_line: new_end_line,
+            end_char: new_end_char,
+            content_xml: new_content,
+        };
+
+        diesel::update(xml_fragments::table.find(target_fragment.id))
+            .set(&target_update)
+            .execute(conn)
+            .context("Failed to update target fragment")?;
+
+        // Delete the current fragment
+        diesel::delete(xml_fragments::table.find(current_fragment.id))
+            .execute(conn)
+            .context("Failed to delete current fragment")?;
+
+        // Reload the updated target fragment
+        let updated_target: XmlFragmentRecord = xml_fragments::table
+            .find(target_fragment.id)
+            .first(conn)
+            .context("Failed to reload target fragment")?;
+
+        Ok(updated_target)
+    })
+}
+
 /// Insert a new empty fragment before or after the specified fragment
 ///
 /// This function creates a new fragment with:

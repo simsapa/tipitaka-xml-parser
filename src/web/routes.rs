@@ -17,6 +17,7 @@ use crate::web::models::{
     ArangoStatusResponse, PaliTitlesResponse,
     ValidationRunRequest, ValidationRunResponse, AutoFixRequest, AutoFixResponse,
     InsertFragmentRequest, InsertFragmentResponse,
+    MergeDeleteFragmentRequest, MergeDeleteFragmentResponse,
     RecalculateBoundariesRequest, RecalculateBoundariesResponse,
     ResetFileRequest, ResetFileResponse,
 };
@@ -27,7 +28,7 @@ use crate::fragments_schema::xml_fragments;
 use crate::fragments_models::{
     XmlFragmentRecord, UpdateFragmentMetadata, UpdateFragmentBoundary, UpdateFragmentIndexCode, NewXmlFragment
 };
-use crate::fragment_operations::{Direction, move_fragment_content, find_target_fragment, increment_frag_idx_code, insert_fragment, validate_boundary_chain, recalculate_boundaries, validate_content_integrity};
+use crate::fragment_operations::{Direction, move_fragment_content, merge_delete_fragment, find_target_fragment, increment_frag_idx_code, insert_fragment, validate_boundary_chain, recalculate_boundaries, validate_content_integrity};
 use crate::types::compare_frag_idx_code;
 
 /// Serve the main index.html page
@@ -791,6 +792,47 @@ fn move_fragment(
     Ok(Json(MoveFragmentResponse {
         current_fragment: current_item,
         target_fragment: target_item,
+    }))
+}
+
+/// POST /api/fragments/merge-delete - Delete a sub-fragment and merge its content into an adjacent fragment
+///
+/// Only works on sub-fragments (minor index > 0, e.g. "12.1", "12.2").
+/// The fragment is deleted from the database and its content merged into the target.
+#[post("/api/fragments/merge-delete", data = "<request>")]
+fn merge_delete_fragment_route(
+    request: Json<MergeDeleteFragmentRequest>,
+    db_state: &State<DbState>
+) -> Result<Json<MergeDeleteFragmentResponse>, String> {
+    let direction = match request.direction.as_str() {
+        "prev" => Direction::Prev,
+        "next" => Direction::Next,
+        _ => return Err(format!("Invalid direction: {}. Must be 'prev' or 'next'", request.direction)),
+    };
+
+    let mut conn = db_state.connect()
+        .map_err(|e| format!("Database connection failed: {}", e))?;
+
+    let target_fragment = merge_delete_fragment(
+        &mut conn,
+        &request.xml_file,
+        &request.frag_idx_code,
+        direction,
+    ).map_err(|e| format!("Merge-delete operation failed: {}", e))?;
+
+    let target_item = FragmentListItem {
+        id: target_fragment.id,
+        frag_idx_code: target_fragment.frag_idx_code,
+        frag_type: target_fragment.frag_type,
+        frag_review: target_fragment.frag_review,
+        cst_code: target_fragment.cst_code,
+        sc_code: target_fragment.sc_code,
+    };
+
+    Ok(Json(MergeDeleteFragmentResponse {
+        success: true,
+        target_fragment: target_item,
+        message: Some("Sub-fragment deleted and merged successfully".to_string()),
     }))
 }
 
@@ -1718,6 +1760,7 @@ pub fn get_routes() -> Vec<Route> {
         reset_file_route,
         delete_fragment,
         move_fragment,
+        merge_delete_fragment_route,
         insert_fragment_route,
         create_fragment,
         get_settings,

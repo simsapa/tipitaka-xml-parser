@@ -196,6 +196,22 @@ pub struct InsertFragmentResponse {
     pub boundary_errors: Option<Vec<BoundaryDiscontinuityInfo>>,
 }
 
+/// Request body for merge-deleting a sub-fragment
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MergeDeleteFragmentRequest {
+    pub frag_idx_code: String,
+    pub xml_file: String,
+    pub direction: String, // "prev" or "next"
+}
+
+/// Response for merge-delete operation
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MergeDeleteFragmentResponse {
+    pub success: bool,
+    pub target_fragment: FragmentListItem,
+    pub message: Option<String>,
+}
+
 /// Request for recalculating boundaries
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RecalculateBoundariesRequest {

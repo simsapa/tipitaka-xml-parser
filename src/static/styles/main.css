@@ -742,6 +742,36 @@ textarea {
     color: white;
 }
 
+[data-theme="dark"] .button.is-danger {
+    background-color: #f14668;
+    color: white;
+}
+
+[data-theme="dark"] .button.is-danger:hover {
+    background-color: #ef2e55;
+    color: white;
+}
+
+[data-theme="dark"] .button.is-info {
+    background-color: #3e8ed0;
+    color: white;
+}
+
+[data-theme="dark"] .button.is-info:hover {
+    background-color: #3082c5;
+    color: white;
+}
+
+[data-theme="dark"] .button.is-warning {
+    background-color: #ffe08a;
+    color: rgba(0, 0, 0, 0.7);
+}
+
+[data-theme="dark"] .button.is-warning:hover {
+    background-color: #ffd970;
+    color: rgba(0, 0, 0, 0.7);
+}
+
 [data-theme="dark"] .button.is-light {
     background-color: #363636;
     color: var(--bulma-text-color);
